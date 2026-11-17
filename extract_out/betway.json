@@ -1,0 +1,310 @@
+{
+  "url": "https://betway.com/g/en/sports",
+  "title": "Online Betting Site | Sports Betting | Betway",
+  "page_text": "Sign Up Log In Terms & Conditions Bet Terms & Conditions apply Register Selected Customer Only Opt In Terms & Conditions Bet Terms & Conditions apply Register Selected Customer Only Opt In Football Tennis Promotions Casino Rewards Club Slot of the week Horse Racing Betway Boosts Highlights UEFA International Competitions, Nations League Win/Draw/Win Home Draw Away Denmark Norway 2.25 4.00 2.62 Today 20:45 More Bets UEFA International Competitions, Nations League Win/Draw/Win Home Draw Away Wales Portugal 6.00 5.00 1.40 Today 20:45 More Bets UEFA International Competitions, Nations League Win/Draw/Win Home Draw Away Poland Sweden 2.20 3.80 2.87 Today 20:45 More Bets Next Off Races 05:20 Mizusawa Distance: 0m 6f 211y Going: Sloppy 6 Panorama Stage (6) T.Toshihiko Kobayashi J.Yuri Takahashi 2 Blue Crest (2) T.Kimura Satoshi J.Toshiya Yamamoto 10 Nishino Tomaranai (10) T.Toru Sannomiya J.Rei Iwamoto View Full Racecard 05:30 Kyneton Distance: 0m 7f 77y Going: N/A Each way: 1/5 odds 3 places 5 Bow Ribbon (2) T.David Hill J.Alana Kelly 2.75 11 Royal Heritage (8) T.Nigel Blackiston J.Brad Rawiller 3.60 6 Into You (1) T.Shay Keating J.Ryan Hurdle 4.60 View Full Racecard 05:40 Scone Distance: 0m 5f 212y Going: N/A Each way: 1/5 odds 3 places 7 Merini (1) T.Kris Lees J.Aaron Bullock 1.80 11 Halcyon Belle (8) T.Nathan Doyle J.Anna Roper 5.50 13 Magic Artist (5) T.Nathan Doyle J.Liam Riordan 8.50 View Full Racecard 05:55 Mizusawa Distance: 0m 6f 211y Going: Sloppy Each way: 1/5 odds 3 places 1 Esca Cocco (1) T.Kazumune Ito J.Yuri Takahashi SP 2 Izmir (2) T.Koichi Sato J.Toshiya Yamamoto SP 3 Midnight Honey (3) T.Kimura Satoshi J.Ryo Kobayashi SP View Full Racecard 06:00 Kyneton Distance: 1m 1f 83y Going: N/A Each way: 1/4 odds 3 places 2 Winter Nights (5) T.Ben, Will & Jd Hayes J.Damian Lane 1.90 12 Crossoverkid (11) T.Andrew Payne J.Neil Farley 4.50 5 Surely Special (3) T.Christopher Davis J.Teo Nugent 7.00 View Full Racecard 06:10 Kanazawa Distance: 0m 6f 211y Going: Sloppy Ea",
+  "odds_endpoints": [
+    {
+      "url": "https://betway.com/g/api/sports/content/getEventsWithMultipleMarkets",
+      "status": 200,
+      "size": 117524,
+      "odds_like": true,
+      "sample": "{\"Events\":[{\"Version\":22,\"Id\":17479714,\"GroupName\":\"USL Championship\",\"SubCategoryName\":\"USA\",\"CategoryCName\":\"soccer\",\"CategoryName\":\"Football\",\"HomeTeamName\":\"New Mexico United\",\"AwayTeamName\":\"Sacramento Republic\",\"EventName\":\"New Mexico United - Sacramento Republic\",\"Milliseconds\":1794880800000,\"Date\":\"11/17/2026\",\"Time\":\"02:00\",\"MarketCount\":0,\"Markets\":[],\"CouponMarketId\":null,\"FilterMarkets\":{},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProviderType\":null,\"LiveStreamingDesktopStatus\":null,\"IsOutright\":false,\"FeedId\":76582718,\"SuperTournamentCName\":null,\"SuperTour"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getEvents",
+      "status": 200,
+      "size": 11910,
+      "odds_like": true,
+      "sample": "{\"MethodName\":\"Events\",\"MethodResult\":\"OK\",\"CorrelationId\":\"0ee9d26b-1799-4bcc-a971-b76b7496b490\",\"Events\":[{\"Version\":6,\"Id\":17493280,\"GroupName\":\"ATP Finals\",\"SubCategoryName\":\"ATP\",\"CategoryCName\":\"tennis\",\"CategoryName\":\"Tennis\",\"HomeTeamName\":\"Arthur Fils\",\"AwayTeamName\":\"Rafael Jodar\",\"EventName\":\"Arthur Fils - Rafael Jodar\",\"Milliseconds\":1794920400000,\"Date\":\"11/17/2026\",\"Time\":\"13:00\",\"MarketCount\":0,\"Markets\":[661133809],\"CouponMarketId\":661133809,\"FilterMarkets\":{\"match-winner\":661133809},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProviderType\":null,\"LiveStre"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getOutrights",
+      "status": 200,
+      "size": 14798,
+      "odds_like": true,
+      "sample": "{\"MethodName\":\"Outrights\",\"MethodResult\":\"OK\",\"CorrelationId\":\"1d3f5308-8268-4141-975d-cf3bca21aa81\",\"Events\":[{\"Version\":5,\"Id\":17493900,\"GroupName\":\"Nations League\",\"SubCategoryName\":\"Football Boost\",\"CategoryCName\":\"betway-boosts\",\"CategoryName\":\"Betway Boosts\",\"HomeTeamName\":null,\"AwayTeamName\":null,\"EventName\":\"Bruno Fernandes 1+ Assists (Wales v Portugal)\",\"Milliseconds\":1794944700000,\"Date\":\"11/17/2026\",\"Time\":\"19:45\",\"MarketCount\":0,\"Markets\":[661194115],\"CouponMarketId\":null,\"FilterMarkets\":{},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProviderType\":null,\"LiveS"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getEvents",
+      "status": 200,
+      "size": 13222,
+      "odds_like": true,
+      "sample": "{\"MethodName\":\"Events\",\"MethodResult\":\"OK\",\"CorrelationId\":\"e690e129-8398-4b5c-8850-99fd2ed46190\",\"Events\":[{\"Version\":6,\"Id\":17490620,\"GroupName\":\"Southwell\",\"SubCategoryName\":\"UK \\u0026 Ireland\",\"CategoryCName\":\"horse-racing\",\"CategoryName\":\"Horse Racing\",\"HomeTeamName\":null,\"AwayTeamName\":null,\"EventName\":\"16:30 Southwell\",\"Milliseconds\":1794933000000,\"Date\":\"11/17/2026\",\"Time\":\"16:30\",\"MarketCount\":0,\"Markets\":[],\"CouponMarketId\":null,\"FilterMarkets\":{},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProviderType\":null,\"LiveStreamingDesktopStatus\":null,\"IsOutright\":false"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getEvents",
+      "status": 200,
+      "size": 11838,
+      "odds_like": true,
+      "sample": "{\"MethodName\":\"Events\",\"MethodResult\":\"OK\",\"CorrelationId\":\"fac6c8dd-852b-4c70-97a5-537cab6ce873\",\"Events\":[{\"Version\":22,\"Id\":17479714,\"GroupName\":\"USL Championship\",\"SubCategoryName\":\"USA\",\"CategoryCName\":\"soccer\",\"CategoryName\":\"Football\",\"HomeTeamName\":\"New Mexico United\",\"AwayTeamName\":\"Sacramento Republic\",\"EventName\":\"New Mexico United - Sacramento Republic\",\"Milliseconds\":1794880800000,\"Date\":\"11/17/2026\",\"Time\":\"02:00\",\"MarketCount\":0,\"Markets\":[],\"CouponMarketId\":null,\"FilterMarkets\":{},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProviderType\":null,\"LiveStreami"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getEventMarkets",
+      "status": 200,
+      "size": 105849,
+      "odds_like": true,
+      "sample": "{\"MethodName\":\"EventMarkets\",\"MethodResult\":\"OK\",\"CorrelationId\":\"9f4d5292-21b4-48ec-81df-ac0cd7fb36b5\",\"Events\":[{\"Version\":176,\"Id\":17493857,\"GroupName\":\"Sydney - Australia\",\"SubCategoryName\":\"Challenger\",\"CategoryCName\":\"tennis\",\"CategoryName\":\"Tennis\",\"HomeTeamName\":\"Derek Pham\",\"AwayTeamName\":\"Hiroki Moriya\",\"EventName\":\"Derek Pham - Hiroki Moriya\",\"Milliseconds\":1794882600000,\"Date\":\"11/17/2026\",\"Time\":\"02:30\",\"MarketCount\":0,\"Markets\":[661190253],\"CouponMarketId\":661190253,\"FilterMarkets\":{\"match-winner\":661190253},\"IsSuspended\":false,\"LiveStreamingMobileStatus\":null,\"LiveStreamingProvi"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/sports/racing/horse-racing/getHorseRacingFeaturedRaces?forceFetch=false",
+      "status": 200,
+      "size": 107978,
+      "odds_like": true,
+      "sample": "{\"type\":\"napiResponse\",\"data\":{\"races\":[{\"id\":17493926,\"title\":\"Jay Bourke Memorial Bm56 Handicap\",\"distance\":\"0m 7f 77y\",\"hasLiveStreaming\":false,\"milliseconds\":1794889980000,\"venueTime\":\"2026-11-17T04:30:00Z\",\"name\":\"04:30 Kyneton\",\"markets\":[{\"id\":661197277,\"marketGroupCName\":\"race-winner\",\"marketGroupName\":\"Race Winner\",\"title\":\"Race Winner\",\"isStartingPrice\":false,\"isSuspended\":false,\"outcomes\":[{\"id\":2706962496,\"betName\":\"Bow Ribbon\",\"decimalOdds\":2.75,\"fractionalNumOdd\":7,\"fractionalDenOdd\":4,\"isDisplayed\":true,\"isActive\":true,\"rowNumber\":0,\"racer\":{\"id\":\"17493926_-326642418\",\"number\":\""
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://betway.com/g/version.json",
+      "status": 200,
+      "size": 24,
+      "odds_like": false,
+      "sample": "{\"version\":\"20261113.7\"}"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/getMaintenanceMode",
+      "status": 200,
+      "size": 58,
+      "odds_like": false,
+      "sample": "{\"type\":\"napiResponse\",\"data\":{\"env\":\"client.bw_mt_live\"}}"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/home-hub/hero-menu",
+      "status": 200,
+      "size": 1133,
+      "odds_like": false,
+      "sample": "{\"type\":\"napiResponse\",\"data\":{\"items\":[{\"id\":\"812059ef-fa11-53e4-b84f-24ba297b6a0b#0\",\"link\":{\"kind\":\"offer_category\",\"categoryCName\":\"soccer\"},\"label\":\"Football\"},{\"id\":\"56217328-2955-5e66-8cca-c71a93116a49#1\",\"link\":{\"kind\":\"offer_category\",\"categoryCName\":\"tennis\"},\"label\":\"Tennis\"},{\"id\":\"0518a0bb-f96c-416a-a091-4e5802b8f9cd#2\",\"icon\":{\"kind\":\"img\",\"ref\":\"0TKIaaowP0DMjguP4\"},\"link\":{\"kind\":\"third_party_content\",\"contentId\":\"SportsPromotions\"},\"label\":\"Promotions\"},{\"id\":\"cc529a8f-e0af-4fdb-97c0-c6f602df077c#3\",\"icon\":{\"kind\":\"img\",\"ref\":\"0laTmGbRLy7DYYYE6\"},\"link\":{\"kind\":\"third_party_con"
+    },
+    {
+      "url": "https://api.superspx.com/api/v1/ping",
+      "status": 200,
+      "size": 160,
+      "odds_like": false,
+      "sample": "{\"ok\":true,\"time\":\"2026-11-17T04:30:05.070Z\",\"auth\":\"anonymous\",\"context\":{\"brand\":\"betway\",\"licence\":\"mt\",\"territory\":\"no\",\"locale\":\"en\",\"environment\":\"prod\"}}"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/getRecommendedBets",
+      "status": 200,
+      "size": 11,
+      "odds_like": false,
+      "sample": "{\"data\":[]}"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 491,
+      "odds_like": false,
+      "sample": "[{\"id\":\"17493153-BetRadar-HLS\",\"externalId\":\"av:stream:34433027\",\"eventId\":17493153,\"provider\":\"BetRadar\",\"startTime\":\"2026-11-17T04:20:00+00:00\",\"format\":\"HLS\",\"status\":\"Live\",\"restrictions\":{\"maxPlayerSizePercentage\":100,\"loginRequired\":true}},{\"id\":\"17493170-BetRadar-HLS\",\"externalId\":\"av:stream:34430357\",\"eventId\":17493170,\"provider\":\"BetRadar\",\"startTime\":\"2026-11-17T04:30:00+00:00\",\"format\":\"HLS\",\"status\":\"Live\",\"restrictions\":{\"maxPlayerSizePercentage\":100,\"loginRequired\":true}}]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getTopGroups",
+      "status": 200,
+      "size": 1539,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"GetTopGroups\",\"MethodResult\":\"OK\",\"CorrelationId\":\"4c04674e-ff1a-434d-ab0d-831aebd24456\",\"Success\":true,\"Groups\":[{\"SubCategoryName\":\"ATP\",\"SubCategoryCName\":\"atp\",\"GroupCName\":\"atp-finals\",\"GroupName\":\"ATP Finals\",\"FixturesCount\":4,\"OutrightsCount\":1,\"GroupSortIndex\":0},{\"SubCategoryName\":\"WTA\",\"SubCategoryCName\":\"wta\",\"GroupCName\":\"colina\",\"GroupName\":\"Colina\",\"FixturesCount\":9,\"OutrightsCount\":0,\"GroupSortIndex\":1},{\"SubCategoryName\":\"ATP\",\"SubCategoryCName\":\"atp\",\"GroupCName\":\"atp-finals---doubles\",\"GroupName\":\"ATP Finals - Doubles\",\"FixturesCount\":2,\"OutrightsCount\":0,\"Grou"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getTopGroups",
+      "status": 200,
+      "size": 132,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"GetTopGroups\",\"MethodResult\":\"OK\",\"CorrelationId\":\"d0507010-e573-4d3e-a677-e514fb08ae11\",\"Success\":true,\"Groups\":[]}\n"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getTopGroups",
+      "status": 200,
+      "size": 668,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"GetTopGroups\",\"MethodResult\":\"OK\",\"CorrelationId\":\"16d21a69-08c0-434c-9b98-333ee88edefc\",\"Success\":true,\"Groups\":[{\"SubCategoryName\":\"UK \\u0026 Ireland\",\"SubCategoryCName\":\"uk-and-ireland\",\"GroupCName\":\"southwell\",\"GroupName\":\"Southwell\",\"FixturesCount\":9,\"OutrightsCount\":0,\"GroupSortIndex\":4},{\"SubCategoryName\":\"UK \\u0026 Ireland\",\"SubCategoryCName\":\"uk-and-ireland\",\"GroupCName\":\"ffos-las\",\"GroupName\":\"Ffos Las\",\"FixturesCount\":7,\"OutrightsCount\":0,\"GroupSortIndex\":6},{\"SubCategoryName\":\"UK \\u0026 Ireland\",\"SubCategoryCName\":\"uk-and-ireland\",\"GroupCName\":\"kempton\",\"GroupName\":\""
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getTopGroupsInplay",
+      "status": 200,
+      "size": 9966,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"GetTopGroupsInplay\",\"MethodResult\":\"OK\",\"CorrelationId\":\"a13275f3-ce7f-4b83-9a5f-b2037284a9c6\",\"Success\":true,\"Categories\":[{\"DisplayName\":\"Football\",\"CategoryCName\":\"soccer\",\"Events\":[17479714,17493153,17496789,17496762,17496766,17493170],\"EventTablesKeys\":[\"soccer_usa_usl-championship\",\"soccer_esoccer_adriaticleague\",\"soccer_esoccer_valhalla-cup\"]},{\"DisplayName\":\"Tennis\",\"CategoryCName\":\"tennis\",\"Events\":[17493857,17493860,17494101,17496955,17496973,17496999,17488314,17488548,17497037,17487188],\"EventTablesKeys\":[\"tennis_challenger_sydney---australia\",\"tennis_challenger_kobe-"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getTopGroups",
+      "status": 200,
+      "size": 325,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"GetTopGroups\",\"MethodResult\":\"OK\",\"CorrelationId\":\"379e7e4b-4338-453a-b844-3b1af37fc1c5\",\"Success\":true,\"Groups\":[{\"SubCategoryName\":\"Football Boost\",\"SubCategoryCName\":\"football-boost\",\"GroupCName\":\"uefa-nations-league\",\"GroupName\":\"Nations League\",\"FixturesCount\":0,\"OutrightsCount\":6,\"GroupSortIndex\":36}]}\n"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getGroup",
+      "status": 200,
+      "size": 2226,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"Group\",\"MethodResult\":\"OK\",\"CorrelationId\":\"6a45029e-c895-4533-81d7-e9f8909177f7\",\"Success\":true,\"Categories\":[{\"DisplayName\":\"Horse Racing\",\"CategoryCName\":\"horse-racing\",\"Events\":[17490620,17490611,17490610,17490623,17490625,17490621,17490626,17490622,17490639],\"EventTablesKeys\":[\"horse-racing_uk-and-ireland_southwell\"]}],\"EventSummaries\":[{\"EventId\":17490620,\"StartTime\":\"2026-11-17T16:30:00\",\"EventTableKey\":\"horse-racing_uk-and-ireland_southwell\",\"IsOutright\":false,\"EventTableKeys\":[\"horse-racing_uk-and-ireland_southwell\"]},{\"EventId\":17490611,\"StartTime\":\"2026-11-17T17:00:00"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getGroup",
+      "status": 200,
+      "size": 1953,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"Group\",\"MethodResult\":\"OK\",\"CorrelationId\":\"b4b53bf0-cf2e-4c36-ab1b-0f803aaea7c2\",\"Success\":true,\"Categories\":[{\"DisplayName\":\"Betway Boosts\",\"CategoryCName\":\"betway-boosts\",\"Events\":[17493900,17493898,17493904,17493901,17493902,17493896],\"EventTablesKeys\":[\"betway-boosts_football-boost_uefa-nations-league\"]}],\"EventSummaries\":[{\"EventId\":17493900,\"StartTime\":\"2026-11-17T19:45:00\",\"EventTableKey\":\"betway-boosts_football-boost_uefa-nations-league\",\"IsOutright\":true,\"EventTableKeys\":[\"betway-boosts_football-boost_uefa-nations-league\"]},{\"EventId\":17493898,\"StartTime\":\"2026-11-17T1"
+    },
+    {
+      "url": "https://betway.com/g/api/sports/content/getGroup",
+      "status": 200,
+      "size": 1699,
+      "odds_like": false,
+      "sample": "{\"MethodName\":\"Group\",\"MethodResult\":\"OK\",\"CorrelationId\":\"dcebca04-97b1-4f92-b53f-0646fa9bc42b\",\"Success\":true,\"Categories\":[{\"DisplayName\":\"Tennis\",\"CategoryCName\":\"tennis\",\"Events\":[17493280,17493281,17496341,17496342,17472250],\"EventTablesKeys\":[\"tennis_atp_atp-finals\"]}],\"EventSummaries\":[{\"EventId\":17493280,\"StartTime\":\"2026-11-17T13:00:00\",\"EventTableKey\":\"tennis_atp_atp-finals\",\"IsOutright\":false,\"EventTableKeys\":[\"tennis_atp_atp-finals\"]},{\"EventId\":17493281,\"StartTime\":\"2026-11-17T19:30:00\",\"EventTableKey\":\"tennis_atp_atp-finals\",\"IsOutright\":false,\"EventTableKeys\":[\"tennis_atp_atp-f"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 491,
+      "odds_like": false,
+      "sample": "[{\"id\":\"17493145-BetRadar-HLS\",\"externalId\":\"av:stream:34433415\",\"eventId\":17493145,\"provider\":\"BetRadar\",\"startTime\":\"2026-11-17T04:05:00+00:00\",\"format\":\"HLS\",\"status\":\"Live\",\"restrictions\":{\"maxPlayerSizePercentage\":100,\"loginRequired\":true}},{\"id\":\"17493144-BetRadar-HLS\",\"externalId\":\"av:stream:34433759\",\"eventId\":17493144,\"provider\":\"BetRadar\",\"startTime\":\"2026-11-17T04:10:00+00:00\",\"format\":\"HLS\",\"status\":\"Live\",\"restrictions\":{\"maxPlayerSizePercentage\":100,\"loginRequired\":true}}]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 246,
+      "odds_like": false,
+      "sample": "[{\"id\":\"17492829-BetRadar-HLS\",\"externalId\":\"av:stream:33769493\",\"eventId\":17492829,\"provider\":\"BetRadar\",\"startTime\":\"2026-11-17T02:30:00+00:00\",\"format\":\"HLS\",\"status\":\"Live\",\"restrictions\":{\"maxPlayerSizePercentage\":100,\"loginRequired\":true}}]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/services/api/LiveStreaming/streams",
+      "status": 200,
+      "size": 2,
+      "odds_like": false,
+      "sample": "[]"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/getVersionInfo",
+      "status": 200,
+      "size": 62,
+      "odds_like": false,
+      "sample": "{\"type\":\"napiResponse\",\"data\":{\"minimumVersion\":\"20261110.2\"}}"
+    },
+    {
+      "url": "https://cdn.cookielaw.org/consent/ea988c94-8e6c-4e9f-b22a-a1db5e72ae9d/ea988c94-8e6c-4e9f-b22a-a1db5e72ae9d.json",
+      "status": 200,
+      "size": 4917,
+      "odds_like": false,
+      "sample": "{\"CookieSPAEnabled\":false,\"CookieSameSiteNoneEnabled\":false,\"CookieV2CSPEnabled\":false,\"MultiVariantTestingEnabled\":false,\"UseV2\":true,\"MobileSDK\":false,\"SkipGeolocation\":false,\"ScriptType\":\"PRODUCTION\",\"Version\":\"202505.2.0\",\"OptanonDataJSON\":\"ea988c94-8e6c-4e9f-b22a-a1db5e72ae9d\",\"GeolocationUrl\":\"https://geolocation.onetrust.com/cookieconsentpub/v1/geo/location\",\"BulkDomainCheckUrl\":\"https://cookies-data.onetrust.io/bannersdk/v1/domaingroupcheck\",\"RuleSet\":[{\"Id\":\"019b0415-01a9-7e74-be61-f842ccfb68e6\",\"Name\":\"Canada & lax LATAM - AM Banner\",\"Countries\":[\"ar\",\"hn\",\"do\",\"ni\",\"gt\",\"bo\",\"ca\",\"v"
+    },
+    {
+      "url": "https://geolocation.onetrust.com/cookieconsentpub/v1/geo/location",
+      "status": 200,
+      "size": 69,
+      "odds_like": false,
+      "sample": "{\"country\":\"NO\",\"state\":\"02\",\"stateName\":\"Akershus\",\"continent\":\"EU\"}"
+    },
+    {
+      "url": "https://cdn.cookielaw.org/consent/ea988c94-8e6c-4e9f-b22a-a1db5e72ae9d/019b0414-17d4-7582-bf91-b104e8936f93/en.json",
+      "status": 200,
+      "size": 213337,
+      "odds_like": false,
+      "sample": "{\"DomainData\":{\"pclifeSpanYr\":\"Year\",\"pclifeSpanYrs\":\"Years\",\"pclifeSpanSecs\":\"A few seconds\",\"pclifeSpanWk\":\"Week\",\"pclifeSpanWks\":\"Weeks\",\"pccontinueWithoutAcceptText\":\"Continue without Accepting\",\"pccloseButtonType\":\"Icon\",\"MainText\":\"Privacy Preference Center\",\"MainInfoText\":\"When you visit any website, it may store or retrieve information on your browser, mostly in the form of cookies. This information might be about you, your preferences or your device and is mostly used to make the site work as you expect it to. The information does not usually directly identify you, but it can give you"
+    },
+    {
+      "url": "https://cdn.cookielaw.org/scripttemplates/202505.2.0/assets/otFlat.json",
+      "status": 200,
+      "size": 15345,
+      "odds_like": false,
+      "sample": "\n            {\n                \"name\": \"otFlat\",\n                \"html\": \"PGRpdiBpZD0ib25ldHJ1c3QtYmFubmVyLXNkayIgY2xhc3M9Im90RmxhdCI+PGRpdiByb2xlPSJkaWFsb2ciPjxkaXYgY2xhc3M9Im90LXNkay1jb250YWluZXIiPjxkaXYgY2xhc3M9Im90LXNkay1yb3ciPjxkaXYgaWQ9Im9uZXRydXN0LWdyb3VwLWNvbnRhaW5lciIgY2xhc3M9Im90LXNkay1laWdodCBvdC1zZGstY29sdW1ucyI+PGRpdiBjbGFzcz0iYmFubmVyX2xvZ28iPjwvZGl2PjxkaXYgaWQ9Im9uZXRydXN0LXBvbGljeSI+PGgyIGlkPSJvbmV0cnVzdC1wb2xpY3ktdGl0bGUiPlRpdGxlPC9oMj48ZGl2IGlkPSJvbmV0cnVzdC1wb2xpY3ktdGV4dCI+dGl0bGU8YSBocmVmPSIjIj5wb2xpY3k8L2E+PC9kaXY+PGRpdiBjbGFzcz0ib3QtZHBkLWNvbnRhaW5lciI+PGgzIGNsYXNzPSJvdC"
+    },
+    {
+      "url": "https://cdn.cookielaw.org/scripttemplates/202505.2.0/assets/v2/otPcCenter.json",
+      "status": 200,
+      "size": 66105,
+      "odds_like": false,
+      "sample": "\n        {\n            \"name\": \"otPcCenter\",\n            \"html\": \"PGRpdiBpZD0ib25ldHJ1c3QtcGMtc2RrIiBjbGFzcz0ib3RQY0NlbnRlciBvdC1oaWRlIG90LWZhZGUtaW4iPjxkaXYgcm9sZT0iZGlhbG9nIiBhcmlhLW1vZGFsPSJ0cnVlIj48IS0tIENsb3NlIEJ1dHRvbiAtLT48ZGl2IGNsYXNzPSJvdC1wYy1oZWFkZXIiPjwhLS0gTG9nbyBUYWcgLS0+PGRpdiBjbGFzcz0ib3QtcGMtbG9nbyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJDb21wYW55IExvZ28iPjwvZGl2PjxidXR0b24gaWQ9ImNsb3NlLXBjLWJ0bi1oYW5kbGVyIiBjbGFzcz0ib3QtY2xvc2UtaWNvbiIgYXJpYS1sYWJlbD0iQ2xvc2UiPjwvYnV0dG9uPjwvZGl2PjwhLS0gQ2xvc2UgQnV0dG9uIC0tPjxkaXYgaWQ9Im90LXBjLWNvbnRlbnQiIGNsYXNzPSJvdC1wYy1zY3JvbGxiYXIiPjxoMiBpZD0ib3"
+    },
+    {
+      "url": "https://betway.com/g/nextapi/initiateFingerPrintTracking",
+      "status": 200,
+      "size": 64,
+      "odds_like": false,
+      "sample": "{\"fingerPrintTrackingId\":\"437b5022-3b69-4f40-aef5-839b13010b60\"}"
+    },
+    {
+      "url": "https://asr-api-spinsport-live-betway-01.azurewebsites.net/messagehub/negotiate?negotiateVersion=1",
+      "status": 200,
+      "size": 573,
+      "odds_like": false,
+      "sample": "{\"negotiateVersion\":0,\"url\":\"https://asr-svc-spinsport-live-betway-01-a.service.signalr.net/client/?hub=messagehub\\u0026asrs.op=%2Fmessagehub\\u0026negotiateVersion=1\\u0026asrs_request_id=%2F9du0A4AAAA%3D\",\"accessToken\":\"eyJhbGciOiJIUzI1NiIsImtpZCI6IjExNzExODkxMzEiLCJ0eXAiOiJKV1QifQ.eyJhc3JzLnMuc2VjbiI6IjMiLCJuYmYiOjE3OTQ4ODk4MTAsImV4cCI6MTc5NDg5MzQxMCwiaWF0IjoxNzk0ODg5ODEwLCJhdWQiOiJodHRwczovL2Fzci1zdmMtc3BpbnNwb3J0LWxpdmUtYmV0d2F5LTAxLWEuc2VydmljZS5zaWduYWxyLm5ldC9jbGllbnQvP2h1Yj1tZXNzYWdlaHViIn0.ZKJ4LoDwp9I4Lun7ChOmidzL1PMCQUdChPXOzb9rRYs\",\"availableTransports\":[]}"
+    },
+    {
+      "url": "https://asr-svc-spinsport-live-betway-01-a.service.signalr.net/client/negotiate?hub=messagehub&asrs.op=%2Fmessagehub&negotiateVersion=1&asrs_request_id=%2F9du0A4AAAA%3D",
+      "status": 200,
+      "size": 334,
+      "odds_like": false,
+      "sample": "{\"negotiateVersion\":1,\"connectionId\":\"pl120kl53PnChdwpbIE1ngMjpzRAh02\",\"connectionToken\":\"_NNgKENfBEluPOT8ABPGZgMjpzRAh02\",\"availableTransports\":[{\"transport\":\"WebSockets\",\"transferFormats\":[\"Text\",\"Binary\"]},{\"transport\":\"ServerSentEvents\",\"transferFormats\":[\"Text\"]},{\"transport\":\"LongPolling\",\"transferFormats\":[\"Text\",\"Binary\"]}]}"
+    }
+  ]
+}

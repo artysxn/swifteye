@@ -1,0 +1,142 @@
+{
+  "url": "https://thunderpick.io/sports?list=Live",
+  "title": "Crypto Sports Betting: Bet on Sports with Bitcoin at Thunderpick",
+  "page_text": "Esports Sports Casino Live 25 Top Tournaments NFL 11 NBA 5 NHL 12 ATP World Tour Finals Turin 4 UEFA Nations League A 2 Soccer 753 UEFA Nations League A 2 CHAMPIONS LEAGUE 19 UEFA Nations League B 6 Conference League 1 Europa League 19 Show more Basketball 199 Euroleague 20 EuroCup 16 Europe - Champions League 4 EuroBasket. Women. Qualification 16 European North League 2 Show more Tennis 382 WT Bradenton Men Singles 5 ATP Chall Metz Doubles 5 Argentina 5 Australia 27 Bolivia 4 Show more American Football 78 USA 78 Hockey 167 Champions Hockey League 8 Alps Hockey League 6 Austria 2 Canada 16 Czech Republic 24 Show more Table Tennis 270 Setka Cup 119 Liga Pro 144 TT Cup 5 Hot Bikini League 2 Martial Arts 75 Boxing Bout 48 UFC 20 KSW 7 Volleyball 24 Brazil 6 China 4 Czech Republic 2 Finland 1 France 3 Show more Cricket 1 One Day International 1 Darts 28 Grand Slam of Darts 12 MODUS Super Series 15 PDC World Championship 1 Handball 48 World Championship 2027 1 Handball Champions League 6 EHF European League 16 Denmark 5 France 8 Show more Rugby 6 Six Nations 6 Snooker 23 Germany 23 Aussie Rules 9 Australia 9 Golf 1 US Masters 2027 1 Badminton 52 Hong Kong 52 Bandy 7 Sweden 7 Futsal 1 Spain 1 Show more Rewards Promotions Race 07:12:46 Giveaways 1 day Thunder VIP Club Support FAQ Thunderpick App Blog World Championship English Rewards Log in Join €600 Boosted Welcome Bonus Join Now Never Miss A Play Enable Notifications Unlock Play In One Tap. Bet from Telegram. Join Now Soccer 99+ Basketball 99+ Tennis 99+ Am. Football 78 Hockey 99+ Table Tennis 99+ Martial Arts 75 Volleyball 24 Cricket 1 Darts 28 Handball 48 Rugby 6 Snooker 23 Aussie Rules 9 Golf 1 Badminton 52 Bandy 7 Futsal 1 NFL NBA NHL ATP Turin UEFA NL A Featured Bets Ranked EP.6 Combo Apogee Esports 2.35 Match Winner Inner Circle - Apogee Esports BIG 1.45 Match Winner BIG - Sangal Ninjas in Pyjamas 1.17 Match Winner Ninjas in Pyjamas - Team UNiTY Luminosity Gaming 2.10 Match Winner GamerLegion - Luminosity ",
+  "odds_endpoints": [
+    {
+      "url": "https://thunderpick.io/translations/locales/en/web.json",
+      "status": 200,
+      "size": 475688,
+      "odds_like": true,
+      "sample": "{\n  \"aboutPage\": {\n    \"ABOUT_THUNDERPICK_TEXT\": \"<b>Thunderpick</b> is an  innovative crypto <a target=\\\"_blank\\\" href=\\\"https://thunderpick.io{lang}/esports\\\">esports betting</a> site & online casino, designed to meet the expectations of the fast-growing community of gamers and esports enthusiasts. Created by long-time players, Thunderpick aims to provide its users with a new, game-like experience that makes placing wagers on your favorite games even more entertaining. With us you can watch games, bet on live in-play events, challenge other players and thrive as a member of a community that "
+    },
+    {
+      "url": "https://thunderpick.io/translations/locales/en/layout.json",
+      "status": 200,
+      "size": 4351,
+      "odds_like": true,
+      "sample": "{\n  \"country-block-screen\": {\n    \"NOT_AVAILABLE\": \"Thunderpick is currently not available in your country\"\n  },\n  \"gambling-games\": {\n    \"baccarat\": \"Baccarat\",\n    \"bingo\": \"Bingo\",\n    \"blackjack\": \"Blackjack\",\n    \"card\": \"Cards\",\n    \"casual\": \"Casual\",\n    \"craps\": \"Craps\",\n    \"crash\": \"Crash\",\n    \"favorites\": \"Favorites\",\n    \"fishing\": \"Fishing\",\n    \"game-show\": \"Game shows\",\n    \"live\": \"Live casino\",\n    \"lottery\": \"Lottery\",\n    \"luckiest\": \"Luckiest\",\n    \"poker\": \"Poker\",\n    \"recent\": \"Recent\",\n    \"roulette\": \"Roulette\",\n    \"slots\": \"Slots\",\n    \"thundercrash\": \"Crash\",\n   "
+    },
+    {
+      "url": "https://thunderpick.io/api/matches",
+      "status": 200,
+      "size": 3164926,
+      "odds_like": true,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"upcoming\":[{\"preferredMarkets\":[],\"id\":3017302,\"gameId\":11,\"startTime\":\"2026-11-18T01:00:00+00:00\",\"hasInPlayMarkets\":true,\"isHighlighted\":false,\"isLiveModeOverridden\":true,\"totalOpenMarkets\":15,\"totalAvailableMarkets\":15,\"bestOfMaps\":null,\"pin\":{\"isPinned\":false,\"order\":0},\"streams\":[],\"plainStreamLinks\":[],\"note\":\"\",\"isNoteVisible\":false,\"score\":{\"id\":3017302,\"score\":{\"homeScore\":\"0\",\"awayScore\":\"0\"},\"currentPeriod\":null,\"periodScores\":[],\"additionalScore\":null},\"hasMainMarket\":false,\"prematchSgcEnabled\":false,\"inPlaySgcEnabled\":false,\"isBetBuilderEnabled"
+    },
+    {
+      "url": "https://thunderpick.io/api/featured-bets",
+      "status": 200,
+      "size": 7332,
+      "odds_like": true,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":[{\"id\":500,\"betType\":3,\"name\":\"Ranked EP.6 Combo \",\"currentCombinedOdds\":8.37,\"subWagers\":[{\"bettingEventType\":1,\"eventId\":2943112,\"marketId\":250930623,\"selectionId\":625217673,\"selectionName\":\"Apogee Esports\",\"selectionTotal\":null,\"marketName\":\"Match Winner\",\"marketBaseLine\":null,\"matchName\":\"Inner Circle vs Apogee Esports\",\"homeCompetitorName\":\"Inner Circle\",\"awayCompetitorName\":\"Apogee Esports\",\"competition\":{\"id\":11949,\"name\":\"Ranked Episode 6\",\"shortName\":\"Ranked Episode 6\",\"countryCode\":null},\"eventStartTime\":\"2026-11-17T11:00:00Z\",\"currentOdds\":2.35,\"ga"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://thunderpick.io/api/ip-geo/country-check",
+      "status": 200,
+      "size": 851,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"ip\":\"2a01:799:1525:4700:5c90:4f2c:f55:fe53\",\"code\":\"NO\",\"numericCode\":578,\"messageForBlockedUsers\":null,\"permissions\":{\"pageUsageAllowed\":true,\"createAccountAllowed\":true,\"loginAllowed\":true,\"bettingAllowed\":true,\"bettingViewAllowed\":true,\"gamblingViewAllowed\":true,\"gamblingUsageAllowed\":true,\"fiatDepositsAllowed\":false,\"fiatWithdrawalsAllowed\":false,\"cryptoWithdrawalsAllowed\":true,\"cryptoDepositsAllowed\":true,\"giftCardDepositsAllowed\":true,\"giftCardWithdrawalsAllowed\":false,\"creditCardDepositsAllowed\":false,\"creditCardWithdrawalsAllowed\":false,\"apcoCreditC"
+    },
+    {
+      "url": "https://thunderpick.io/api/configuration/config",
+      "status": 200,
+      "size": 22403,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"publicConfig\":{\"server\":{\"publicAddress\":\"https://thunderpick.io\",\"publicBlogAddress\":\"https://thunderpick.io/blog\",\"deployStartedTime\":\"\",\"environment\":\"production\",\"withdrawalsSafeModeEndTime\":null,\"withdrawalsFailSafeModeEnabled\":false},\"session\":{\"countriesWithNoCaptchaAllowed\":[\"CN\",\"PL\"],\"privacyModeEnabledUserName\":\"Hidden\",\"hiddenAvatarUrl\":\"/assets/img/user-avatar/hidden-avatar.png\"},\"turnstile\":{\"siteKey\":\"1x00000000000000000000AA\"},\"google\":{\"appId\":\"618320813263-loubhume1tk85hu1up73cs7ef1hnjhiq.apps.googleusercontent.com\"},\"analytics\":{\"tracking"
+    },
+    {
+      "url": "https://thunderpick.io/api/health",
+      "status": 200,
+      "size": 41,
+      "odds_like": false,
+      "sample": "{\"status\":\"Healthy\",\"version\":\"9.19.2.0\"}"
+    },
+    {
+      "url": "https://thunderpick.io/api/v2/competitions",
+      "status": 200,
+      "size": 47107,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"competitions\":{\"1\":{\"1\":[{\"competitionId\":12047,\"name\":\"Overwatch Champions Series 2026 - Asia Stage 3\",\"shortName\":\"Overwatch Champ\",\"matchCount\":2,\"countryCode\":null,\"parentTournament\":null}],\"2\":[],\"3\":[{\"competitionId\":7642,\"name\":\"LoL European Circuit\",\"shortName\":\"Lol Circuit\",\"matchCount\":1,\"countryCode\":null,\"parentTournament\":null}],\"4\":[{\"competitionId\":11983,\"name\":\"BLAST SLAM IX\",\"shortName\":\"Blast Slam IX\",\"matchCount\":9,\"countryCode\":null,\"parentTournament\":null},{\"competitionId\":12121,\"name\":\"Essence III\",\"shortName\":\"Essence III\",\"matchCount"
+    },
+    {
+      "url": "https://thunderpick.io/api/content/banner/published",
+      "status": 200,
+      "size": 8802,
+      "odds_like": false,
+      "sample": "{\"error\":null,\"ok\":true,\"data\":[{\"static\":true,\"title\":\"<p>More&nbsp;Ways&nbsp;To</p><p>Deposit&nbsp;Unlocked:&nbsp;</p><p>Game&nbsp;On!</p>\",\"link\":\"/casino?wallet=true\",\"linkTitle\":\"Deposit Now\",\"promotional\":false,\"id\":446,\"loginRequirement\":\"logged-in\",\"section\":[\"Gambling\"],\"games\":[],\"devices\":[\"Mobile\",\"Tablet\",\"Desktop\"],\"background\":\"/content-img/background.smqvuypr.goo.png\",\"wideBackground\":\"\",\"order\":32,\"isWelcomeBanner\":false},{\"static\":true,\"title\":\"<p>Patch&nbsp;Note:</p><p>More&nbsp;Ways&nbsp;to&nbsp;</p><p>Deposit&nbsp;Unlocked</p>\",\"link\":\"/esports?wallet=true\",\"linkTitle\":\"De"
+    },
+    {
+      "url": "https://thunderpick.io/api/content/seo/published?language=en&genericPath=%2Fsports&specificPath=%2Fsports",
+      "status": 200,
+      "size": 25246,
+      "odds_like": false,
+      "sample": "{\"error\":null,\"ok\":true,\"data\":{\"path\":\"/sports\",\"language\":\"en\",\"metaTitle\":\"Crypto Sports Betting: Bet on {categoryOrGameSecond} with Bitcoin at Thunderpick\",\"metaDescription\":\"Bet on {categoryOrGame} at Thunderpick – a modern {categoryOrGame} betting site offering Best Odds & Lines, Live In-Play Bets and Cash Outs. Get your winnings lightning fast.\",\"imageUrl\":\"\",\"imageAlt\":null,\"h1\":\"Crypto Sports Betting with Thunderpick\",\"seoArticle\":\"Thunderpick was once known for two things. We are the premier [esports betting application](https://thunderpick.io/esports) in the world. Secondly, we plac"
+    },
+    {
+      "url": "https://thunderpick.io/api/races/short",
+      "status": 200,
+      "size": 611,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"races\":[{\"id\":\"f04e40cf-ab6b-4423-9455-edcf32b2d1d8\",\"snapshotId\":\"a6212a30-3d08-4a56-ba45-cfd0dc1c837d\",\"prizePool\":400000,\"startTime\":\"2026-11-15T11:46:12.7352094+00:00\",\"finishTime\":\"2026-11-17T11:46:12.7352094+00:00\",\"winnersCount\":150,\"minimumOdds\":1.01,\"maximumOdds\":5.00,\"status\":1},{\"id\":\"bdb2ac74-d67c-4ee5-bfd2-a34edf3380d8\",\"snapshotId\":\"dbb44307-0729-467c-b95f-a8a4a00463bc\",\"prizePool\":400000,\"startTime\":\"2026-11-13T11:46:11.5323318+00:00\",\"finishTime\":\"2026-11-15T11:46:11.5323318+00:00\",\"winnersCount\":150,\"minimumOdds\":1.01,\"maximumOdds\":5.00,\"st"
+    },
+    {
+      "url": "https://thunderpick.io/api/matches?matchesIds=2992058&matchesIds=3012467",
+      "status": 200,
+      "size": 50,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"matches\":[]}}"
+    },
+    {
+      "url": "https://thunderpick.io/api/giveaways/nearest-closing",
+      "status": 200,
+      "size": 3855,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"id\":6692,\"tier\":2,\"status\":1,\"tickets\":2614,\"participantsCount\":586,\"winningTickets\":1,\"lastParticipants\":[{\"username\":\"Hidden\",\"avatar\":{\"image\":\"/assets/img/avatar/anonymous.webp\",\"largeImage\":\"/assets/img/avatar/anonymous.large.webp\",\"gradient\":null},\"isVip\":false,\"playerRank\":0,\"publicUid\":null},{\"username\":\"mochakofi99\",\"avatar\":{\"image\":\"https://avatars.akamai.steamstatic.com/e6b87c4f0d4a6d2d1e14d49829f92f85c7a43222_full.jpg\",\"largeImage\":\"https://avatars.akamai.steamstatic.com/e6b87c4f0d4a6d2d1e14d49829f92f85c7a43222_full.jpg\",\"gradient\":null},\"isVip"
+    },
+    {
+      "url": "https://thunderpick.io/api/sgc/bet-builder-enabled",
+      "status": 200,
+      "size": 52,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"enabled\":true}}"
+    },
+    {
+      "url": "https://thunderpick.io/api/matches?matchesIds=2992058&matchesIds=3011341&matchesIds=3012467&matchesIds=3011029",
+      "status": 200,
+      "size": 50,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"matches\":[]}}"
+    },
+    {
+      "url": "https://thunderpick.io/api/betting-events/live-counts/sport",
+      "status": 200,
+      "size": 231,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"totalLive\":25,\"games\":[{\"gameId\":15,\"liveCount\":12},{\"gameId\":31,\"liveCount\":5},{\"gameId\":43,\"liveCount\":3},{\"gameId\":14,\"liveCount\":1},{\"gameId\":10,\"liveCount\":1},{\"gameId\":11,\"liveCount\":3}]}}"
+    },
+    {
+      "url": "https://thunderpick.io/api/exchange-rates",
+      "status": 200,
+      "size": 109,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"eur\":{\"ccy\":\"EUR\",\"mid\":1.0000000},\"usd\":{\"ccy\":\"USD\",\"mid\":1.1006790}}}"
+    },
+    {
+      "url": "https://thunderpick.io/api/matches",
+      "status": 200,
+      "size": 50,
+      "odds_like": false,
+      "sample": "{\"statusCode\":200,\"ok\":true,\"data\":{\"matches\":[]}}"
+    },
+    {
+      "url": "https://accounts.google.com/gsi/status?client_id=618320813263-loubhume1tk85hu1up73cs7ef1hnjhiq.apps.googleusercontent.com&cas=Lcs5ELuYNjMAaZb0Oy3GUKT0FQk%2FLjKAtuSmZQYjAFo&bs=x2LBYH8%2BCKXYGN2blHK2Zg604OICt%2BzhazpKdtMkaCY&has_opted_out_fedcm=true&is_itp=true",
+      "status": 200,
+      "size": 79,
+      "odds_like": false,
+      "sample": ")]}'\n[[\"MOmVr8MqOOcrTg2BgM2Cslsi0ejEl92iDT3Yqpq7JBM\"],null,0,1,1,90,120,null,0]"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+[
+  {
+    "url": "https://thunderpick.io/api/matches",
+    "method": "POST",
+    "headers": {
+      "host": "thunderpick.io",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://thunderpick.io/sports?list=Live",
+      "content-type": "application/json",
+      "content-length": "175",
+      "origin": "https://thunderpick.io",
+      "connection": "keep-alive",
+      "cookie": "__cf_bm=N_1Xu4Ho20GUOVpECQXy.UFBonoTI9Iv1j4YnMIXD6c-1794890404.867583-1.0.1.1-uRFAYRPuWgeolghEAcXvo7SArDBUvqIk8j78_83NcYgqR3Gdzr7jncDhCLDl7INArVNvkhMyrzm3UBSQxDjbN_1Yn.9jaNVz6DtADMbKhPQ38QNAQAa9zKCxtGwNZAnv; landing-page=https%3A%2F%2Fthunderpick.io%2Fsports",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "same-origin",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"gameIds\":[10,11,12,13,14,15,16,17,18,24,25,26,27,28,29,30,31,43,44,45,46,47,48],\"competitionId\":null,\"country\":null,\"parentTournamentUrlAcronym\":null,\"matchesView\":\"normal\"}"
+  },
+  {
+    "url": "https://thunderpick.io/api/matches?matchesIds=2992058&matchesIds=3011341&matchesIds=3012467&matchesIds=3011029",
+    "method": "GET",
+    "headers": {
+      "host": "thunderpick.io",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://thunderpick.io/sports?list=Live",
+      "connection": "keep-alive",
+      "cookie": "__cf_bm=N_1Xu4Ho20GUOVpECQXy.UFBonoTI9Iv1j4YnMIXD6c-1794890404.867583-1.0.1.1-uRFAYRPuWgeolghEAcXvo7SArDBUvqIk8j78_83NcYgqR3Gdzr7jncDhCLDl7INArVNvkhMyrzm3UBSQxDjbN_1Yn.9jaNVz6DtADMbKhPQ38QNAQAa9zKCxtGwNZAnv; landing-page=https%3A%2F%2Fthunderpick.io%2Fsports",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "same-origin",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": null
+  },
+  {
+    "url": "https://thunderpick.io/api/matches?matchesIds=2992058&matchesIds=3012467",
+    "method": "GET",
+    "headers": {
+      "host": "thunderpick.io",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://thunderpick.io/sports?list=Live",
+      "connection": "keep-alive",
+      "cookie": "__cf_bm=N_1Xu4Ho20GUOVpECQXy.UFBonoTI9Iv1j4YnMIXD6c-1794890404.867583-1.0.1.1-uRFAYRPuWgeolghEAcXvo7SArDBUvqIk8j78_83NcYgqR3Gdzr7jncDhCLDl7INArVNvkhMyrzm3UBSQxDjbN_1Yn.9jaNVz6DtADMbKhPQ38QNAQAa9zKCxtGwNZAnv; landing-page=https%3A%2F%2Fthunderpick.io%2Fsports",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "same-origin",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": null
+  },
+  {
+    "url": "https://thunderpick.io/api/matches",
+    "method": "GET",
+    "headers": {
+      "host": "thunderpick.io",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://thunderpick.io/sports?list=Live",
+      "connection": "keep-alive",
+      "cookie": "__cf_bm=N_1Xu4Ho20GUOVpECQXy.UFBonoTI9Iv1j4YnMIXD6c-1794890404.867583-1.0.1.1-uRFAYRPuWgeolghEAcXvo7SArDBUvqIk8j78_83NcYgqR3Gdzr7jncDhCLDl7INArVNvkhMyrzm3UBSQxDjbN_1Yn.9jaNVz6DtADMbKhPQ38QNAQAa9zKCxtGwNZAnv; landing-page=https%3A%2F%2Fthunderpick.io%2Fsports",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "same-origin",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": null
+  }
+]

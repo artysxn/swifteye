@@ -1,0 +1,317 @@
+{
+  "url": "https://www.m88.com/sports/M%20Sports%20Seamless?Domain=https:%2F%2Fwww.m88.com&category=0&sportsId=52&showHeader=true",
+  "title": "M88 Where Asia plays | Online Casino & Sports Betting",
+  "page_text": "DARK MODE LOGIN REGISTER HOME SPORTS HOT ESPORTS LIVE CASINO CASINO/FISHING LOTTERY P2P PROMOTIONS VIP EXCLUSIVES 17/11/2026 05:31 (GMT+1) We are committed to your account security. To enhance protection, we’re introducing a One-Time Password (OTP) feature. Log in, go to your profile, and enable OTP. This helps safeguard your personal information from unauthorized access Elevate your VIP experience! Play more, earn more rewards and avail our exclusive benefits. Only here at M88! Check out the new features at our Casino Slots Page: Hot Games and Game Filters, allowing you to find the games of your choice easily and more! Experience the thrill now! We are committed to your account security. To enhance protection, we’re introducing a One-Time Password (OTP) feature. Log in, go to your profile, and enable OTP. This helps safeguard your personal information from unauthorized access Elevate your VIP experience! Play more, earn more rewards and avail our exclusive benefits. Only here at M88! Check out the new features at our Casino Slots Page: Hot Games and Game Filters, allowing you to find the games of your choice easily and more! Experience the thrill now! APP REFER FRIEND Live Help English",
+  "odds_endpoints": [
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/data/leftmenu",
+      "status": 200,
+      "size": 46075,
+      "odds_like": true,
+      "sample": "{\"status\":1,\"data\":[{\"spid\":10,\"league_group\":\"\",\"c1x2DC_t\":187,\"c1x2DC_l\":16,\"c1x2DC_e\":486,\"cFGLG_e\":0,\"cFGLG_l\":0,\"cFGLG_t\":50,\"cFTFHCS_e\":0,\"cFTFHCS_l\":0,\"cFTFHCS_t\":50,\"cFTFHOE_e\":474,\"cFTFHOE_l\":1,\"cFTFHOE_t\":139,\"cFTFHTG_e\":0,\"cFTFHTG_l\":0,\"cFTFHTG_t\":50,\"cHDPOU_e\":497,\"cHDPOU_l\":18,\"cHDPOU_t\":231,\"cHTFT_e\":0,\"cHTFT_l\":0,\"cHTFT_t\":50,\"cMP_e\":339,\"cMP_l\":13,\"cMP_t\":187,\"cSP_e\":0,\"cSP_l\":0,\"cSP_t\":50,\"cTW_e\":70,\"cTW_t\":1,\"cTot\":{\"e\":907,\"t\":489,\"l\":31},\"cBBBG_l\":0,\"cBBBG_t\":11,\"cBBBG_e\":135,\"sub_menu\":[{\"spid\":10,\"league_group\":\"Bundesliga\",\"c1x2DC_t\":0,\"c1x2DC_l\":0,\"c1x2DC_e\":18,\"cFGLG_e"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/data/main",
+      "status": 200,
+      "size": 525299,
+      "odds_like": true,
+      "sample": "{\"status\":1,\"data\":[{\"spid\":\"52\",\"data\":[{\"spid\":\"52\",\"no_event\":\"52038320\",\"no_event_sort\":\"0\",\"event_name\":\"Dota 2 - 1win Essence|0|default|0|No Region\",\"no_partai\":\"15203919\",\"no_team_sort\":\"0\",\"match_date\":\"202611171800\",\"club_home_id\":\"52056498\",\"club_home\":\"PARIVISION\",\"club_away_id\":\"52069147\",\"club_away\":\"Froglings\",\"home_score\":\"0_0\",\"away_score\":\"0\",\"ev_round\":\"0\",\"live_timer\":\"\",\"home_pry\":\"0_0\",\"away_pry\":\"0_0\",\"multi_flags_1\":\"|0|N|0\",\"multi_flags_2\":\"0|0|N||0|0\",\"is_neutral\":\"N\",\"is_live\":\"0\",\"game_type_a\":\"0\",\"sub_partai_a\":\"1\",\"hdc_ori_a\":\"-1.5000\",\"hdc_display_a\":\"1.5|\",\"price"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/data/leftmenu",
+      "status": 200,
+      "size": 46075,
+      "odds_like": true,
+      "sample": "{\"status\":1,\"data\":[{\"spid\":10,\"league_group\":\"\",\"c1x2DC_t\":187,\"c1x2DC_l\":16,\"c1x2DC_e\":486,\"cFGLG_e\":0,\"cFGLG_l\":0,\"cFGLG_t\":50,\"cFTFHCS_e\":0,\"cFTFHCS_l\":0,\"cFTFHCS_t\":50,\"cFTFHOE_e\":474,\"cFTFHOE_l\":1,\"cFTFHOE_t\":139,\"cFTFHTG_e\":0,\"cFTFHTG_l\":0,\"cFTFHTG_t\":50,\"cHDPOU_e\":497,\"cHDPOU_l\":18,\"cHDPOU_t\":231,\"cHTFT_e\":0,\"cHTFT_l\":0,\"cHTFT_t\":50,\"cMP_e\":339,\"cMP_l\":13,\"cMP_t\":187,\"cSP_e\":0,\"cSP_l\":0,\"cSP_t\":50,\"cTW_e\":70,\"cTW_t\":1,\"cTot\":{\"e\":907,\"t\":489,\"l\":31},\"cBBBG_l\":0,\"cBBBG_t\":11,\"cBBBG_e\":135,\"sub_menu\":[{\"spid\":10,\"league_group\":\"Bundesliga\",\"c1x2DC_t\":0,\"c1x2DC_l\":0,\"c1x2DC_e\":18,\"cFGLG_e"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/data/main",
+      "status": 200,
+      "size": 525299,
+      "odds_like": true,
+      "sample": "{\"status\":1,\"data\":[{\"spid\":\"52\",\"data\":[{\"spid\":\"52\",\"no_event\":\"52038320\",\"no_event_sort\":\"0\",\"event_name\":\"Dota 2 - 1win Essence|0|default|0|No Region\",\"no_partai\":\"15203919\",\"no_team_sort\":\"0\",\"match_date\":\"202611171800\",\"club_home_id\":\"52056498\",\"club_home\":\"PARIVISION\",\"club_away_id\":\"52069147\",\"club_away\":\"Froglings\",\"home_score\":\"0_0\",\"away_score\":\"0\",\"ev_round\":\"0\",\"live_timer\":\"\",\"home_pry\":\"0_0\",\"away_pry\":\"0_0\",\"multi_flags_1\":\"|0|N|0\",\"multi_flags_2\":\"0|0|N||0|0\",\"is_neutral\":\"N\",\"is_live\":\"0\",\"game_type_a\":\"0\",\"sub_partai_a\":\"1\",\"hdc_ori_a\":\"-1.5000\",\"hdc_display_a\":\"1.5|\",\"price"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://www.m88.com/deploy-config.json",
+      "status": 200,
+      "size": 1686,
+      "odds_like": false,
+      "sample": "{\n  \"apiKey\": \"\",\n  \"gaTrackingCode\": \"\",\n  \"assetsPath\": \"m88\",\n  \"assetsQueryString\": \"\",\n  \"gamesThumbsBaseUrl\": \"\",\n  \"p2pHotGamesThumbsBaseUrl\": \"\",\n  \"p2pOtherGamesThumbsBaseUrl\": \"\",\n  \"pgSlotsHotGamesThumbsBaseUrl\": \"\",\n  \"gamesThumbsUrlSuffix\": \"\",\n  \"longVersion\": \"\",\n  \"gtmId\": \"\",\n  \"cmsSlugPostfix\": \"man\",\n  \"brandId\": 2,\n  \"desktopPortalId\": 1,\n  \"mobilePortalId\": 2,\n  \"affiliateDataExpiryOffset\": 168,\n  \"brandName\": \"M88\",\n  \"supportedLanguages\": \"en-US,zh-CN,id-ID,th-TH,vi-VN\",\n  \"supportedCountries\": \"WORLD,CN,ID,MY,TH,VN\",\n  \"airshipEmailApiBaseUrl\": \"https://airship.36aid.co"
+    },
+    {
+      "url": "https://www.m88.com/assets/data/seo/seo-domains.json",
+      "status": 200,
+      "size": 14830,
+      "odds_like": false,
+      "sample": "{\n  \"globalExclusions\": [\n    \"/account\",\n    \"/reset-password\",\n    \"/cashier\",\n    \"/demo-lobby\",\n    \"/promotion-details-page\",\n    \"/game-exclusion-list\"\n  ],\n  \"globalSeoContent\": {\n    \"home.id-ID.html\": {\n      \"collapsable\": false,\n      \"position\": \"footer\"\n    },\n    \"home.th-TH.html\": {\n      \"collapsable\": false,\n      \"position\": \"footer\"\n    },\n    \"home.vi-VN.html\": {\n      \"collapsable\": false,\n      \"position\": \"footer\"\n    },\n    \"home.en-US.html\": {\n      \"collapsable\": false,\n      \"position\": \"footer\"\n    },\n    \"home.zh-CN.html\": {\n      \"collapsable\": false,\n      \"posit"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/airship/airship.config.json",
+      "status": 200,
+      "size": 280,
+      "odds_like": false,
+      "sample": "{\n  \"airshipAppKey\": \"uF5aD7hbTgCrMl0jwJzPpw\",\n  \"airshipToken\": \"MTp1RjVhRDdoYlRnQ3JNbDBqd0p6UHB3OlFlLWI3Tm5McU1kbkczRlR5YkxRZVlHcmYyNlRtcUhsU29lSlh4T0xBb1k\",\n  \"airshipValidPublicKey\": \"BER6g2td1RpnwX776jdafzJph69XjpwmDyFYMrRBjcJenuNWqSAKv8El5e-F6yfYZrLshPWOqLEqjE-_83N3oSc=\"\n}\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/mobile/mobile-page-config.json",
+      "status": 200,
+      "size": 238,
+      "odds_like": false,
+      "sample": "{\n  \"enabled\": true,\n  \"androidUrl\": \"https://mobileresource.rk258.com/native/m88-app/installer/m88-release-global-v3.51.1350-1351.apk\",\n  \"iosUrl\": \"https://mobileresource.manstg.com/native/m88-app/installer/M88_STG_Asia_3.0.1705.ipa\"\n}\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/chat/chat-vip-mapping.json",
+      "status": 200,
+      "size": 559,
+      "odds_like": false,
+      "sample": "{\n  \"vipLevelMappings\": {\n    \"VIP - Bronze - V10\": \"VIP\",\n    \"VIP - Silver - V20\": \"VIP\",\n    \"VIP - Gold - V30\": \"VIP\",\n    \"VIP - Platinum - V40\": \"VIP\",\n    \"VIP - Diamond - V50\": \"VIP\",\n    \"VIP - Elite - V60\": \"VIP\",\n    \"Gold - V30\": \"VIP\",\n    \"Platinum - V40\": \"VIP\",\n    \"Diamond - V50\": \"VIP\",\n    \"New Player - R10\": \"nonVIP\",\n    \"Normal - R20\": \"nonVIP\",\n    \"Verified - R30\": \"nonVIP\",\n    \"Premium - R40\": \"nonVIP\",\n    \"Retail - R10\": \"nonVIP\",\n    \"Premium - R50\": \"nonVIP\",\n    \"Bronze - R10\": \"nonVIP\",\n    \"Silver - R50\": \"nonVIP\"\n  }\n}\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/tracking/matomo/matomo-domain-config.en-US.json",
+      "status": 200,
+      "size": 129,
+      "odds_like": false,
+      "sample": "{\n  \"www.m88.com\": true,\n  \"www.m88vp1.com\": true,\n  \"www.m88vp8.com\": true,\n  \"www.m88vre.com\": true,\n  \"www.msonsj.com\": true\n}"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/seo/search-engines-list.json",
+      "status": 200,
+      "size": 161,
+      "odds_like": false,
+      "sample": "[\n  \"google\",\n  \"bing\",\n  \"yahoo\",\n  \"baidu\",\n  \"yandex\",\n  \"duckduckgo\",\n  \"naver\",\n  \"daum\",\n  \"sogou\",\n  \"ecosia\",\n  \"ask.com\",\n  \"aol.com\",\n  \"coccoc.com\"\n]\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/tracking/matomo/www.m88.com/matomo-configuration.en-US.json",
+      "status": 200,
+      "size": 123,
+      "odds_like": false,
+      "sample": "{\n  \"TrackingId\": \"4\",\n  \"ContainerId\" : \"ySJseWXy\",\n\t\"SiteCategory\": \"M88 - Main Site - All\",\n\t\"MatomoUrl\": \"infana.net\"\n}"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/header/macro-menu/macro-menu-links.en-US.json",
+      "status": 200,
+      "size": 45099,
+      "odds_like": false,
+      "sample": "{\n  \"CNY\": {\n    \"sports\": {\n      \"rebate\": {\n        \"id\": \"rebate\",\n        \"url\": \"/promotions\",\n        \"image\": \"rebate_sports_1_en-US.webp\"\n      },\n      \"links\": [\n        {\n          \"id\": \"BTiCNY\",\n          \"url\": \"/sports/Bsports\",\n          \"queryParams\": {\n            \"languageCode\": \"en-US\"\n          },\n          \"image\": \"bti_rebate1_cny_EN.webp\"\n        },\n        {\n          \"id\": \"mSports\",\n          \"url\": \"/sports/M Sports Seamless\",\n          \"queryParams\": {\n            \"noIframe\": \"true\",\n            \"Domain\": \"{{CURRENT_HOSTNAME}}\"\n          },\n          \"image\": \"msp"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/header/navigation-menu/navigation-links.en-US.json",
+      "status": 200,
+      "size": 8888,
+      "odds_like": false,
+      "sample": "{\n  \"MYR\": [\n    {\n      \"id\": \"home\",\n      \"name\": \"Home\",\n      \"url\": \"/\",\n      \"icon\": \"home.svg\",\n      \"iconActive\": \"home-active.svg\"\n    },\n    {\n      \"id\": \"sports\",\n      \"name\": \"Sports\",\n      \"url\": \"/sportsbook\",\n      \"icon\": \"sports.svg\",\n      \"iconActive\": \"sports-active.svg\",\n      \"tag\": \"Hot\"\n    },\n    {\n      \"id\": \"esports\",\n      \"name\": \"ESports\",\n      \"url\": \"/esports\",\n      \"icon\": \"e-sports.svg\",\n      \"iconActive\": \"e-sports-active.svg\"\n    },\n    {\n      \"id\": \"live-casino\",\n      \"name\": \"Live Casino\",\n      \"url\": \"/livecasino\",\n      \"icon\": \"live-casino."
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/sidenav/navigation-menu.en-US.json",
+      "status": 200,
+      "size": 12950,
+      "odds_like": false,
+      "sample": "{\n  \"MYR\": {\n    \"sideNavigationLinks\": [\n      {\n        \"id\": \"home\",\n        \"name\": \"Home\",\n        \"url\": \"/\",\n        \"icon\": \"home.svg\"\n      },\n      {\n        \"id\": \"sports\",\n        \"name\": \"Sports\",\n        \"url\": \"/sportsbook\",\n        \"icon\": \"sports.svg\"\n      },\n      {\n        \"id\": \"esports\",\n        \"name\": \"E-Sports\",\n        \"url\": \"/esports\",\n        \"icon\": \"esports.svg\"\n      },\n      {\n        \"id\": \"livecasino\",\n        \"name\": \"Live Casino\",\n        \"url\": \"/livecasino\",\n        \"icon\": \"live-casino.svg\"\n      },\n      {\n        \"id\": \"casino\",\n        \"name\": \"Casino"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/header/logo/logo-config.json",
+      "status": 200,
+      "size": 734,
+      "odds_like": false,
+      "sample": "{\n  \"CNY\": {\n    \"desktop\": \"assets/logo/mlogochina-desktop_cn-top-5-league-with-tagline-version-2026.svg\",\n    \"mobile\": \"assets/logo/mlogochina-mobile_cn-top-5-league-with-tagline-version-2026.svg\"\n  },\n  \"VND\": {\n    \"desktop\": \"assets/logo/mlogoviet-desktop_vn-slogan.svg\",\n    \"mobile\": \"assets/logo/mlogoviet-mobile_vn-slogan.svg\"\n  },\n  \"IDR\": {\n    \"desktop\": \"assets/logo/mlogoindo-desktop.svg?v=8\",\n    \"mobile\": \"assets/logo/mlogoindo-mobile.svg?v=8\"\n  },\n  \"THB\": {\n    \"desktop\": \"assets/logo/mlogo-thai-epl-theme.svg?v=8\",\n    \"mobile\": \"assets/logo/mlogo-thai-epl-theme-mobile.svg?v=8\""
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/sidenav/welcome-bonus.en-US.json",
+      "status": 200,
+      "size": 88,
+      "odds_like": false,
+      "sample": "{\n  \"All\": {\n    \"title\": \"188% WELCOME BONUS\",\n    \"subtitle\": \"FOR NEW PLAYERS\"\n  }\n}\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/animated-widget/configs/animated-widget.json",
+      "status": 200,
+      "size": 806,
+      "odds_like": false,
+      "sample": "{\n  \"MYR\": {\n    \"url\": \"/slots-exclusive\",\n    \"target\": \"_blank\",\n    \"imageUrl\": \"assets/data/animated-widget/images/mahjong-wins-3-black-scatter.webp\"\n  },\n  \"CNY\": {\n    \"url\": \"https://mszuqiuwan.com/\",\n    \"target\": \"_blank\",\n    \"imageUrl\": \"assets/data/animated-widget/images/cny-backup.webp\"\n  },\n  \"IDR\": {\n    \"url\": \"/game/PG_65\",\n    \"target\": \"_blank\",\n    \"imageUrl\": \"assets/data/animated-widget/images/mahjong-ways.webp\"\n  },\n  \"VND\": {\n    \"url\": \"/promotions?id=17761\",\n    \"target\": \"\",\n    \"imageUrl\": \"assets/data/animated-widget/images/animated-msport-season-202627-unlock-wee"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/header/navigation-menu/navigation-links.en-US.json",
+      "status": 200,
+      "size": 8888,
+      "odds_like": false,
+      "sample": "{\n  \"MYR\": [\n    {\n      \"id\": \"home\",\n      \"name\": \"Home\",\n      \"url\": \"/\",\n      \"icon\": \"home.svg\",\n      \"iconActive\": \"home-active.svg\"\n    },\n    {\n      \"id\": \"sports\",\n      \"name\": \"Sports\",\n      \"url\": \"/sportsbook\",\n      \"icon\": \"sports.svg\",\n      \"iconActive\": \"sports-active.svg\",\n      \"tag\": \"Hot\"\n    },\n    {\n      \"id\": \"esports\",\n      \"name\": \"ESports\",\n      \"url\": \"/esports\",\n      \"icon\": \"e-sports.svg\",\n      \"iconActive\": \"e-sports-active.svg\"\n    },\n    {\n      \"id\": \"live-casino\",\n      \"name\": \"Live Casino\",\n      \"url\": \"/livecasino\",\n      \"icon\": \"live-casino."
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/header/news-info-line/news-info-line-config.json",
+      "status": 200,
+      "size": 8479,
+      "odds_like": false,
+      "sample": "{\r\n  \"en-US\": {\r\n    \"icon\": \"/assets/icons/icon-megaphone.svg\",\r\n    \"authorizedNews\": [\r\n      \"Please save our Help Site URL at www.m88help.com/en as an alternative link to contact our 24/7 Customer Support via Live Help. Our latest back-up URLs can also be obtained from this link.\",\r\n      \"We are committed to your account security. To enhance protection, we’re introducing a One-Time Password (OTP) feature. Log in, go to your profile, and enable OTP. This helps safeguard your personal information from unauthorized access\",\r\n      \"Elevate your VIP experience! Play more, earn more rewards a"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/chat/chat-vip-mapping.json",
+      "status": 200,
+      "size": 559,
+      "odds_like": false,
+      "sample": "{\n  \"vipLevelMappings\": {\n    \"VIP - Bronze - V10\": \"VIP\",\n    \"VIP - Silver - V20\": \"VIP\",\n    \"VIP - Gold - V30\": \"VIP\",\n    \"VIP - Platinum - V40\": \"VIP\",\n    \"VIP - Diamond - V50\": \"VIP\",\n    \"VIP - Elite - V60\": \"VIP\",\n    \"Gold - V30\": \"VIP\",\n    \"Platinum - V40\": \"VIP\",\n    \"Diamond - V50\": \"VIP\",\n    \"New Player - R10\": \"nonVIP\",\n    \"Normal - R20\": \"nonVIP\",\n    \"Verified - R30\": \"nonVIP\",\n    \"Premium - R40\": \"nonVIP\",\n    \"Retail - R10\": \"nonVIP\",\n    \"Premium - R50\": \"nonVIP\",\n    \"Bronze - R10\": \"nonVIP\",\n    \"Silver - R50\": \"nonVIP\"\n  }\n}\n"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/chat/live-person-prefix.en-US.json",
+      "status": 200,
+      "size": 26,
+      "odds_like": false,
+      "sample": "{\n  \"All\": \"chat-en-us\"\n}\n"
+    },
+    {
+      "url": "https://www.m88.com/api/portal/v1/globalization/geolocation-configuration/1",
+      "status": 200,
+      "size": 92,
+      "odds_like": false,
+      "sample": "{\"clientIP\":\"158.248.9.68\",\"countryCode\":\"NO\",\"defaultCurrency\":\"CNY\",\"languages\":[\"zh-CN\"]}"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/header/logo/logo-config.json",
+      "status": 200,
+      "size": 734,
+      "odds_like": false,
+      "sample": "{\n  \"CNY\": {\n    \"desktop\": \"assets/logo/mlogochina-desktop_cn-top-5-league-with-tagline-version-2026.svg\",\n    \"mobile\": \"assets/logo/mlogochina-mobile_cn-top-5-league-with-tagline-version-2026.svg\"\n  },\n  \"VND\": {\n    \"desktop\": \"assets/logo/mlogoviet-desktop_vn-slogan.svg\",\n    \"mobile\": \"assets/logo/mlogoviet-mobile_vn-slogan.svg\"\n  },\n  \"IDR\": {\n    \"desktop\": \"assets/logo/mlogoindo-desktop.svg?v=8\",\n    \"mobile\": \"assets/logo/mlogoindo-mobile.svg?v=8\"\n  },\n  \"THB\": {\n    \"desktop\": \"assets/logo/mlogo-thai-epl-theme.svg?v=8\",\n    \"mobile\": \"assets/logo/mlogo-thai-epl-theme-mobile.svg?v=8\""
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/tracking/third-party-components/exclusion_configuration.en-US.json",
+      "status": 200,
+      "size": 451,
+      "odds_like": false,
+      "sample": "{\n  \"components\": [\n    {\n      \"Name\": \"Admill\",\n      \"DisabledCountries\": [\"CN\"],\n      \"DisabledLanguages\": []\n    },\n    {\n      \"Name\": \"GoogleTagManager\",\n      \"DisabledCountries\": [\"CN\"],\n      \"DisabledLanguages\": []\n    },\n    {\n      \"Name\": \"Liveperson\",\n      \"DisabledCountries\": [\"CN\"],\n      \"DisabledLanguages\": [\"zh-CN\"]\n    },\n    {\n      \"Name\": \"Airship\",\n      \"DisabledCountries\": [],\n      \"DisabledLanguages\": []\n    }\n  ]\n}\n"
+    },
+    {
+      "url": "https://www.m88.com/assets/data/seo/page-schemas.en-US.json",
+      "status": 200,
+      "size": 4342,
+      "odds_like": false,
+      "sample": "{\n  \"home\": {\n    \"@context\": \"https://schema.org\",\n    \"@type\": \"Organization\",\n    \"@id\": \"https://www.m88.com/#organization\",\n    \"name\": \"M88\",\n    \"alternateName\": \"M88 Mansion\",\n    \"url\": \"https://www.m88.com/\",\n    \"logo\": {\n      \"@type\": \"ImageObject\",\n      \"url\": \"https://www.m88.com/~/static/images/chat/img_mansion_opengraph.jpeg\"\n    },\n    \"image\": \"https://www.m88.com/~/static/images/chat/img_mansion_opengraph.jpeg\",\n    \"description\": \"Play at M88 - Asia's best and most trusted betting platform. Enjoy live casino, sports betting, slots, lottery and keno with the best rewards.\""
+    },
+    {
+      "url": "https://www.m88.com/assets/data/seo/metatags.en-US.json",
+      "status": 200,
+      "size": 13562,
+      "odds_like": false,
+      "sample": "{\n  \"register\": {\n    \"title\": \"Register Your Accountt\",\n    \"description\": \"Play at M88 - Asia’s the best and the most trusted betting platform. Enjoy live casino, sports betting, slots, lottery and keno with the best rewards.\",\n    \"ogImage\": \"assets/registration/og-image.jpeg\",\n    \"ogImageAlt\": \"M88 Refer a Friend banner\",\n    \"ogImageWidth\": \"600\",\n    \"ogImageHeight\": \"600\"\n  },\n  \"login\": {\n    \"title\": \"Login to Your Account\",\n    \"description\": \"Log in to your M88 account to access your profile, manage your wallet, explore promotions, and continue your gaming experience securely.\"\n  }"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/tracking/google-analytics/GoogleTag-domain-config.en-US.json",
+      "status": 200,
+      "size": 2964,
+      "odds_like": false,
+      "sample": "{\n  \"www.m88.com\": true,\n  \"www.m88my2.com\": true,\n  \"www.m88topbetid.com\": true,\n  \"www.m88vntop88.com\": true,\n  \"www.m88vp1.com\": true,\n  \"www.m88vp8.com\": true,\n  \"www.m88vre.com\": true,\n  \"www.ms8flow.com\": true,\n  \"www.msclip.com\": true,\n  \"www.ms3916.com\": true,\n  \"www.m88sports.co\": true,\n  \"www.msneol.com\": true,\n  \"www.msbjet.com\": true,\n  \"www.msjgbl.com\": true,\n  \"www.ms1216.com\": true,\n  \"www.msgfpl.com\": true,\n  \"www.msccyu.com\": true,\n  \"www.ms1904.com\": true,\n  \"www.msqwyb.com\": true,\n  \"www.ms8bml.com\": true,\n  \"www.ms0625.com\": true,\n  \"www.ms7745.com\": true,\n  \"www.ms0543.com"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/raf/configs/raf-configuration.en-US.json",
+      "status": 200,
+      "size": 34687,
+      "odds_like": false,
+      "sample": "{\n  \"MYR\": {\n    \"joinBannerConfig\": {\n      \"title\": \"JOIN NOW & REFER YOUR FRIENDS TO M88\",\n      \"text\": \"EARN UP TO 88 MYR FOR EACH SUCCESSFUL REFERRAL\",\n      \"action\": \"join now\",\n      \"navigationUrl\": \"/register\",\n      \"backgroundImg\": \"assets/raf/images/banner-background.jpg\",\n      \"backgroundImgLarge\": \"assets/raf/images/world-large.png\",\n      \"accentImg\": \"assets/raf/images/accent-image.png\"\n    },\n    \"referBannerConfig\": {\n      \"title\": \"invite your friends via referral link\",\n      \"backgroundImg\": \"assets/raf/images/banner-background.jpg\",\n      \"backgroundImgLarge\": \"assets"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/tracking/google-analytics/www.m88.com/GoogleTag_default_configuration.en-US.json",
+      "status": 200,
+      "size": 94,
+      "odds_like": false,
+      "sample": "{\n  \"TrackingId\": \"\",\n  \"TrackingHeadId\": \"GTM-PKZWKB2L\",\n  \"TrackingBodyId\": \"GTM-PKZWKB2L\"\n}"
+    },
+    {
+      "url": "https://www.m88.com/api/portal/v1/prod-game/product",
+      "status": 200,
+      "size": 1297,
+      "odds_like": false,
+      "sample": "{\"lobbyUrl\":\"https://msports.m88.com/loader?t=p_LGmayWRvSKAq-nyTnCSWenXa5nHJDF1TX1T1TiQcQDfHUD2tOvC608cnPX0mjvyRfu1xyzyvPeuP0m9DtIknJuy9j1qjIpgOeQldMo6ognca_4Wl0t9jYD2LC4BgMVkXltngfcN2fPQp6ZfrFZtrLmN0HOOv6F6o-RR_9-tc70Punqh1kRsHirxH9cRwaqCJ6IATEOf0YxRwP5NIS411gLiKYhPJsV3xf6VZy55VPQDnjdussC_v2PcnDO9KnP51uO0FzJoDVUrkrmkP1pPl9unTF4b58uHnoyjjYmyS-_pdSB8DRCYZBWjZOGfToITA0JB7cRphKhxfxtf6_c1Hzxx4kRHGrFC0lJDijRZw_40Be7CF4z_XUlrGcIFPSvApYwOCW2UK1lM44UzncYfjnxlByBVRqFhrBAt9yqVqXeQ_08_3Ki4N_JO0BTlg4a--yJGGxaKF2bP9_NFUstwZ_4F6Uu4WXMX_DNgmS3XXVvaghe1gZEwD0WPpjTZxF2CKiRkF7IYqMmY1k57xyYFxWUeTgAaXda-MODlfQA96"
+    },
+    {
+      "url": "https://www.m88.com/api/portal/v1/globalization/geolocation-configuration/1",
+      "status": 200,
+      "size": 92,
+      "odds_like": false,
+      "sample": "{\"clientIP\":\"158.248.9.68\",\"countryCode\":\"NO\",\"defaultCurrency\":\"CNY\",\"languages\":[\"zh-CN\"]}"
+    },
+    {
+      "url": "https://pp-assets.ms0105.com/cmslibrary/m88/assets/data/tracking/affiliates/affiliates_config.json",
+      "status": 200,
+      "size": 13544,
+      "odds_like": false,
+      "sample": "{\r\n  \"m88xst.com\": {\r\n    \"RegisteredDomain\": \"www.m88xst.com\",\r\n    \"MarketingChannel\": \"Affiliate\",\r\n    \"CampaignName\": \"1\",\r\n    \"MarketingSource\": \"7345\",\r\n    \"ReferralURL\": \"https://record.cole8888.com\",\r\n    \"Btag\": \"SN050LeuGSUTZC94slbr9mNd7ZgqdRLk\"\r\n  },\r\n  \"playtiyu88.com\": {\r\n    \"RegisteredDomain\": \"www.playtiyu88.com\",\r\n    \"MarketingChannel\": \"Affiliate\",\r\n    \"CampaignName\": \"1\",\r\n    \"MarketingSource\": \"7670\",\r\n    \"ReferralURL\": \"https://affm5688.com/\",\r\n    \"Btag\": \"sQ3UAj0IfFBURo-rjP9CI2Nd7ZgqdRLk\"\r\n  },\r\n  \"tiyumz.com\": {\r\n    \"RegisteredDomain\": \"www.tiyumz.com\",\r\n    \"Ma"
+    },
+    {
+      "url": "https://wbcapi.m88prd.com/api/v1/auth/token",
+      "status": 200,
+      "size": 360,
+      "odds_like": false,
+      "sample": "{\"access_token\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwiYXVkIjoid2JjLXBvcnRhbC1nYXRld2F5LWFwaSIsInJvbGVzIjpbIlJPTEVfQVBJIiwiUk9MRV9SRUFEIl0sInNjb3BlIjpbXSwiaXNzIjoid2JjLXBvcnRhbC1nYXRld2F5IiwiZXhwIjoxNzk0ODkzNDc3LCJpYXQiOjE3OTQ4ODk4NzcsImNsaWVudF9pZCI6IndiYy1wb3J0YWwtcHJvZCJ9.jmEK2FV7zXZMObs0CvYmoLOZBAYROkruEqQlc3fYSgU\",\"expires_in\":3600,\"token_type\":\"Bearer\"}"
+    },
+    {
+      "url": "https://accdn.lpsnmedia.net/api/account/45859899/configuration/le-campaigns/zones?fields=id&fields=zoneValue&__d=22701",
+      "status": 200,
+      "size": 43701,
+      "odds_like": false,
+      "sample": "[{\"id\":1153814570,\"createdDate\":\"2020-03-24 08:53:05\",\"modifiedDate\":\"2020-03-24 08:53:05\",\"name\":\"Offsite\",\"deleted\":false,\"zoneType\":2,\"mainZone\":false,\"capping\":0,\"mapping\":[{\"engagementSubType\":28},{\"engagementSubType\":30},{\"engagementSubType\":29}],\"isDeleted\":false},{\"id\":1153814670,\"createdDate\":\"2020-03-24 08:53:05\",\"modifiedDate\":\"2020-03-24 08:53:05\",\"name\":\"Proactive Overlay\",\"deleted\":false,\"zoneType\":1,\"mainZone\":true,\"capping\":0,\"mapping\":[{\"engagementSubType\":0},{\"engagementSubType\":1},{\"engagementSubType\":8},{\"engagementSubType\":9},{\"engagementSubType\":13},{\"engagementSubType\":2"
+    },
+    {
+      "url": "https://accdn.lpsnmedia.net/api/account/45859899/configuration/setting/accountproperties?__d=51039",
+      "status": 200,
+      "size": 8540,
+      "odds_like": false,
+      "sample": "[{\"id\":\"messaging.ios.sdk.min.version\",\"createdDate\":\"2017-01-10 07:53:09\",\"modifiedDate\":\"2023-01-22 16:54:16\",\"type\":2,\"propertyValue\":{\"value\":\"1.1.36\"},\"deleted\":false},{\"id\":\"nbc.integrations.adobe.analytics\",\"createdDate\":\"2023-10-13 03:07:36\",\"modifiedDate\":\"2023-10-13 03:07:42\",\"type\":2,\"propertyValue\":{\"value\":\"false\"},\"deleted\":false},{\"id\":\"messaging.audio.sharing.enabled\",\"createdDate\":\"2020-09-02 07:53:03\",\"modifiedDate\":\"2023-10-13 03:07:42\",\"type\":2,\"propertyValue\":{\"value\":\"false\"},\"deleted\":false},{\"id\":\"messaging.file.sharing.blurAllConversationImages\",\"createdDate\":\"2023-10-"
+    },
+    {
+      "url": "https://wbcapi.m88prd.com/api/v1/global-portal-configs?locale=en-US&populate=portal_Id&portalId=1",
+      "status": 200,
+      "size": 6925,
+      "odds_like": false,
+      "sample": "{\"data\":[{\"id\":31,\"documentId\":\"orh67f9qw0nocq557iv9lezf\",\"parameters\":{\"P2P\":\"P2P\",\"Pts\":\"Pts\",\"City\":\"City\",\"Earn\":\"Earn\",\"Gold\":\"Gold\",\"Bronze\":\"Bronze\",\"Locked\":\"Locked\",\"SPORTS\":\"SPORTS\",\"Silver\":\"Silver\",\"points\":\"points\",\"status\":\"status\",\"Country\":\"Country\",\"Diamond\":\"Diamond\",\"ESPORTS\":\"ESPORTS\",\"Included\":\"Included\",\"Platinum\":\"Platinum\",\"Postcode\":\"Postcode\",\"You have\":\"You have\",\"Claim now\":\"Claim now\",\"Full Name\":\"Full Name\",\"VIP badge\":\"VIP badge\",\"LIVE CASINO\":\"LIVE CASINO\",\"Redeem item\":\"Redeem item\",\"Enter Number\":\"Enter Number\",\"KENO & LOTTO\":\"KENO & LOTTO\",\"My VIP level\":\"My"
+    },
+    {
+      "url": "https://accdn.lpsnmedia.net/api/account/45859899/configuration/domainprotection/refererrestrictions?__d=29694",
+      "status": 200,
+      "size": 95,
+      "odds_like": false,
+      "sample": "{\"error\":\"The requested resource could not be found but may be available again in the future.\"}"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/initconfig",
+      "status": 200,
+      "size": 458,
+      "odds_like": false,
+      "sample": "{\"status\":1,\"data\":{\"bbbg_url\":\"https://mansion88.betstream.betgenius.com/betstream-view/page/auth-betbuilder/betbuilder?url=mansion88-prod-gen2.sportcastlive.com\\u0026key={0}\\u0026brand={1}\\u0026culture={2}\\u0026ConsumerFixtureId={3}\",\"show_header\":true,\"sb_url\":\"https://product.{domain}/Main/Sports/msports/frames.aspx\",\"direct_old_version\":true,\"show_jackpot\":false,\"show_laliga\":true,\"show_graphyte\":false,\"hide_sport\":{\"59\":true},\"mtm_package\":\"PRD\"}}\n"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/data/matomoconfig",
+      "status": 200,
+      "size": 199,
+      "odds_like": false,
+      "sample": "{\"status\":1,\"data\":{\"global\":1,\"event\":{\"BET_LIST_MINI\":1,\"CATEGORY\":1,\"ENTRY_PAGES\":1,\"FEATURES\":1,\"MAIN_PAGE\":1,\"MY_BET\":1,\"PLACE_BET\":1,\"PROMOTION\":1,\"QUICK_LINKS\":1,\"SETTINGS\":1,\"TIME_SLOT\":1}}}\n"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/sport/top?currency=MYR",
+      "status": 200,
+      "size": 174,
+      "odds_like": false,
+      "sample": "{\"status\":1,\"data\":{\"list_sport\":[10,57,12,58,11,16,32,52,60,22,26,53,54,55,56,18,19,20,21,15,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,97,59],\"display_list\":5}}\n"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/M88S/data/main",
+      "status": 200,
+      "size": 48,
+      "odds_like": false,
+      "sample": "{\"status\":1,\"data\":[{\"spid\":\"52\",\"data\":null}]}\n"
+    },
+    {
+      "url": "https://ause1.idp.liveperson.net/api/account/45859899/anonymous/authorize?__d=48596",
+      "status": 200,
+      "size": 678,
+      "odds_like": false,
+      "sample": "{\"token\":\"eyJraWQiOiJ1bmEtMTMtMDUtMTciLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiI3NDY1M2VjNy01MGYyLTQwYzItYTUzZS1jNzUwZjJmMGMyYTQiLCJhdWQiOiJhY2M6NDU4NTk4OTkiLCJhY3IiOiIwIiwiaXNzIjoiaHR0cHM6XC9cL2lkcC5saXZlcGVyc29uLm5ldCIsImV4cCI6MTc5NDg5MDQ4MSwiaWF0IjoxNzk0ODg5ODgxLCJqdGkiOiIwZDU0YzMwOC1lYzQ5LTRmMGEtOTRjMy0wOGVjNDkxZjBhNDEifQ.QKEg1m1j9ZAE99BWsf8_5ECF-L6Dvgda_eakUIEo2zxz1OBPbVPOND20wGC9J55Cdem7lOHAnPQ7o8EC02Ew8Aj_tYoxmVlFi_zHeHVNxu7Elh2Ed5ymfzEqyCm5kFrlp-Dus3TcE9NI3ofr5zYkBDAzGlwPwxcY0XO0zipOuLJ5bD5c7BkedYEtoy6H3MwrRHa_ptBfvqYAiSzy1SIxwF11MaaYeQWkCIjLvNxg-WPHEUOkhvKtkXXCNaZYWZqaikFo8pe-9w"
+    },
+    {
+      "url": "https://msports.m88.com/api/v1/data/matomoconfig",
+      "status": 200,
+      "size": 199,
+      "odds_like": false,
+      "sample": "{\"status\":1,\"data\":{\"global\":1,\"event\":{\"BET_LIST_MINI\":1,\"CATEGORY\":1,\"ENTRY_PAGES\":1,\"FEATURES\":1,\"MAIN_PAGE\":1,\"MY_BET\":1,\"PLACE_BET\":1,\"PROMOTION\":1,\"QUICK_LINKS\":1,\"SETTINGS\":1,\"TIME_SLOT\":1}}}\n"
+    }
+  ]
+}

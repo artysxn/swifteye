@@ -1,0 +1,106 @@
+{
+  "url": "https://gg.bet/no/live",
+  "title": "Live betting: spill på sport i sanntid hos GG.BET",
+  "page_text": "Installer Andoid-appen LAST NED Innlogging Registrer deg Søk For Deg Populært Football Counter-Strike Tennis Valorant American Football Aussie Rules Badminton Basketball Basketball 3x3 Basketball esports Boxing Chess Cricket Darts Dota 2 Football esports Formula 1 Futsal Handball Ice Hockey King of Glory League of Legends MMA Overwatch PUBG Rugby Union Snooker Specials Table Tennis Volleyball Water Polo Ice Hockey esports Floorball Sumo Bandy WarCraft III Crossfire Alle Direkte 1h 6h 12h NHL 3 Periode 19:36 Utah Mammoth Vancouver Canucks 2 0 1 3 0 0 Stilling 0 1 1x2 Utah Mammoth 3.19 Draw 1.99 Vancouver Canucks 3.42 Handicap +0.5 1.76 -0.5 2 Total Over 3.5 - Under 3.5 - World Cup. EA FC 25. (2x4 min) 1 Tid 31:27 Denmark USA 1 0 1 Stilling 0 1 1x2 Denmark 4.46 Draw 3.8 USA 1.61 Handicap +1.5 1.86 -1.5 1.88 Total Over 3.5 1.65 Under 3.5 2.15 CROSSFIRE Season 7 BO3: Mirage R: 16/24 Overtake Sector Endless Esports Anb 16 19 Mrg 11 4 Stilling 0 1 Map 2 - Round winner Overtake Sector 20 2.18 Endless Esports 20 1.64 Wanted Goons DETONATE Stilling 0 1 Winner Wanted Goons 3.12 DETONATE 1.33 Map 2 - Total rounds Over 21.5 1.97 Under 21.5 1.77 Italy. Seria A. EA FC 25. (2x4 min) 1 Tid 46:00 AS Roma Como 1 0 0 Stilling 0 0 1x2 AS Roma 2.76 Draw 2.58 Como 2.79 Total Over 1.5 2.2 Under 1.5 1.62 Challenger. Sydney. Men Singles Sett 2 August Holmgren Dhakshineswar Suresh 1 7 (7) 6 (3) 2 1 0 P 0 0 Stilling 1 0 Winner August Holmgren 1.12 Dhakshineswar Suresh 5.62 Game handicap -3.5 2.01 +3.5 1.75 Total games Over 25.5 2.14 Under 25.5 1.66 Valorant Random Match Kart 1 R: 6 Team eggsterr Players 1 0 5 Stilling 0 0 Winner Team Eggsterr 5.25 Players 1.14 Map 1 - Total rounds Over 19.5 1.89 Under 19.5 1.85 Challenger. Sydney. Men Singles Sett 2 Li Tu James McCabe 1 6 4 2 0 3 P 40 15 Stilling 1 0 Winner Li Tu 1.86 James McCabe 1.87 Game handicap +2.5 1.79 -2.5 1.96 Total games Over 28.5 1.91 Under 28.5 1.83 Valorant Random Match Kart 1 R: 22 Team ichinosetohr Players 1 12 9 Stilling 0 0 W",
+  "odds_endpoints": [],
+  "all_json_endpoints": [
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 101,
+      "odds_like": false,
+      "sample": "{\"data\":{\"geoIpLocation\":{\"countryIsoCode\":\"no\",\"cityName\":\"Oslo\",\"__typename\":\"GeoIpLocationType\"}}}"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 243,
+      "odds_like": false,
+      "sample": "{\"data\":{\"analyticsSettings\":{\"reportServiceUrl\":\"\\/\\/stat.gg.bet\\/font.png?project=ggbet\\u0026uniqueId=06ab26b2-dcdf-48aa-ba8d-53fc0b22614f\\u0026isAuth=0\\u0026action=visit\\u0026refCode=\\u0026affData=\",\"__typename\":\"AnalyticsSettingsResult\"}}}"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 4331,
+      "odds_like": false,
+      "sample": "{\"data\":{\"localeSwitcher\":{\"titles\":[{\"locale\":\"nb-no\",\"isoLocale\":\"nb_NO\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"en\",\"isoLocale\":\"en_US\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"cn\",\"isoLocale\":\"zh_CN\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"pl\",\"isoLocale\":\"pl_PL\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"ja\",\"isoLocale\":\"ja_JP\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"uk-ua\",\"isoLocale\":\"uk_UA\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"es\",\"isoLocale\":\"es_ES\",\"__typename\":\"LocaleSwitcherTitleType\"},{\"locale\":\"en-ca\",\"isoLocale\":\"e"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 81,
+      "odds_like": false,
+      "sample": "{\"data\":{\"dynamicRouteByPath\":{\"entity\":null,\"__typename\":\"dynamicRouteResult\"}}}"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 20521,
+      "odds_like": false,
+      "sample": "{\"data\":{\"bettingSettings\":{\"sports\":[{\"id\":\"bowling\",\"type\":\"classic_sports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"esports_the_finals\",\"type\":\"esports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"esports_2_xko\",\"type\":\"esports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"pickleball\",\"type\":\"classic_sports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"esports_geo_guessr\",\"type\":\"esports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"esports_deadlock\",\"type\":\"esports\",\"iconId\":\"\",\"__typename\":\"BettingSportImpl\"},{\"id\":\"olympic_games_2024\",\"type\":\"class"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 1474,
+      "odds_like": false,
+      "sample": "{\"data\":{\"widgetByName\":{\"template\":\"{\\n\\u0022buttons\\u0022: [\\n{\\n\\u0022id\\u0022: \\u0022search\\u0022,\\n\\u0022title\\u0022: \\u0022S\\u00f8k\\u0022,\\n\\u0022icon\\u0022: \\u0022media:9c9f98a99e8a27bca1c1ae546908ed41243fa4cfac\\u0022,\\n\\u0022action\\u0022: { \\u0022type\\u0022: \\u0022modal\\u0022, \\u0022target\\u0022: \\u0022search\\u0022 },\\n\\u0022gaEventCode\\u0022: \\u0022categorizer_search_click\\u0022\\n},\\n{\\n\\u0022id\\u0022: \\u0022favorites\\u0022,\\n\\u0022title\\u0022: \\u0022Favoritter\\u0022,\\n\\u0022icon\\u0022: \\u0022media:48d9774c7b480f3e8ed2a6155ba13eaa05fa1c1730\\u0022,\\n\\u0022action\\u0022: { \\u0022type\\u00"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 3772,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"keyValuePair\":{\"value\":\"{\\n    \\u0022desktop\\u0022: [\\n        \\u0022\\/player\\/kyc\\u0022,\\n        \\u0022\\/player\\/profile-deposit\\u0022,\\n        \\u0022\\/player\\/profile-cashier-withdraw\\u0022,\\n        \\u0022\\/auth\\/register\\u0022,\\n        \\u0022\\/auth\\/signin\\u0022,\\n        \\u0022\\/player\\/aml-form\\u0022,\\n        \\u0022\\/player\\/welcome-bonus\\u0022,\\n        \\u0022\\/player\\/confirm-email\\u0022,\\n        \\u0022\\/player\\/verification-phone\\u0022,\\n        \\u0022\\/sports\\/match\\u0022,\\n        \\u0022\\/esports\\/match\\u0022,\\n        \\u0022\\/results\\u0022,\\n        \\u0022\\/casino\\/"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 7434,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"localeMenu\":{\"id\":\"menu:footer-betting-esports\",\"locale\":\"nb-no\",\"items\":[{\"url\":\"dota2\",\"anchor\":\"Dota 2\",\"status\":\"enabled\",\"imageId\":\"743055a22fe74f9a87983fda3992417f9d94060cc1\",\"expanded\":false,\"__typename\":\"LocalizedMenuItemImpl\"},{\"url\":\"starcraft2\",\"anchor\":\"StarCraft 2\",\"status\":\"enabled\",\"imageId\":\"media:7985c169e16dc9e847e9153ce010ce8fb52d0dbc5c\",\"expanded\":false,\"__typename\":\"LocalizedMenuItemImpl\"},{\"url\":\"counter-strike\",\"anchor\":\"Counter-Strike\",\"status\":\"enabled\",\"imageId\":\"media:65d3b206c4fb20fdc67ba340bee095735023fe3690\",\"expanded\":false,\"__typename\":\"LocalizedMenuI"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 125,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"keyValuePair\":{\"value\":\"{\\u0022showInterval\\u0022: 30, \\u0022bonusTTL\\u0022: 180}\",\"__typename\":\"KeyValueType\"}}}]"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 165,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"keyValuePair\":{\"value\":\"uk,ge,hu,es,ro,fr,fi,no:+44 (203) 769-19-62|pt,cn,jp,ru:+44 (203) 769-19-62|pl:+48 (45) 363-05-55\",\"__typename\":\"KeyValueType\"}}}]"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 22,
+      "odds_like": false,
+      "sample": "{\"data\":{\"user\":null}}"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 205,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"keyValuePair\":{\"value\":\"1\",\"__typename\":\"KeyValueType\"}}},{\"data\":{\"keyValuePair\":{\"value\":\"1\",\"__typename\":\"KeyValueType\"}}},{\"data\":{\"keyValuePair\":{\"value\":\"1\",\"__typename\":\"KeyValueType\"}}}]"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 146,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"widgetByName\":{\"template\":\"%android: Installer Andoid-appen%\\n%ios:Installer iOS-appen%\",\"fields\":[],\"__typename\":\"WidgetLocalized\"}}}]"
+    },
+    {
+      "url": "https://gg.bet/graphql",
+      "status": 200,
+      "size": 2031,
+      "odds_like": false,
+      "sample": "[{\"data\":{\"banners\":[{\"id\":\"banner:welcome-bonus-2025-m\",\"title\":\"\",\"subtitle\":\"\",\"imageHref\":\"\\/betting-welcome-bonus\",\"buttonText\":\"\",\"buttonHref\":\"\",\"imageSrc\":\"\\/file\\/media:c1237281a6490c062da45dc78b91ad04a1517428bb\",\"__typename\":\"DecodedBannerImpl\"},{\"id\":\"banner:sport-tournament-p2-november-26-november-26-m\",\"title\":\"\",\"subtitle\":\"\",\"imageHref\":\"\\/promotions\\/betting\\/tournaments\",\"buttonText\":\"\",\"buttonHref\":\"\",\"imageSrc\":\"\\/file\\/media:2160f982dc10b9658055dae3eb2afe877f1632e8ce\",\"__typename\":\"DecodedBannerImpl\"},{\"id\":\"banner:nba-promo-november-26-m\",\"title\":\"\",\"subtitle\":\"\",\"imageHre"
+    }
+  ]
+}

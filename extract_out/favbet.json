@@ -1,0 +1,121 @@
+{
+  "url": "https://www.favbet.hr/en/live/all/",
+  "title": "Live sports betting on FavBet ⚡",
+  "page_text": "This website uses cookies This website uses cookies. We use cookies to personalize content and ads, provide social media features, and analyze our traffic. We also share information about your use of our Site with our social media, advertising and analytics partners who may combine it with other information you have provided to them or that they have collected from your use of their services. Cookies are small text files that websites can use to make the user experience more efficient. The law states that we can store cookies on your device if they are absolutely necessary for the operation of this site. We need your permission for all other types of cookies. This means that cookies that are categorized as necessary are processed on the basis of the Electronic Communications Act - Art. 43. paragraphs 2 and 4. All other cookies, which means those from the preferences and marketing categories, are processed on the basis of GDPR Art. 6 (1) (a) GDPR. This site uses different types of cookies. Some cookies are set by third-party services that appear on our pages. At any time, you can change or withdraw your consent on Cookie statement on our webpage. User information may be used forpersonalization of ads. Consent Selection Necessary cookies Functional cookies Analytics cookies Marketing Show details Allow all Allow selection Deny SPORTS LIVE CASINO LOTTERY HOT INSTANT GAMES ESPORTS ... BONUS PROMOTIONS FAVZONE LOG IN SIGN UP TOP LIVE ICE HOCKEY | USA | NHL 40:57 3rd P +17 Utah Mammoth Vancouver Canucks 0 1 0 0 1 3.35 X 2.95 2 2.30 SPORTS IN-PLAY NOW LIVE ALL SPORTS 18 TENNIS 10 BASKETBALL 4 ICE HOCKEY 1 TABLE TENNIS 3 LIVE Live calendar Payment system Need help? TENNIS (10) Match winner ATP CHALLENGER | KOBE, JAPAN 1 Match Winner 2 Ognjen Milic Maximus Jones 15 0 1 1 1 3 Started 3rd S 3.85 1.26 +14 Niels McDonald Keegan Smith 0 0 0 0 0 0 Prestarted 1st S 2.35 1.58 +12 ATP CHALLENGER | SYDNEY, AUSTRALIA 1 Match Winner 2 Derek Pham Hiroki Moriya 0 0 1 0 4 4 St",
+  "odds_endpoints": [
+    {
+      "url": "https://www.favbet.hr/service/plex/v1/desktop/en/siteSettings",
+      "status": 200,
+      "size": 66985,
+      "odds_like": true,
+      "sample": "{\"desktop\":{\"components\":{\"06c11f61-3a37-4edb-addd-b192557cdf41\":{\"target\":[\"nativeScreen\",\"page\",\"header\",\"footer\"],\"category\":\"General\",\"title\":\"Custom\",\"type\":\"smartico-icon\",\"id\":\"06c11f61-3a37-4edb-addd-b192557cdf41\",\"config\":{}},\"0c540433-2aba-4b8d-b142-640da0d39ecf\":{\"target\":[\"nativeScreen\",\"page\",\"header\",\"footer\"],\"category\":\"General\",\"title\":\"Custom\",\"type\":\"header-contact-info-with-custom-chat\",\"id\":\"0c540433-2aba-4b8d-b142-640da0d39ecf\",\"config\":{}},\"0e123df3-973b-402d-ba34-2b4dfcc22198\":{\"target\":[\"header\"],\"category\":\"General\",\"title\":\"Deposit Button\",\"type\":\"depositButton\",\"id\""
+    },
+    {
+      "url": "https://www.favbet.hr/service/plex/v1/desktop/en/translations",
+      "status": 200,
+      "size": 735201,
+      "odds_like": true,
+      "sample": "{\"balance.addwallet.walletone.amount\":\"Amount\",\"content.games.category.popular\":\"Popular casino games\",\"web.balance.deposithistory.filter.daterange_1\":\"Today and Yesterday\",\"header.userpopover.settings\":\"Settings\",\"sportsbook.events.stream.crash\":\"video unavailable\",\"teaser.month.sep\":\"Sep\",\"weekdays.thu\":\"Thu\",\"teaser.month.mayshort\":\"May\",\"games.tablegames\":\"table games\",\"personaloffice.filter.options.bonussport.status.wasnotactivated\":\"Expired\",\"club.playerdata.info.statuspoints\":\"Status points\",\"accountingmessages.accounting_error_130\":\"’Serial Number’ invalid\",\"accountingmessages.accounti"
+    },
+    {
+      "url": "https://www.favbet.hr/service/plex/v1/desktop/en/pages?pageUrl=live",
+      "status": 200,
+      "size": 22786,
+      "odds_like": true,
+      "sample": "[{\"pageUrl\":\"/live/calendar\",\"name\":\"calendar\",\"title\":\"calendar\",\"titleTranslation\":\"\",\"snippetId\":\"\",\"robots\":\"\",\"metaDescription\":\"\",\"userSegments\":[],\"canonicalTag\":[],\"backgroundImage\":\"\",\"backgroundColor\":\"\",\"layout\":{\"type\":\"threeColumnFullHd\",\"columns\":[[\"a232290d-0319-420a-9127-04273cd06261\",\"3c2358ec-2859-4f8c-b328-5e73f3ac99d8\",\"e5211677-a688-4c1b-85c1-c1e979ec326c\"],[\"8cca639b-16a8-41f7-b5bd-d8643d293d55\",\"87a81f59-38a7-47a8-b8c4-c0e0619dca30\",\"8182eb08-054b-47a8-8dce-4368e700c402\"],[\"e1dd4a96-e17f-4f7e-8c82-db6829c5d15a\"]],\"columnsWithIndependentScroll\":[],\"stickyComponents\":[\"e1d"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api/head_groups/",
+      "status": 200,
+      "size": 44485,
+      "odds_like": true,
+      "sample": "[{\"market_template_id\":1196,\"market_template_name\":\"Match Winner\",\"market_template_weight\":100,\"market_type_count\":0,\"market_type_id\":0,\"outcome_type_names\":[\"1\",\"2\"],\"result_type_id\":4,\"result_type_name\":\"Total score\",\"result_type_weight\":-1,\"sport_id\":89},{\"market_template_id\":5,\"market_template_name\":\"Match winner\",\"market_template_weight\":10,\"market_type_count\":0,\"market_type_id\":0,\"outcome_type_names\":[\"1\",\"2\"],\"result_type_id\":0,\"result_type_name\":\"Match (With ET)\",\"result_type_weight\":0,\"sport_id\":172},{\"market_template_id\":5,\"market_template_name\":\"Match winner\",\"market_template_weight"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api/top_live/",
+      "status": 200,
+      "size": 12602,
+      "odds_like": true,
+      "sample": "{\"events\":[{\"event_line_position\":6455,\"participants\":[{\"event_id\":43530950,\"event_participant_id\":164159186,\"participant_country_id\":15,\"participant_id\":834441,\"participant_logo_url\":null,\"participant_mark_default\":null,\"participant_mark_name\":null,\"participant_mark_short_name\":null,\"participant_name\":\"Utah Mammoth\",\"participant_number\":1,\"participant_type\":\"team\"},{\"event_id\":43530950,\"event_participant_id\":164159187,\"participant_country_id\":21,\"participant_id\":169200,\"participant_logo_url\":null,\"participant_mark_default\":true,\"participant_mark_name\":\"\",\"participant_mark_short_name\":\"\",\"part"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://www.favbet.hr/service/session_mng/session/create",
+      "status": 200,
+      "size": 30,
+      "odds_like": false,
+      "sample": "{\"data\":{},\"status\":\"success\"}"
+    },
+    {
+      "url": "https://www.favbet.hr/service/pds/v1/account/get",
+      "status": 400,
+      "size": 101,
+      "odds_like": false,
+      "sample": "{\"data\":{\"x-user-id\":\"NOT_INTEGER\"},\"error_code\":\"pds_-3\",\"message\":\"Wrong request\",\"status\":\"error\"}"
+    },
+    {
+      "url": "https://www.favbet.hr/bets/timezone/set/",
+      "status": 200,
+      "size": 11,
+      "odds_like": false,
+      "sample": "{\"ok\":3600}"
+    },
+    {
+      "url": "https://www.favbet.hr/service/segmentation/v3/abtests/get",
+      "status": 200,
+      "size": 40,
+      "odds_like": false,
+      "sample": "{\"status\":\"success\",\"data\":{\"items\":[]}}"
+    },
+    {
+      "url": "https://consentcdn.cookiebot.com/consentconfig/036ad14e-d534-497c-8381-ebdbe798270d/settings.json",
+      "status": 200,
+      "size": 611,
+      "odds_like": false,
+      "sample": "{\"widget\":{\"enabled\":false,\"position\":{\"position\":\"bottom-left\",\"distanceVerticalPx\":10,\"distanceHorizontalPx\":10},\"theme\":{\"closed\":{\"backgroundColor\":\"#000000\",\"foregroundColor\":\"#FFFFFF\"},\"opened\":{\"backgroundColor\":\"#FFFFFF\",\"foregroundColor\":\"#141414\",\"highlightColor\":\"#1032CF\",\"shadeColor\":\"#D6D6D6\",\"changeBackgroundColor\":\"#1032CF\",\"changeTextColor\":\"#FFFFFF\",\"changeBorderColor\":\"#1032CF\",\"withdrawBackgroundColor\":\"#FFFFFF\",\"withdrawTextColor\":\"#141414\",\"withdrawBorderColor\":\"#1032CF\",\"detailsBackgroundColor\":\"#F2F2F2\"}},\"content\":{\"cultures\":[\"en\",\"hr\"],\"default\":\"hr\",\"autodetectLangua"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+      "status": 200,
+      "size": 71,
+      "odds_like": false,
+      "sample": "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"hash\":[{\"operator_hash\":\"4c4b40\"}]}}"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+      "status": 200,
+      "size": 555,
+      "odds_like": false,
+      "sample": "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":[{\"event_count\":10,\"sport_id\":2,\"sport_name\":\"Tennis\",\"sport_short_name\":\"Tennis\",\"sport_slug\":\"tennis\",\"sport_weigh\":3},{\"event_count\":4,\"sport_id\":23,\"sport_name\":\"Basketball\",\"sport_short_name\":\"Basket-ll\",\"sport_slug\":\"basketball\",\"sport_weigh\":5},{\"event_count\":1,\"sport_id\":39,\"sport_name\":\"Ice Hockey\",\"sport_short_name\":\"Hockey\",\"sport_slug\":\"ice-hockey2\",\"sport_weigh\":11},{\"event_count\":3,\"sport_id\":48,\"sport_name\":\"Table Tennis\",\"sport_short_name\":\"Table Tennis\",\"sport_slug\":\"table-tennis\",\"sport_weigh\":12}]}"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+      "status": 200,
+      "size": 71,
+      "odds_like": false,
+      "sample": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"hash\":[{\"operator_hash\":\"4c7250\"}]}}"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+      "status": 200,
+      "size": 2947,
+      "odds_like": false,
+      "sample": "{\"id\":4,\"jsonrpc\":\"2.0\",\"result\":[{\"event_count\":726,\"sport_id\":1,\"sport_name\":\"Soccer\",\"sport_short_name\":\"Soccer\",\"sport_slug\":\"soccer\",\"sport_weigh\":1},{\"event_count\":152,\"sport_id\":2,\"sport_name\":\"Tennis\",\"sport_short_name\":\"Tennis\",\"sport_slug\":\"tennis\",\"sport_weigh\":2},{\"event_count\":108,\"sport_id\":23,\"sport_name\":\"Basketball\",\"sport_short_name\":\"Basket-ll\",\"sport_slug\":\"basketball\",\"sport_weigh\":3},{\"event_count\":31,\"sport_id\":20,\"sport_name\":\"Handball\",\"sport_short_name\":\"Handball\",\"sport_slug\":\"handball\",\"sport_weigh\":5},{\"event_count\":56,\"sport_id\":85,\"sport_name\":\"Esports\",\"sport_sh"
+    },
+    {
+      "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+      "status": 200,
+      "size": 67733,
+      "odds_like": false,
+      "sample": "{\"id\":13,\"jsonrpc\":\"2.0\",\"result\":[{\"event_line_position\":8339,\"participants\":[{\"event_id\":43534843,\"event_participant_id\":164177974,\"participant_country_id\":10,\"participant_id\":821237,\"participant_logo_url\":null,\"participant_mark_default\":null,\"participant_mark_name\":null,\"participant_mark_short_name\":null,\"participant_name\":\"Ognjen Milic\",\"participant_number\":1,\"participant_type\":\"athlete\"},{\"event_id\":43534843,\"event_participant_id\":164177975,\"participant_country_id\":10,\"participant_id\":567027,\"participant_logo_url\":null,\"participant_mark_default\":null,\"participant_mark_name\":null,\"particip"
+    },
+    {
+      "url": "https://www.favbet.hr/service/plex/v1/desktop/en/snippets?id=live.all.disclaimer-mob&id=widget.right&id=footer.nacini-placanja&id=footer-social-networks&id=footer-partner&id=footer.copyright&id=crutch.hide-brithday-date&id=footer.global-css",
+      "status": 200,
+      "size": 16118,
+      "odds_like": false,
+      "sample": "{\"footer.copyright\":\"<style>\\n    /* NEW COLOR*/\\n    .footer-copyright-text {\\n        font-size: 10px;\\n        color: #2C3969;\\n        opacity: .8;  \\n    }\\n    \\n    .dark .footer-copyright-text{\\n        color: #A6ACBD;\\n    }\\n    \\n    /* NEW class */\\n    .footer-all-right-reserved{\\n        font-size: 10px;\\n        color: #2C3969;\\n        font-weight: 600;\\n    }\\n    \\n    /* NEW margin */\\n    .footer-copyright-text, .copyright-list{\\n        margin: 0 0 24px 0;\\n    }\\n    \\n    .footer-copyright-img {\\n        margin-bottom: 16px;\\n    }\\n    \\n    /* NEW gap  */\\n    .copyrig"
+    }
+  ]
+}

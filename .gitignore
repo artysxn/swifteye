@@ -9,12 +9,6 @@
 *.log
 oddsfeed.toml
 
-# Python env and local experiments (not part of the service)
+# Python virtual env and caches
 .venv/
 __pycache__/
-*.py
-proxies.txt
-probe_results.json
-probe_shots/
-extract_out/
-cf_demo.png

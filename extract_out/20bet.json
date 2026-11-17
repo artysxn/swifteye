@@ -1,0 +1,219 @@
+{
+  "url": "https://20betz0ne.com/no/live?top=1",
+  "title": "Live Sportspill og Live Odds • I-spill betting på 20Bet",
+  "page_text": "MOBILAPP SPORTSSPILL NO LOGG INN REGISTRER DEG Topp Het Kombo Favoritter Økt Fotball vSoccer Basketball vBasketball Tennis Ishockey Bordtennis Baseball Cricket eSoccer Badminton CS2 AI Injustice 2 FIFA22 Penalty Golf Dota 2 League of Legends eBasketball Live (95) Topp Ligaer NHL 1 USA. USL 1 NCAA, Grunnserie 4 ATP Challenger Kobe, Japan Men Singles 1 ATP Challenger Sydney, Australia Men Singles 2 SRL Fall Invitational Osaka, JPN 2 UTR PTT Newport Beach Men 27 2 UTR PTT Newport Beach Women 27 3 LIVE TOPP HENDELSER Topp Hendelser NHL 1 X 2 U TOTAL O 40:35 3. periode0:00:10:0 Utah Mammoth 0 Vancouver Canucks 1 3.95 2.85 2.15 1.75 3.5 2.05 557 USA. USL 1 X 2 U TOTAL O 110:40 Pause i ekstraomganger0:01:10:10:1 New Mexico United 1 Sacramento Republic 2 20 NCAA, GRUNNSERIE 1 2 U TOTAL O 39:38 2. periode55:4054:31 Oregon State Beavers 109 East Texas A&M Lions 71 0 28:13 2. periode52:4922:15 UC San Diego Tritons 74 Texas Southern Tigers 64 9.5 1.9 189.5 1.75 83 30:53 2. periode44:3826:21 Saint Mary's Gaels 70 Portland State Vikings 59 10 1.75 169.5 1.8 51 04:00 a.m. 2. periode53:2022:23 UCLA Bruins 75 Long Beach State Beach 43 1.85 162.5 1.8 74 ATP CHALLENGER KOBE, JAPAN MEN SINGLES 1 2 U TOTAL O ‌ ATP CHALLENGER SYDNEY, AUSTRALIA MEN SINGLES 1 2 U TOTAL O ‌ ‌ SRL FALL INVITATIONAL OSAKA, JPN 1 2 U TOTAL O ‌ ‌ UTR PTT NEWPORT BEACH MEN 27 1 2 U TOTAL O ‌ ‌ UTR PTT NEWPORT BEACH WOMEN 27 1 2 U TOTAL O ‌ ‌ ‌ Vi bruker Informasjonskapsler - Informasjonskapsel policy. JEG GODTAR",
+  "odds_endpoints": [
+    {
+      "url": "https://20betz0ne.com/api/v2/translation/get?acceptLanguage=en-GB&p=0&pageUrl=%2Fno%2Flive%3Ftop%3D1&classificationsStrategy=2&classifications=db+column",
+      "status": 200,
+      "size": 297801,
+      "odds_like": true,
+      "sample": "{\"data\":{\"default\":{\"form\":{\"email\":\"E-post\",\"password\":\"Passord\",\"search currency\":\"S\\u00f8k valuta\",\"name\":\"Navn\",\"street and number\":\"Gate og nummer\",\"city\":\"By\",\"phone\":\"Telefon\",\"search\":\"S\\u00f8k\",\"new password\":\"Nytt passord\",\"main currency\":\"Hovedvaluta\",\"date of birth\":\"F\\u00f8dselsdato\",\"prefix\":\"Kode\",\"phone number\":\"Telefonnummer\",\"first name\":\"Fornavn\",\"last name\":\"Etternavn\",\"province\":\"Fylke\",\"street\":\"Full adresse\",\"postcode\":\"Postkode\",\"full name\":\"Fullt navn\",\"country\":\"Land\",\"post\\/zip code\":\"Postnummer\",\"other currencies\":\"Andre valutaer\",\"current password\":\"N\\u00e5v\\u00e6r"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/market-group-sorting/get-all?_trlang=no",
+      "status": 200,
+      "size": 92676,
+      "odds_like": true,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"rows\":{\"1013\":[{\"name\":\"Hoved\",\"order\":10,\"isLive\":false,\"isMain\":true,\"markets\":[1,11,16,18,2957,225,223,219,621,868,557,1091,557,1091,289,1090,289,1090,292,1084,262]},{\"name\":\"Poeng\",\"order\":10,\"isLive\":false,\"isMain\":false,\"markets\":[227,228,230,291,229,19,20,26,220,66,383,702,1034,660,190,242,503,440]},{\"name\":\"Hoved\",\"order\":10,\"isLive\":true,\"isMain\":true,\"markets\":[1,11,16,18,2957,225,223,219,621,868,557,1091,557,1091,289,1090,289,1090,292,1084,262]},{\"name\":\"Poeng\",\"order\":10,\"isLive\":true,\"isMain\":false,\"markets\":[227,228,230,291,229,19,20,26,220,66,3"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v4/coupon/get?lang=no&_trlang=no",
+      "status": 200,
+      "size": 701,
+      "odds_like": true,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"userId\":\"488a4ac5c55d812a872b142a5b0b44d9\",\"bets\":[],\"events\":[],\"leagues\":[],\"sportCategories\":[],\"results\":{},\"players\":[],\"potentialWin\":{\"single\":null,\"multi\":null,\"system\":[]},\"maxUserPayout\":null,\"seasons\":[],\"stages\":[],\"competitors\":[],\"odds\":{},\"variants\":[],\"comboBoost\":{\"id\":3,\"minSelections\":3,\"maxSelections\":20,\"minOdd\":1.2,\"maxOdd\":501,\"dateFrom\":\"2022-10-20 00:00:00\",\"dateTill\":\"2050-01-01 00:00:00\",\"odds\":{\"3\":1.05,\"4\":1.07,\"5\":1.1,\"6\":1.12,\"7\":1.15,\"8\":1.2,\"9\":1.25,\"10\":1.27,\"11\":1.3,\"12\":1.35,\"13\":1.4,\"14\":1.45,\"15\":1.5,\"16\":1.6,\"17\":1.7,\"18"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/event/list?lang=no&relations=odds&relations=withMarketsCount&relations=result&relations=league&relations=competitors&relations=sportCategories&relations=tips&relations=additionalInfo&relations=broadcasts&relations=statistics&oddsExists_eq=1&main=1&limit=30&status_in=2&status_in=1&isTopLive_eq=1&oddsBooster=0&isFavorite=0&isLive=true",
+      "status": 200,
+      "size": 159320,
+      "odds_like": true,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"page\":1,\"firstPage\":1,\"lastPage\":1,\"totalCount\":16,\"limit\":30,\"items\":[{\"id\":12068960,\"sbEventId\":12068960,\"vendorId\":1,\"vendorEventId\":\"sr:match:72909506\",\"sportId\":4,\"sportCategoryId\":390,\"leagueId\":1013499,\"roundId\":1018448,\"isTop\":1,\"isTopLive\":1,\"status\":2,\"team1\":\"\",\"team2\":\"\",\"competitor1Id\":305305,\"competitor2Id\":88184,\"time\":\"2026-11-17 02:30:00\",\"translationSlug\":\"utah-mammoth-vancouver-canucks\",\"defaultSlug\":\"utah-mammoth-vancouver-canucks\",\"liveMatchTracker\":\"https:\\/\\/ws-cdn001.akamaized.net\\/sportradar\\/en\\/standalone\\/match.lmtPlus#matchId=7290"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://dwmu1hf7ovvid.cloudfront.net/site/upload/logos/loaders.json",
+      "status": 200,
+      "size": 2836,
+      "odds_like": false,
+      "sample": "{\"spinid.com\":{\"favicon\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/site\\/upload\\/logos\\/e7866858-ac5e-4261-871c-b9cbb3e507de\\/1743679732_favicon.png\",\"loader\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/site\\/upload\\/logos\\/9cc150d6-7404-4505-bac8-70ad3334466e\\/1743684600_black.svg\",\"modernFavicon\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/site\\/upload\\/logos\\/e7866858-ac5e-4261-871c-b9cbb3e507de\\/1743679732_favicon.png\",\"modernLoader\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/site\\/upload\\/logos\\/9cc150d6-7404-4505-bac8-70ad3334466e\\/1743684600_black.svg\"},\"ee.spinid.com\":{\"favicon\":\"https:\\/\\/dwmu"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/rev2/configurations",
+      "status": 200,
+      "size": 627,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"config\":{\"projectName\":\"20bet\",\"defaultCurrency\":\"NOK\",\"sessionTimer\":false,\"bonusesEnabled\":true,\"responsibleGamingTools\":false,\"refProgramEnabled\":false,\"smarticoEnabled\":false,\"gamixterEnabled\":false,\"cryptoCurrencyEnabled\":false,\"captcha\":2,\"captchaServices\":{\"auth\":{\"enabledOnWeb\":true,\"enabledOnMobileApp\":true},\"taxId\":{\"enabledOnWeb\":false,\"enabledOnMobileApp\":false}}},\"sportsbook\":{\"liveSportContentEnabled\":true,\"prematchSportContentEnabled\":true,\"oddsBoosterEnabled\":true},\"casino\":{\"enabled\":true,\"liveEnabled\":true},\"pgw\":{\"merchantId\":\"3da6e1e6-518d"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/data/get-countries-list?acceptLanguage=en-GB&p=0",
+      "status": 200,
+      "size": 190215,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"countries\":[{\"hasProvince\":0,\"hasFiscalRegions\":0,\"needConfirmationModal\":false,\"hasPromoCodes\":true,\"isBTagRequired\":false,\"restrictReg\":false,\"id\":499,\"code\":\"996\",\"name\":\"Abkhazia\",\"alpha_2\":\"AB\",\"alpha_3\":\"ABK\",\"dialCode\":\"99544\",\"languageId\":\"2\",\"currencyId\":\"RUB\",\"flagUrl\":{\"square\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/flags\\/ab.png\",\"rectangle\":\"https:\\/\\/dwmu1hf7ovvid.cloudfront.net\\/flags\\/ab.svg\"},\"isActive\":0,\"isActiveDesktop\":null,\"isActiveMobile\":null,\"requiredRegistrationSmsVerification\":0,\"blocked\":0,\"isBlockedDesktop\":0,\"isBlockedMobile\":0"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/data/get-currencies?acceptLanguage=en-GB&p=0&orderField=displayOrder&orderDirection=DESC",
+      "status": 200,
+      "size": 16628,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"currencies\":[{\"code\":\"ARS\",\"description\":\"Argentine Peso\",\"name\":\"Argentine Peso\",\"icon\":null,\"iconURL\":null,\"appIconUrl\":\"https:\\/\\/dueh421xfqdi.cloudfront.net\\/currencies\\/ARS-app-logo.svg\",\"codeNumber\":\"032\",\"subUnits\":2,\"enabled\":1,\"isCrypto\":false,\"isCryptoAlternative\":false,\"casinoAlternativeCurrencyRequired\":false,\"phoneConfirmationRequired\":false},{\"code\":\"AZN\",\"description\":\"Azerbaijan Manat\",\"name\":\"Azerbaijan Manat\",\"icon\":null,\"iconURL\":null,\"appIconUrl\":\"https:\\/\\/dueh421xfqdi.cloudfront.net\\/currencies\\/AZN-app-logo.svg\",\"codeNumber\":\"944\",\"subU"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/ip-data?acceptLanguage=en-GB&p=0",
+      "status": 200,
+      "size": 830,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"ip\":\"2a01:799:1525:4700:5c90:4f2c:f55:fe53\",\"city\":\"Fetsund\",\"country\":\"NO\",\"country_code\":\"NO\",\"country_code_iso3\":\"NOR\",\"country_name\":\"Norway\",\"continent_code\":\"EU\",\"in_eu\":false,\"postal\":\"1900\",\"latitude\":59.9315,\"longitude\":11.1728,\"timezone\":\"Europe\\/Oslo\",\"utc_offset\":\"+0100\",\"country_calling_code\":\"+47\",\"currency\":\"NOK\",\"currency_name\":\"Norwegian Krone\",\"is_available_for_registration\":true,\"internalCountry\":{\"id\":166,\"code\":\"578\",\"name\":\"Norway\",\"alpha2\":\"NO\",\"alpha3\":\"NOR\",\"dialCode\":\"47\",\"currencyId\":\"NOK\",\"isActive\":1,\"requiredRegistrationSmsVerifi"
+    },
+    {
+      "url": "https://20betz0ne.com/api/config/bootstrap?acceptLanguage=en-GB&p=0&pageUrl=%2Fno%2Flive%3Ftop%3D1",
+      "status": 200,
+      "size": 55019,
+      "odds_like": false,
+      "sample": "{\"error\":false,\"status\":\"success\",\"code\":200,\"data\":{\"preferredLanguage\":{\"id\":10,\"iso\":\"no\",\"betRadarIso\":\"no\",\"locale\":\"nor_NO\",\"name\":\"Norsk\",\"shortName\":\"NO\",\"url\":\"no\",\"sortorder\":16,\"primary\":false,\"enabled\":true},\"primaryLanguage\":{\"id\":2,\"iso\":\"en\",\"betRadarIso\":\"en\",\"locale\":\"en_GB\",\"name\":\"English\",\"shortName\":\"EN\",\"url\":\"en\",\"sortorder\":0,\"primary\":true,\"enabled\":true},\"javaScripts\":{\"bodyJavaScript\":\"\\u003C!-- custom javascript code or any html --\\u003E\\r\\n\\r\\n\\u003C!-- Google Tag Manager --\\u003E\\r\\n\\u003Cscript\\u003E(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({\\u0027gtm.start\\u0"
+    },
+    {
+      "url": "https://20betz0ne.com/api/v2/page/availability?acceptLanguage=en-GB&p=0&pageUrl=%2Fno%2Flive%3Ftop%3D1",
+      "status": 200,
+      "size": 128,
+      "odds_like": false,
+      "sample": "{\"error\":false,\"status\":\"success\",\"code\":200,\"data\":{\"status\":\"ok\",\"payload\":null,\"responseCode\":null,\"isStatusConfirmed\":true}}"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/configurations?acceptLanguage=en-GB&p=0",
+      "status": 200,
+      "size": 8228,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"sportsbook\":{\"competitorLogoEnabled\":true,\"ticketPrintEnabled\":false,\"fastAmounts\":{\"EUR\":[10,5,50,100,20],\"BRL\":[10,1000,50,5,20],\"CAD\":[10,125,50,100,500],\"CHF\":[10,5,100,20,50],\"CZK\":[5,10,1000,500,5000],\"HUF\":[1000,500,5000,2000,10000],\"INR\":[100,500,10,50,200],\"MYR\":[300,100,200,10,400],\"NOK\":[10,50,20,100,500],\"PLN\":[10,100,200,50,500],\"THB\":[200,150,100,500,50],\"UAH\":[200,2000,5000,500,1500],\"USD\":[50,10,5,100,20],\"CLP\":[1000,500,5000,10000,50000],\"IQD\":[1000,5000,10000,50000,100000],\"JPY\":[500,1000,5000,10000,15000],\"KES\":[5,50,100,10,500],\"MXN\":[10,5"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v3/currency-variables?acceptLanguage=en-GB&p=0",
+      "status": 200,
+      "size": 201496,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"items\":[{\"id\":1,\"isActive\":true,\"amountInBaseCurrency\":\"20\",\"formattedAmountInBaseCurrency\":null,\"description\":\"First deposit bonus landing page\",\"frontendIdentifier\":\"{%minFDBdeposit%}\",\"values\":[{\"currencyCode\":\"AZN\",\"currencyName\":\"Azerbaijan Manat\",\"amount\":\"35\",\"formattedString\":null},{\"currencyCode\":\"BDT\",\"currencyName\":\"Taka\",\"amount\":\"2000\",\"formattedString\":null},{\"currencyCode\":\"BGN\",\"currencyName\":\"Bulgarian Lev\",\"amount\":\"40\",\"formattedString\":null},{\"currencyCode\":\"CAD\",\"currencyName\":\"Canadian Dollar\",\"amount\":\"30\",\"formattedString\":null},{\"curr"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/data/provinces?_trlang=no",
+      "status": 200,
+      "size": 2254,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"items\":[{\"id\":1,\"name\":\"Alberta\",\"code\":\"CA-AB\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":2,\"name\":\"British Columbia\",\"code\":\"CA-BC\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":3,\"name\":\"Manitoba\",\"code\":\"CA-MB\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":4,\"name\":\"New Brunswick\",\"code\":\"CA-NB\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":5,\"name\":\"Newfoundland and Labrador\",\"code\":\"CA-NL\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":6,\"name\":\"Northwest Territories\",\"code\":\"CA-NT\",\"countryId\":41,\"countryAlpha2Code\":\"CA\"},{\"id\":7,\"name\":\"Nova Sc"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/data/rates?_trlang=no",
+      "status": 200,
+      "size": 9517,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"items\":[{\"codeFrom\":\"EUR\",\"codeTo\":\"BTG\",\"value\":0.0342},{\"codeFrom\":\"EUR\",\"codeTo\":\"CNH\",\"value\":6.8889},{\"codeFrom\":\"EUR\",\"codeTo\":\"XAG\",\"value\":0.0512},{\"codeFrom\":\"EUR\",\"codeTo\":\"XAU\",\"value\":0.0006},{\"codeFrom\":\"EUR\",\"codeTo\":\"XLM\",\"value\":8.9755},{\"codeFrom\":\"EUR\",\"codeTo\":\"EUR\",\"value\":1.0},{\"codeFrom\":\"EUR\",\"codeTo\":\"LTL\",\"value\":3.4519302834},{\"codeFrom\":\"EUR\",\"codeTo\":\"VEF\",\"value\":3592998.5129715},{\"codeFrom\":\"EUR\",\"codeTo\":\"AED\",\"value\":4.039283},{\"codeFrom\":\"EUR\",\"codeTo\":\"AFN\",\"value\":70.384185},{\"codeFrom\":\"EUR\",\"codeTo\":\"ALL\",\"value\":90.577295"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/tournaments/bet-tournament/got-active?_trlang=no",
+      "status": 200,
+      "size": 66,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"gotAvailableTournaments\":true}}"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/multibet-of-the-day/list?labelId=0&isLive=true&relations%5B%5D=result&relations%5B%5D=odds&relations%5B%5D=competitors&relations%5B%5D=variants&relations%5B%5D=players&relations%5B%5D=league&lang=no&eventsType=1&_trlang=no",
+      "status": 200,
+      "size": 122,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"items\":[],\"relations\":{},\"betBuilderItems\":[],\"availableSportIds\":[],\"currency\":\"NOK\"}}"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/registration-configurations?desktop=1&_trlang=no",
+      "status": 200,
+      "size": 410,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"isBTagRequired\":false,\"isBrasilRegFormRequired\":true,\"duplicateBonusValidation\":true,\"showPersonalCodeToggler\":{\"active\":false,\"exceptCountries\":[]},\"showHouseForCountries\":[],\"resendTimers\":{\"phone\":60,\"mail\":60},\"cyrillicValidation\":false,\"topBluemFlowEnabled\":false,\"oneStepForm\":{\"active\":false,\"exceptCountries\":[\"BR\",\"CW\"]},\"postcoder\":{\"active\":false,\"countries\":[]}}}"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v3/status?_trlang=no",
+      "status": 200,
+      "size": 155,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"feedIsUp\":[1,4,5],\"connectionIsUp\":[101,103,105,114,400,500],\"liveBetsEnabled\":1,\"liveOddsEnabled\":[1,6,7]},\"hash\":null}"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v4/menu/live/no?_trlang=no",
+      "status": 200,
+      "size": 38168,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"sports\":[{\"id\":1,\"name\":\"Fotball\",\"alias\":\"football\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":2,\"countOutrights\":0},{\"id\":1213,\"name\":\"vSoccer\",\"alias\":\"vsoccer\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/vsoccer.svg\",\"countEvents\":12,\"countOutrights\":0},{\"id\":2,\"name\":\"Basketball\",\"alias\":\"basketball\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":4,\"countOutrights\":0},{\"id\":1215,\"name\":\"vBasketball\",\"alias\":\"nba2k23\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v3/menu/leagues/top-live/no?_trlang=no",
+      "status": 200,
+      "size": 4289,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"leagues\":[{\"id\":1013499,\"sportCategoryId\":390,\"type\":0,\"order\":19,\"express\":1,\"countryCode\":\"NHL\",\"flagCode\":\"NHL\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/nhl.svg\",\"name\":\"NHL\",\"description\":\"[]\",\"translationSlug\":\"nhl\",\"defaultSlug\":\"nhl\",\"topLive\":1,\"isOutright\":false,\"vendorId\":1,\"sport_id\":4,\"isTop\":1,\"isTopLive\":1,\"countryName\":\"NHL\",\"countEvents\":1},{\"id\":1066165,\"sportCategoryId\":2669,\"type\":0,\"order\":7,\"express\":1,\"countryCode\":\"US\",\"flagCode\":\"US\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/us.svg\",\"name\":\"USA. USL\","
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v4/menu/line/no?period=0&withOutrightMarkets=1&_trlang=no",
+      "status": 200,
+      "size": 319693,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"sports\":[{\"id\":1,\"name\":\"Fotball\",\"alias\":\"football\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":1152,\"countOutrights\":103},{\"id\":1213,\"name\":\"vSoccer\",\"alias\":\"vsoccer\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/vsoccer.svg\",\"countEvents\":43,\"countOutrights\":0},{\"id\":2,\"name\":\"Basketball\",\"alias\":\"basketball\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":238,\"countOutrights\":19},{\"id\":1215,\"name\":\"vBasketball\",\"alias\":\"nba2k23\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,"
+    },
+    {
+      "url": "https://20betz0ne.com/api/seo/get-data?pageUrl=%2Fno%2Flive&_trlang=no",
+      "status": 200,
+      "size": 15904,
+      "odds_like": false,
+      "sample": "{\"error\":false,\"status\":\"success\",\"code\":200,\"data\":{\"metaData\":{\"title\":\"Live Sportspill og Live Odds \\u2022 I-spill betting p\\u00e5 20Bet\",\"meta_description\":\"Nettsted for live sportsbetting. 20Bet tilbyr liveodds for tennis, fotball og andre sporter. Spill live med mobilappen!\",\"meta_keywords\":\"\",\"seo_text\":\"\\u003Ch2\\u003ETopp Live betting p\\u00e5 sport hos 20Bet\\u003C\\/h2\\u003E\\r\\n\\u003Cp\\u003E\\u00c5 bli med i live betting sin spennende verden kan forvandle m\\u00e5ten du opplever sport p\\u00e5. Hos 20Bet tilbyr vi deg en dynamisk og engasjerende m\\u00e5te \\u00e5 f\\u00f8lge med p\\u00e5 dine"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/menu/leagues/top-live/no?_trlang=no",
+      "status": 200,
+      "size": 1211,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"leagues\":[{\"id\":1013499,\"sportCategoryId\":390,\"type\":0,\"order\":19,\"express\":1,\"countryCode\":\"NHL\",\"flagCode\":\"NHL\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/nhl.svg\",\"name\":\"NHL\",\"description\":\"[]\",\"translationSlug\":\"nhl\",\"defaultSlug\":\"nhl\",\"topLive\":1,\"isOutright\":false,\"sport_id\":4,\"isTop\":1,\"isTopLive\":1,\"countryName\":\"NHL\",\"countEvents\":1},{\"id\":1010130,\"sportCategoryId\":366,\"type\":0,\"order\":4,\"express\":1,\"countryCode\":\"atp.svg\",\"flagCode\":\"atp.svg\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/atp.svg\",\"name\":\"ATP Challenge"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/data/get-crypto-alternatives?_trlang=no",
+      "status": 200,
+      "size": 8521,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"items\":[{\"code\":\"USD\",\"description\":\"US Dollar\",\"name\":\"US Dollar\",\"icon\":null,\"iconURL\":null,\"appIconUrl\":\"https:\\/\\/dueh421xfqdi.cloudfront.net\\/currencies\\/USD-app-logo.svg\",\"codeNumber\":\"840\",\"subUnits\":2,\"enabled\":1,\"isCrypto\":false,\"isCryptoAlternative\":true,\"casinoAlternativeCurrencyRequired\":false,\"phoneConfirmationRequired\":false,\"enabledCryptoRates\":[{\"codeFrom\":\"BSV\",\"codeTo\":\"USD\",\"value\":14.87360207633},{\"codeFrom\":\"BCH\",\"codeTo\":\"USD\",\"value\":208.86612815695},{\"codeFrom\":\"LTC\",\"codeTo\":\"USD\",\"value\":44.904202643501},{\"codeFrom\":\"TRX\",\"codeTo\":\"U"
+    },
+    {
+      "url": "https://accounts.livechatinc.com/v2/customer/0423be4a-3d48-484e-a65a-2228122b8c26/192/token",
+      "status": 200,
+      "size": 201,
+      "odds_like": false,
+      "sample": "{\"access_token\":\"us-south1:SqUYJKPZSVmZem2KE7BBtw\",\"entity_id\":\"7efdbc03-da73-4ec9-bbeb-6be2bf753ff4\",\"expires_in\":14400,\"organization_id\":\"0423be4a-3d48-484e-a65a-2228122b8c26\",\"token_type\":\"Bearer\"}\n"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v3/menu/leagues/top-live/no?_trlang=no",
+      "status": 200,
+      "size": 4289,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"leagues\":[{\"id\":1013499,\"sportCategoryId\":390,\"type\":0,\"order\":19,\"express\":1,\"countryCode\":\"NHL\",\"flagCode\":\"NHL\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/nhl.svg\",\"name\":\"NHL\",\"description\":\"[]\",\"translationSlug\":\"nhl\",\"defaultSlug\":\"nhl\",\"topLive\":1,\"isOutright\":false,\"vendorId\":1,\"sport_id\":4,\"isTop\":1,\"isTopLive\":1,\"countryName\":\"NHL\",\"countEvents\":1},{\"id\":1066165,\"sportCategoryId\":2669,\"type\":0,\"order\":7,\"express\":1,\"countryCode\":\"US\",\"flagCode\":\"US\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/us.svg\",\"name\":\"USA. USL\","
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v2/menu/leagues/top-live/no?_trlang=no",
+      "status": 200,
+      "size": 1211,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"leagues\":[{\"id\":1013499,\"sportCategoryId\":390,\"type\":0,\"order\":19,\"express\":1,\"countryCode\":\"NHL\",\"flagCode\":\"NHL\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/nhl.svg\",\"name\":\"NHL\",\"description\":\"[]\",\"translationSlug\":\"nhl\",\"defaultSlug\":\"nhl\",\"topLive\":1,\"isOutright\":false,\"sport_id\":4,\"isTop\":1,\"isTopLive\":1,\"countryName\":\"NHL\",\"countEvents\":1},{\"id\":1010130,\"sportCategoryId\":366,\"type\":0,\"order\":4,\"express\":1,\"countryCode\":\"atp.svg\",\"flagCode\":\"atp.svg\",\"flagURL\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/atp.svg\",\"name\":\"ATP Challenge"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v4/menu/live/no?_trlang=no",
+      "status": 200,
+      "size": 39112,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"sports\":[{\"id\":1,\"name\":\"Fotball\",\"alias\":\"football\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":2,\"countOutrights\":0},{\"id\":1213,\"name\":\"vSoccer\",\"alias\":\"vsoccer\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/vsoccer.svg\",\"countEvents\":13,\"countOutrights\":0},{\"id\":2,\"name\":\"Basketball\",\"alias\":\"basketball\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":4,\"countOutrights\":0},{\"id\":1215,\"name\":\"vBasketball\",\"alias\":\"nba2k23\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl"
+    },
+    {
+      "url": "https://platform.20betz0ne.com/api/v4/menu/line/no?period=5&withOutrightMarkets=1&_trlang=no",
+      "status": 200,
+      "size": 213509,
+      "odds_like": false,
+      "sample": "{\"status\":\"ok\",\"code\":200,\"data\":{\"sports\":[{\"id\":1,\"name\":\"Fotball\",\"alias\":\"football\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":159,\"countOutrights\":103},{\"id\":1213,\"name\":\"vSoccer\",\"alias\":\"vsoccer\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":\"https:\\/\\/d1wfowvne3d4em.cloudfront.net\\/flags\\/vsoccer.svg\",\"countEvents\":43,\"countOutrights\":0},{\"id\":2,\"name\":\"Basketball\",\"alias\":\"basketball\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\"flagUrl\":null,\"countEvents\":166,\"countOutrights\":19},{\"id\":1215,\"name\":\"vBasketball\",\"alias\":\"nba2k23\",\"type\":0,\"isPopular\":1,\"isEnabled\":1,\""
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+[
+  {
+    "url": "https://betway.com/g/api/sports/content/getEventsWithMultipleMarkets",
+    "method": "POST",
+    "headers": {
+      "host": "betway.com",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "content-type": "application/json",
+      "x-correlation-id": "80564f25-fe71-4393-ad07-eb271d2bc0ba",
+      "traceparent": "00-4cc56b24ac374b44a718be8943582f8b-fa3556df34f141fb-01",
+      "content-length": "1130",
+      "origin": "https://betway.com",
+      "connection": "keep-alive",
+      "referer": "https://betway.com/g/en/sports",
+      "cookie": "deviceId=574fb98b-f3cc-46c8-ab04-fdcac32b8a9e; visitId=a6da3ab0-877d-41dd-af65-f0b25ce009a6; bw_SessionId=a6da3ab0-877d-41dd-af65-f0b25ce009a6; SpinSportVisitId=a6da3ab0-877d-41dd-af65-f0b25ce009a6; clientId=27f051a4-ae11-481a-b970-2fb6f7cad3dd; bw_BrowserId=27f051a4-ae11-481a-b970-2fb6f7cad3dd; __cf_bm=s6VkXGp4bNMJAj_XZGhvud_tArIiqam42BCh2SKu88A-1794890388.6707792-1.0.1.1-uZw1oApyPrZwX8t1gNPosvHxlaW8n97yMBQT.EfHzfBpTMCCxSgZCrECXpLmCgB._b8y3DGVLTBtc3wSekscw5Yq1SRwZJEBbnTCXjsxjy.q54egNrJ9Qmxrtvgxb.MS; userLanguage=en; ssc_subbrand=sports; lastUserLogin=sports",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"BrandId\":3,\"LanguageId\":1,\"TerritoryId\":165,\"TerritoryCode\":\"MT\",\"ClientTypeId\":2,\"JurisdictionId\":2,\"ClientIntegratorId\":1,\"CorrelationId\":\"49b95f62-b123-4d07-a67b-40c8f0a256dd\",\"EventMarketSets\":[{\"EventIds\":[17496193,17496191,17493170,17493197,17493196,17496767],\"IncludeAllMarkets\":true,\"MarketCNames\":[\"win-draw-win\"]},{\"EventIds\":[17493857,17493860,17494101,17496955,17496973,17496999,17488314,17488548,17497037,17487188,17494092],\"IncludeAllMarkets\":true,\"MarketCNames\":[\"match-winner\"]},{\"EventIds\":[17496775,17496800,17496998,17438447],\"IncludeAllMarkets\":true,\"MarketCNames\":[\"match-betting\"]},{\"EventIds\":[17493602,17493605,17493685,17496764,17496765,17493200,17492829],\"IncludeAllMarkets\":true,\"MarketCNames\":[\"baseball-run-line\",\"baseball-total-runs\",\"basketball-point-spread\",\"basketball-total-points\",\"ice-hockey-puck-line\",\"ice-hockey-total-goals\",\"match-winner\",\"match-winner--ot-and-so-incl-\",\"money-line\",\"basketball-match-winner\",\"total-points\",\"point-spread\",\"handicap\",\"total-goals\",\"total-goals---0\",\"-point-spread---0\",\"-total-points---0\"]}],\"ScoreboardRequest\":{\"IncidentRequest\":{},\"ScoreboardType\":3}}"
+  }
+]

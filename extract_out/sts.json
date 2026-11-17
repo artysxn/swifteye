@@ -1,0 +1,86 @@
+{
+  "url": "https://www.sts.pl/live/pilka-nozna",
+  "title": "Piłka nożna na żywo - zakłady, wyniki, piłka nożna live",
+  "page_text": "Zgoda O plikach cookies KORZYSTAMY Z PLIKÓW COOKIES My i nasi Partnerzy wykorzystujemy pliki cookies, żeby nasi Użytkownicy korzystali z produktów na najwyższym poziomie, w sposób dopasowany do ich indywidualnych potrzeb. Cookies to małe pliki tekstowe, które zapisują się w pamięci Twojej przeglądarki. Akceptując wszystkie pliki cookies, usprawniasz działanie strony. Zachęcamy do zapoznania się z naszą Polityką Prywatności i Stosowania Cookies, w której opisujemy tematykę plików cookies. Wyjaśniamy w niej, czym są pliki cookies, jakie są ich rodzaje i w jaki sposób używamy ich w naszej witrynie. Opisujemy również, jak pliki cookies mogą być wykorzystywane przez naszych Partnerów. NIEZBĘDNE PLIKI COOKIES Niezbędne pliki cookies są konieczne do funkcjonowania witryny. Bez nich strona nie będzie działała prawidłowo. Możesz zmienić ustawienia swojej przeglądarki tak, aby je zablokować, jednak wtedy strona nie będzie poprawnie funkcjonować. Ustawienia Akceptuj wszystkie LICZY SIĘBARDZIEJ Promocje STS Club Bonuseria Wizjoner Produkty Aplikacja Centrum pomocy Zakłady bukmacherskie Zakłady live 60 Gry Strefa inspiracji Zaloguj się Załóż konto Zapisane Piłka Nożna ePiłka nożna Tenis Tenis stołowy Koszykówka eKoszykówka Hokej na lodzie Esport Badminton Baseball eHokej na lodzie Piłka Nożna Filtruj USA, USL Championship LIVE 2.połowa dogrywki 113' New Mexico United Sacramento Republic FC 0 0 1 1 0 1 0 0 1 2 1 40.00 X 5.00 2 1.16 Indie, Mumbai Premier League LIVE Start o 05:30 ICL Mumbai FC Somaiya 0 0 1 X 2 Masz pytania lub uwagi? Chętnie pomożemy! Wybierz, co jest dla Ciebie wygodniejsze. Baza wiedzy Czat 24/7 Aplikacja mobilna Pobierz aplikację ze strony mobile.sts.pl, lub skorzystaj z poniższych skrótów. Fundacja Oficjalny bukmacher Piłka nożna na żywo Futbol live Chyba nie ma drugiego takiego sportu jak piłka nożna. Na żywo transmitowanych jest tyle meczów, że każdy kibic znajdzie dla siebie coś interesującego. A wybór jest ogromny, bo każdego d",
+  "odds_endpoints": [
+    {
+      "url": "https://content.sts.pl/devices/common/any/market_description/json/markets_description.json?lang=pl",
+      "status": 200,
+      "size": 181913,
+      "odds_like": true,
+      "sample": "[\n    {\n        \"market\": \"Zawodnik - triple double (z dogrywk\\u0105)\",\n        \"iot\": [\n            77863\n        ],\n        \"description\": \"Typujesz, czy zawodnik uzyska 2-cyfrowy wynik w co najmniej 3 statystykach, czyli punktach, asystach, zbi&oacute;rkach przechwytach lub blokach.\"\n    },\n    {\n        \"market\": \"Zawodnik - double double (z dogrywk\\u0105)\",\n        \"iot\": [\n            76920,\n            77756\n        ],\n        \"description\": \"Typujesz, czy zawodnik uzyska 2-cyfrowy wynik w co najmniej 2 statystykach, czyli punktach, asystach, zbi&oacute;rkach przechwytach lub blokach.\"\n"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://sbk.sts.pl/sbk/assets/dashboard-tournaments.json",
+      "status": 200,
+      "size": 12931,
+      "odds_like": false,
+      "sample": "[{\"tournamentId\":12277,\"sportId\":1,\"categoryId\":3,\"name\":\"Liga Narodów UEFA\",\"imgFilename\":\"images/dashboard-widgets/tournaments/\",\"backgroundColor\":\"#12287b\"},{\"tournamentId\":11104,\"sportId\":3,\"categoryId\":2,\"name\":\"ATP Finals\",\"imgFilename\":\"images/dashboard-widgets/tournaments/\",\"backgroundColor\":\"#002865\"},{\"tournamentId\":837,\"sportId\":1,\"categoryId\":3,\"name\":\"Mecze towarzyskie\",\"imgFilename\":\"images/dashboard-widgets/tournaments/\",\"backgroundColor\":\"#004b87\"},{\"tournamentId\":591,\"sportId\":13,\"categoryId\":102,\"name\":\"Grand Slam of Darts\",\"imgFilename\":\"images/dashboard-widgets/tournaments/"
+    },
+    {
+      "url": "https://sbk.sts.pl/sbk/assets/top-tournaments.json",
+      "status": 200,
+      "size": 44191,
+      "odds_like": false,
+      "sample": "[{\"id\":17633,\"sport_id\":1,\"category_id\":390,\"order\":6,\"show_category_name\":true},{\"id\":28059,\"sport_id\":1,\"category_id\":46,\"order\":52,\"show_category_name\":true},{\"id\":186,\"sport_id\":1,\"category_id\":10,\"order\":178,\"show_category_name\":true},{\"id\":512,\"sport_id\":4,\"category_id\":124,\"order\":43,\"show_category_name\":true},{\"id\":1302,\"sport_id\":2,\"category_id\":536,\"order\":63,\"show_category_name\":true},{\"id\":10303,\"sport_id\":8,\"category_id\":256,\"order\":4,\"show_category_name\":true},{\"id\":1507,\"sport_id\":4,\"category_id\":310,\"order\":18,\"show_category_name\":true},{\"id\":2000226,\"sport_id\":2,\"category_id\":"
+    },
+    {
+      "url": "https://offerer.sts.pl/v1/live/opportunities_config",
+      "status": 200,
+      "size": 9890,
+      "odds_like": false,
+      "sample": "[{\"sport_code\":\"badminton\",\"items\":[{\"name\":\"Zwycięzca meczu\",\"order\":0,\"id_oppty_types\":[822,4655,20080186],\"display_type\":\"default\",\"headers\":[]},{\"name\":\"Set - zwycięzca\",\"order\":1,\"id_oppty_types\":[247,20080245],\"display_type\":\"opptyname\",\"headers\":[]},{\"name\":\"Mecz - liczba punktów\",\"order\":2,\"id_oppty_types\":[4699,20080238],\"display_type\":\"hcp1\",\"headers\":[]}]},{\"sport_code\":\"baseball\",\"items\":[{\"name\":\"Zwycięzca meczu\",\"order\":0,\"id_oppty_types\":[822,823,20010251],\"display_type\":\"default\",\"headers\":[]},{\"name\":\"Mecz - liczba punktów (z dogrywką)\",\"order\":1,\"id_oppty_types\":[825,20010258"
+    },
+    {
+      "url": "https://login-api.sts.pl/api/v2/web/refresh?lang=pl",
+      "status": 400,
+      "size": 98,
+      "odds_like": false,
+      "sample": "{\"code\":\"refresh_token_required\",\"statusCode\":400,\"error\":true,\"message\":\"Refresh token required\"}"
+    },
+    {
+      "url": "https://api.sts.pl/feature-flags?sessionId=560454998&appName=rwd&environment=production",
+      "status": 200,
+      "size": 18998,
+      "odds_like": false,
+      "sample": "{\"toggles\":[{\"name\":\"social_marathons\",\"enabled\":true,\"variant\":{\"name\":\"disabled\",\"enabled\":false,\"feature_enabled\":true,\"featureEnabled\":true},\"impressionData\":false},{\"name\":\"disable_baccarat\",\"enabled\":true,\"variant\":{\"name\":\"disabled\",\"enabled\":false,\"feature_enabled\":true,\"featureEnabled\":true},\"impressionData\":false},{\"name\":\"betting_2_ako_solo_safebet\",\"enabled\":true,\"variant\":{\"name\":\"v1\",\"payload\":{\"type\":\"json\",\"value\":\"{    \\\"web\\\":{       \\\"akolive\\\":\\\"https://api.sts.pl/web/v1/ticket/create/live/ako\\\",       \\\"akoprematch\\\":\\\"https://api.sts.pl/web/v1/ticket/create/prematch/ako\\\""
+    },
+    {
+      "url": "https://cms-proxy.sts.pl/featured-events?t=14957416",
+      "status": 200,
+      "size": 1109,
+      "odds_like": false,
+      "sample": "[{\"event_id\":\"f2414523\",\"image\":\"https:\\/\\/scontent-static.sts.pl\\/KIK\\/TW\\/TOPnHOT_-_repki\\/polska26_6aba250652ace0.51043859.png\",\"order\":40,\"market_id\":1,\"line_id\":1},{\"event_id\":\"f2414192\",\"image\":\"https:\\/\\/scontent-static.sts.pl\\/KIK\\/TW\\/2026_listopad_liga_natodow\\/bosnia-i-hercegowina-rumunia_6af2ea9210cd25.55630396.png\",\"order\":51,\"market_id\":1,\"line_id\":1},{\"event_id\":\"f2414182\",\"image\":\"https:\\/\\/scontent-static.sts.pl\\/KIK\\/TW\\/2026_listopad_liga_natodow\\/dania-norwegia_6af2ea94ea4a64.55087869.png\",\"order\":52,\"market_id\":1,\"line_id\":1},{\"event_id\":\"f2414524\",\"image\":\"https:\\/\\/scont"
+    },
+    {
+      "url": "https://scontent-static.sts.pl/.json/seo_box_pl_mobile.json",
+      "status": 200,
+      "size": 592046,
+      "odds_like": false,
+      "sample": "{\"\\/([a-z]{2})?\\/zaklady-live\\/$\":{\"url\":\"\\\\\\/([a-z]{2})?\\\\\\/zaklady-live\\\\\\/$\",\"title\":\"Zak\\u0142ady na \\u017cywo \\u2013 emocje gwarantowane!\",\"priority\":39,\"seoBoxItemsList\":[{\"title\":\"Zak\\u0142ady live zdobywaj\\u0105 uznanie fan\\u00f3w\",\"content\":\"Wydarzenia sportowe odbywaj\\u0105 si\\u0119 niemal non stop, a sport to obecnie samonap\\u0119dzaj\\u0105ca si\\u0119 maszyna. Przekonuj\\u0105 si\\u0119 o tym tak\\u017ce mi\\u0142o\\u015bnicy zak\\u0142ad\\u00f3w bukmacherskich. Niegdy\\u015b obstawia\\u0142o si\\u0119 wy\\u0142\\u0105cznie w stacjonarnych lokalach, a oferta nie by\\u0142a tak obszerna, jak tera"
+    },
+    {
+      "url": "https://content.sts.pl/devices/common/userdata/files/.json/json/footer_menu.json?t=14957416&lang=pl",
+      "status": 200,
+      "size": 3843,
+      "odds_like": false,
+      "sample": "{\"partners\":[{\"alt\":\"Widzew \\u0141\\u00f3d\\u017a\",\"url\":\"https:\\/\\/widzew.com\\/\",\"iconPath\":\"https:\\/\\/content.sts.pl\\/devices\\/stspl\\/userdata\\/rebranding\\/about-company\\/img\\/herb_Widzew_gwiazdka.svg\"},{\"alt\":\"Rak\\u00f3w Cz\\u0119stochowa\",\"url\":\"https:\\/\\/rakow.com\\/\",\"iconPath\":\"https:\\/\\/scontent-static.sts.pl\\/partnerzy-stopka\\/rakow_64be3a989df795.85246989.svg\"},{\"alt\":\"G\\u00f3rnik Zabrze\",\"url\":\"https:\\/\\/gornikzabrze.pl\",\"iconPath\":\"https:\\/\\/static-content.sts.pl\\/assets\\/logos\\/gornik-zabrze-kolor.svg\"},{\"alt\":\"Ruch Chorz\\u00f3w\",\"url\":\"https:\\/\\/www.ksruch.com\\/\",\"iconPath\":\"https:\\/"
+    },
+    {
+      "url": "https://cms-proxy.sts.pl/pl/product_menu?t=2991483",
+      "status": 200,
+      "size": 1619,
+      "odds_like": false,
+      "sample": "[{\"title\":\"STS Club\",\"icon\":\"sts-club\",\"urlLogout\":\"\\/strefa-bonusow\\/klub-sts\",\"menu\":\"side\",\"rwdPath\":null,\"badge\":{\"color\":\"#ffb900\",\"content\":null}},{\"title\":\"Bonuseria\",\"icon\":\"icon-sports\",\"urlLogout\":\"(modal:bonuseria)\",\"menu\":\"side\",\"rwdPath\":null,\"badge\":{\"color\":\"#ffb900\",\"content\":null}},{\"title\":\"Wizjoner\",\"icon\":\"wizjoner\",\"urlLogout\":\"(modal:wizjoner)\",\"menu\":\"side\",\"rwdPath\":null,\"badge\":{\"color\":\"#f0b049\",\"content\":null}},{\"title\":\"Produkty\",\"icon\":\"bonus\",\"urlLogout\":\"\\/produkty\",\"menu\":\"side\",\"rwdPath\":null,\"badge\":{\"color\":null,\"content\":null}},{\"title\":\"Zak\\u0142ady bukmach"
+    },
+    {
+      "url": "https://consentcdn.cookiebot.com/consentconfig/57fef9c9-7bdd-4e77-8e6b-c4bd110cdc29/settings.json",
+      "status": 200,
+      "size": 622,
+      "odds_like": false,
+      "sample": "{\"widget\":{\"enabled\":false,\"position\":{\"position\":\"bottom-left\",\"distanceVerticalPx\":10,\"distanceHorizontalPx\":10},\"theme\":{\"closed\":{\"backgroundColor\":\"#141414\",\"foregroundColor\":\"#FFFFFF\"},\"opened\":{\"backgroundColor\":\"#FFFFFF\",\"foregroundColor\":\"#141414\",\"highlightColor\":\"#1032CF\",\"shadeColor\":\"#D6D6D6\",\"changeBackgroundColor\":\"#1032CF\",\"changeTextColor\":\"#FFFFFF\",\"changeBorderColor\":\"#1032CF\",\"withdrawBackgroundColor\":\"#FFFFFF\",\"withdrawTextColor\":\"#141414\",\"withdrawBorderColor\":\"#1032CF\",\"detailsBackgroundColor\":\"#F2F2F2\"}},\"content\":{\"cultures\":[\"en\",\"pl\",\"et\",\"fi\"],\"default\":\"pl\",\"autode"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "url": "https://msports.m88.com/api/v1/M88S/data/main",
+    "method": "POST",
+    "headers": {
+      "host": "msports.m88.com",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "content-type": "application/json",
+      "authorization": "Bearer GUEST",
+      "content-length": "412",
+      "origin": "https://msports.m88.com",
+      "connection": "keep-alive",
+      "referer": "https://msports.m88.com/app/v2/",
+      "cookie": "selectedLanguage=en-US; compType=1; ts=; opCode=M88S; be=000000000001000001; og=3; ot=2; vp7=0; vp26=0; MPL=; vpmulti=; strmopA=; memberSince=; refSportID=ALL; __cf_bm=dUvPhZDcb16BJYq5ehqUa8B.Jfq.Upci7fNebC3217M-1794890375.1804476-1.0.1.1-ArmlQmMSm3IzWlF0J26V9zgldc8G6TyJlOWl57EmF.oXcMIvNQDVdyioTSFWumpqLKucFe9L8L7fBmS6dP64eMX3aV1HmEAYLp_CYSsomCEpM33si1hJM2DzSGHnmAiG; _cfuvid=gHimRkyu1NGe7.DypcCmUrI6SRWYMrZFPBF8FuGjqvM-1794890375.1804476-1.0.1.1-wHDRMNdK4enWGIUXY8kyTkMkdePutO6qcxbUOgV5gtU; checkCookie=1; portalContCurr=MYR; wcpacman=0; seam.aToken=GUEST; seam.authS=; seam.compType=1; seam.UID=; seam.opid=FB9DCC8A-3AF7-48B4-A8D1-7570FACCC3E0; seam.sCode=M88S; tutor=tutorOn; TZGMT=0",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"lang_id\":\"en\",\"view_type\":\"0\",\"leagues\":\"999\",\"odds_type\":\"2\",\"odds_group\":\"3\",\"view_date\":\"0\",\"time_filter\":\"0\",\"category\":\"0\",\"branch_code\":\"888\",\"currency\":\"MYR\",\"is_full\":\"true\",\"prev_params\":\"\",\"version\":\"\",\"is_stream\":\"false\",\"is_live_center\":\"false\",\"sport_id\":\"52\",\"display_type\":\"11\",\"top_x\":0,\"currentMenu\":\"spesificSport\",\"currentTimeSlot\":\"1\",\"prevMenu\":\"spesificSport\",\"method\":\"LoadOddsDataLive\"}"
+  },
+  {
+    "url": "https://msports.m88.com/api/v1/M88S/data/main",
+    "method": "POST",
+    "headers": {
+      "host": "msports.m88.com",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "content-type": "application/json",
+      "authorization": "Bearer GUEST",
+      "content-length": "408",
+      "origin": "https://msports.m88.com",
+      "connection": "keep-alive",
+      "referer": "https://msports.m88.com/app/v2/",
+      "cookie": "selectedLanguage=en-US; compType=1; ts=; opCode=M88S; be=000000000001000001; og=3; ot=2; vp7=0; vp26=0; MPL=; vpmulti=; strmopA=; memberSince=; refSportID=ALL; __cf_bm=dUvPhZDcb16BJYq5ehqUa8B.Jfq.Upci7fNebC3217M-1794890375.1804476-1.0.1.1-ArmlQmMSm3IzWlF0J26V9zgldc8G6TyJlOWl57EmF.oXcMIvNQDVdyioTSFWumpqLKucFe9L8L7fBmS6dP64eMX3aV1HmEAYLp_CYSsomCEpM33si1hJM2DzSGHnmAiG; _cfuvid=gHimRkyu1NGe7.DypcCmUrI6SRWYMrZFPBF8FuGjqvM-1794890375.1804476-1.0.1.1-wHDRMNdK4enWGIUXY8kyTkMkdePutO6qcxbUOgV5gtU; checkCookie=1; portalContCurr=MYR; wcpacman=0; seam.aToken=GUEST; seam.authS=; seam.compType=1; seam.UID=; seam.opid=FB9DCC8A-3AF7-48B4-A8D1-7570FACCC3E0; seam.sCode=M88S; tutor=tutorOn; TZGMT=0",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"sport_id\":\"52\",\"lang_id\":\"en\",\"display_type\":\"12\",\"view_type\":\"0\",\"leagues\":\"999\",\"odds_type\":\"2\",\"odds_group\":\"3\",\"view_date\":\"0\",\"time_filter\":\"0\",\"category\":\"0\",\"branch_code\":\"888\",\"currency\":\"MYR\",\"is_full\":\"true\",\"prev_params\":\"\",\"version\":\"\",\"top_x\":0,\"is_stream\":\"false\",\"is_live_center\":\"false\",\"currentMenu\":\"spesificSport\",\"currentTimeSlot\":\"2\",\"prevMenu\":\"spesificSport\",\"method\":\"LoadOddsData\"}"
+  }
+]

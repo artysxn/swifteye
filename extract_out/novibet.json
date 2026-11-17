@@ -1,0 +1,219 @@
+{
+  "url": "https://www.novibet.com/live-betting",
+  "title": "Live Betting Odds | Bet in Play | Novibet",
+  "page_text": "Betting Live Betting Casino Live Casino Noviladies Virtuals REGISTER LOGIN Daily Coupon Live Schedule Bet Request Promotions 17 Soccer 9 Basketball 27 Tennis 11 Table Tennis 1 Baseball 2 Ice Hockey 1 DOTA 2 1 Volleyball 7 Cricket 3 Badminton Live Betting USA - USL Championship New Mexico United Sacramento Republic FC 1 2 ET 112:32 Full Time Result Markets are not available Goals Over/Under Markets are not available Еsoccer - Battle Champions League (2x4 mins) Borussia Dortmund (cosske) Esports Arsenal (mixes) Esports 0 0 01:03 Full Time Result Markets are not available Goals Over/Under O 5.5 1.48 U 5.5 2.36 Juventus (Lunjo) Esports Manchester City (Djape) Esports 0 0 01:01 Markets are not available O 5.5 1.88 U 5.5 1.76 Еsoccer - Battle Club World Cup (2x4 mins) Manchester City (believer) Esports Real Madrid (Kavviro)Esports 2 1 85:30 Full Time Result Markets are not available Goals Over/Under Markets are not available Еsoccer - Battle La Liga (2x6 mins) Еsoccer - Battle Serie A (2x4 mins) Еsoccer - eAdriatic League (2x5 mins) Еsoccer - GT League (2x6 mins) Еsoccer Volta - Bundesliga (2x3 mins) New Mexico United Sacramento Republic FC 1 2 ET 112:32 NEW HT (2x45 Min) FT AET 30' 45' +2 60' 75' 90' +6 120' SRP Ball Safe Attacking Dangerous Attack Possession New Mexico United Ball Safe Attacking Dangerous Attack Possession Sacramento Republic 2nd ET 112:30 Markets are not available Mini games Betslip 0 SPORTSBOOK EXCELLENT ODDS ON 65.000+ EVENTS Don't have an Account? REGISTER Already have an Account? LOGIN NOVI CHAT EMAIL 18+ | General Promotions Terms Apply | T&Cs Apply All your offers in one place! NEW Visit the new Offers page and see what's available for you!🔥 Got it",
+  "odds_endpoints": [
+    {
+      "url": "https://www.novibet.com/apps/translations/en-US.json",
+      "status": 200,
+      "size": 398126,
+      "odds_like": true,
+      "sample": "{\"transifexLoaded\":\"true\",\"common\":{\"languages\":{\"el\":\"Greek\",\"en\":\"English\",\"de\":\"Deutsch\",\"es\":\"Español\",\"bg\":\"Bŭlgarski\",\"fi\":\"Suomi\",\"pt\":\"Portuguese\",\"fr\":\"French\"},\"months\":{\"0\":\"January\",\"1\":\"February\",\"2\":\"March\",\"3\":\"April\",\"4\":\"May\",\"5\":\"June\",\"6\":\"July\",\"7\":\"August\",\"8\":\"September\",\"9\":\"October\",\"10\":\"November\",\"11\":\"December\"},\"bonusSchemes\":{\"nobonus\":\"No bonus\",\"novicasino\":\"Casino Welcome Bonus\",\"novicasinogb\":\"Casino Welcome Bonus\",\"novicasinogr\":\"Casino Welcome Bonus\",\"novicasinoie\":\"Casino Welcome Bonus\",\"novisportsbookgr\":\"Sportsbook Welcome Bonus\",\"novicasinofirstdepositdef"
+    },
+    {
+      "url": "https://www.novibet.com/spt/api/configuration/getclientconfiguration",
+      "status": 200,
+      "size": 40939,
+      "odds_like": true,
+      "sample": "{\"$type\":\"BlueBrown.OnlineSportsbook.Gateway.Shared.ClientConfigurationModel, BlueBrown.OnlineSportsbook.Gateway.Shared\",\"oddsRepresentation\":1,\"userGroupSysname\":null,\"sportsBookUrls\":[\"sports/popular\",\"sports/promotions\"],\"sportsBookApp\":[\"sports/football\",\"sports/basketball\",\"sports/tennis\",\"sports/volleyball\"],\"casinoUrls\":[\"novi-ladies\",\"casino/promotions/\"],\"casinoApp\":[],\"betHistory\":{\"minimumDate\":\"2026-05-17T04:32:06.8822906Z\",\"minimumDateUnix\":\"1778992326\"},\"content\":{\"contentGroups\":{\"sportsContentGroupId\":4324,\"popularContentGroupId\":18},\"prelive\":{\"headlinesGroupId\":4399,\"hotNowGr"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/marketviews/location/v2/4324/4390/?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null&timestamp=5641871794889920923",
+      "status": 200,
+      "size": 306634,
+      "odds_like": true,
+      "sample": "[{\"hasHighlights\":false,\"totalCount\":80,\"betViews\":[{\"competitionContextCaption\":\"Soccer\",\"totalCount\":18,\"marketCaptions\":[{\"betTypeSysname\":\"SOCCER_MATCH_RESULT\",\"marketCaption\":\"Full Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_UNDER_OVER\",\"marketCaption\":\"Goals Over/Under\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_RESULT\",\"marketCaption\":\"Half Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_UNDER_OVER\",\"marketCaption\":\"1st Half - Goals Over/Under\",\"isBoostEligible\":fal"
+    },
+    {
+      "url": "https://www.novibet.com/spt/betslips/betslip/getorcreate",
+      "status": 200,
+      "size": 442,
+      "odds_like": true,
+      "sample": "{\"$type\":\"BlueBrown.Betslips.Shared.Models.Betslips.BetslipModel, BlueBrown.Betslips.Shared\",\"id\":\"1572107047325388800\",\"oddsRepresentation\":\"Decimal\",\"player\":{\"$type\":\"Anonymous\",\"currencySysname\":\"EUR\",\"oddsChangeStrategy\":\"Reject\"},\"state\":{\"$type\":\"Empty\"},\"betContextModes\":[],\"settings\":{\"maxSelections\":30,\"maxBetBuilderSelections\":20,\"betBuilderMinItems\":2,\"betBuilderMaxItems\":12,\"minMergeSelections\":2,\"maxAmount\":1000000000000.0}}"
+    },
+    {
+      "url": "https://widgets.sir.sportradar.com/translations/en.json?v=1794832687594&h=9c2cd2655b4d475363fe21f86b5f359e",
+      "status": 200,
+      "size": 228406,
+      "odds_like": true,
+      "sample": "{\"trans_ranking\":\"Ranking\",\"trans_attacking\":\"Attacking\",\"trans_cup_roster\":\"Cup Roster\",\"trans_sport_Soccer\":\"Soccer\",\"trans_sport_Basketball\":\"Basketball\",\"trans_sport_Hockey\":\"Ice Hockey\",\"trans_sport_Tennis\":\"Tennis\",\"trans_sport_Padel\":\"Padel\",\"trans_sport_Darts\":\"Darts\",\"trans_sport_Handball\":\"Handball\",\"trans_sport_Football\":\"American Football\",\"trans_sport_Volleyball\":\"Volleyball\",\"trans_sport_Beachvolley\":\"Beach Volley\",\"trans_sport_TableTennis\":\"Table Tennis\",\"trans_sport_Badminton\":\"Badminton\",\"trans_sport_Rugby\":\"Rugby\",\"trans_sport_Baseball\":\"Baseball\",\"trans_sport_Cricket\":\"Crick"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/marketviews/location/v2/4324/4390/?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null&timestamp=5641871794889932057",
+      "status": 200,
+      "size": 303278,
+      "odds_like": true,
+      "sample": "[{\"hasHighlights\":false,\"totalCount\":80,\"betViews\":[{\"competitionContextCaption\":\"Soccer\",\"totalCount\":18,\"marketCaptions\":[{\"betTypeSysname\":\"SOCCER_MATCH_RESULT\",\"marketCaption\":\"Full Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_UNDER_OVER\",\"marketCaption\":\"Goals Over/Under\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_RESULT\",\"marketCaption\":\"Half Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_UNDER_OVER\",\"marketCaption\":\"1st Half - Goals Over/Under\",\"isBoostEligible\":fal"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/marketviews/location/v2/4324/4390/?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null&timestamp=5641871794889936980",
+      "status": 200,
+      "size": 304631,
+      "odds_like": true,
+      "sample": "[{\"hasHighlights\":false,\"totalCount\":80,\"betViews\":[{\"competitionContextCaption\":\"Soccer\",\"totalCount\":18,\"marketCaptions\":[{\"betTypeSysname\":\"SOCCER_MATCH_RESULT\",\"marketCaption\":\"Full Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_UNDER_OVER\",\"marketCaption\":\"Goals Over/Under\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_RESULT\",\"marketCaption\":\"Half Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_UNDER_OVER\",\"marketCaption\":\"1st Half - Goals Over/Under\",\"isBoostEligible\":fal"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/marketviews/location/v2/4324/4390/?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null&timestamp=5641871794889942075",
+      "status": 200,
+      "size": 308808,
+      "odds_like": true,
+      "sample": "[{\"hasHighlights\":false,\"totalCount\":80,\"betViews\":[{\"competitionContextCaption\":\"Soccer\",\"totalCount\":18,\"marketCaptions\":[{\"betTypeSysname\":\"SOCCER_MATCH_RESULT\",\"marketCaption\":\"Full Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_UNDER_OVER\",\"marketCaption\":\"Goals Over/Under\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_RESULT\",\"marketCaption\":\"Half Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_UNDER_OVER\",\"marketCaption\":\"1st Half - Goals Over/Under\",\"isBoostEligible\":fal"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/marketviews/location/v2/4324/4390/?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null&timestamp=5641871794889946998",
+      "status": 200,
+      "size": 310440,
+      "odds_like": true,
+      "sample": "[{\"hasHighlights\":false,\"totalCount\":79,\"betViews\":[{\"competitionContextCaption\":\"Soccer\",\"totalCount\":17,\"marketCaptions\":[{\"betTypeSysname\":\"SOCCER_MATCH_RESULT\",\"marketCaption\":\"Full Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_UNDER_OVER\",\"marketCaption\":\"Goals Over/Under\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_RESULT\",\"marketCaption\":\"Half Time Result\",\"isBoostEligible\":false,\"betCaptions\":null},{\"betTypeSysname\":\"SOCCER_FIRST_HALF_UNDER_OVER\",\"marketCaption\":\"1st Half - Goals Over/Under\",\"isBoostEligible\":fal"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://www.novibet.com/cdn-cgi/challenge-platform/h/b/precursor/f8df4d4a0cd6/0.7484161286201844:1794885327:umimehlYXA7tEsO8lVNFeq7kEtcS0bleHI9jr1Wi6as/a5bc02787fa9569c",
+      "status": 200,
+      "size": 18,
+      "odds_like": false,
+      "sample": "{\"i\":60,\"n\":false}"
+    },
+    {
+      "url": "https://www.novibet.com/ngapi/desktop/en/account-api/get-application-custom-headers",
+      "status": 200,
+      "size": 163,
+      "odds_like": false,
+      "sample": "{\"channel\":\"WebPC\",\"languageSysname\":\"en-US\",\"applicationName\":\"Novi\",\"domainKey\":\"\",\"cmsKey\":\"\",\"countrySysname\":\"NO\",\"stateSysname\":null,\"currencySysname\":\"EUR\"}"
+    },
+    {
+      "url": "https://www.novibet.com/nat/config/api/getfeatureflagconfig?domain=COM",
+      "status": 200,
+      "size": 783,
+      "odds_like": false,
+      "sample": "{\"features\":[{\"featureName\":\"survey_tell_us_your_opinion_android\",\"enabled\":false},{\"featureName\":\"survey_tell_us_your_opinion_iOS\",\"enabled\":false},{\"featureName\":\"new_headlines_enabled\",\"enabled\":true},{\"featureName\":\"is_marketplace_enabled\",\"enabled\":false},{\"featureName\":\"virtuals_availability\",\"enabled\":true},{\"featureName\":\"is_predictor_enabled\",\"enabled\":false},{\"featureName\":\"is_personalized_offers_enabled\",\"enabled\":true},{\"featureName\":\"is_novimarkets_enabled\",\"enabled\":false},{\"featureName\":\"is_novibet_club_widget_enabled\",\"enabled\":false},{\"featureName\":\"bip_enabled\",\"enabled\":fals"
+    },
+    {
+      "url": "https://www.novibet.com/ngapi/desktop/en/useraccount/usersessionstate",
+      "status": 200,
+      "size": 3087,
+      "odds_like": false,
+      "sample": "{\"userSessionModel\":{\"isSignalRHubEnabled\":true,\"sessionId\":\"i11neqmfepby4p32tgt2fwwp\",\"virtualSessionId\":\"0\",\"channel\":\"WebPC\",\"applicationName\":\"Novi\",\"isBannedCountry\":false,\"proposedDomain\":null,\"proposedDomainHref\":null,\"isAuthenticated\":false,\"vipType\":{\"id\":1,\"sysname\":\"None\"},\"kycProvider\":\"Jumio\",\"firstName\":null,\"lastName\":null,\"ssn\":null,\"tin\":null,\"email\":null,\"profileId\":0,\"languageSysname\":\"en-US\",\"currencySysname\":\"EUR\",\"currencySymbol\":\"€\",\"userIp\":\"2a01:799:1525:4700:5c90:4f2c:f55:fe53\",\"timeZone\":\"Romance Standard Time\",\"timeZoneOffset\":\"01:00:00\",\"userTimeStampUnix\":17948935"
+    },
+    {
+      "url": "https://www.novibet.com/mrk/seo/api/translations",
+      "status": 200,
+      "size": 250,
+      "odds_like": false,
+      "sample": "{\"casino\":{\"translation\":null,\"children\":{\"rtp\":{\"translation\":\"return-to-player\",\"children\":{}}}},\"sports\":{\"translation\":null,\"children\":{\"esports\":{\"translation\":\"e-sports\",\"children\":{}}}},\"todays-coupons\":{\"translation\":\"coupons\",\"children\":{}}}"
+    },
+    {
+      "url": "https://www.novibet.com/mrk/api/navigation/submenu",
+      "status": 200,
+      "size": 8133,
+      "odds_like": false,
+      "sample": "{\"showBetRadio\":false,\"subMenuPages\":{\"sportsbooklive\":[{\"title\":\"Daily Coupon\",\"sysname\":\"sys_dailycoupon\",\"backgroundColor\":\"#404756\",\"backgroundOpacity\":\"35\",\"backgroundIcon\":\"/media/193380/icons-daily-coupon.svg\",\"backgroundImage\":\"\",\"isNew\":false,\"isHot\":false,\"burgerMenu\":false,\"isFree\":false,\"productType\":\"Sportsbook\",\"actionButtons\":{\"desktop\":{\"simpleLink\":\"/todays-coupons\",\"caption\":\"a\",\"link\":\"/todays-coupons\",\"openNewWindow\":false},\"mobile\":{\"simpleLink\":\"/todays-coupons\",\"caption\":\"a\",\"link\":\"/todays-coupons\",\"openNewWindow\":false},\"native\":{\"actionName\":\"prelive\",\"actionLink\":\"to"
+    },
+    {
+      "url": "https://www.novibet.com/cas/casino/minigames",
+      "status": 200,
+      "size": 1905,
+      "odds_like": false,
+      "sample": "{\"banner\":\"/media/199308/3-witches_en_540x304.svg\",\"casinoMiniGameItems\":[{\"sysname\":\"PP_GatesofNovibet1000\",\"provider\":\"Pragmatic_Play\",\"caption\":\"Gates of Novibet 1000\",\"demoPlayNotSupported\":false,\"banner\":\"/media/194535/370x180.jpg\",\"gameUrl\":\"\"},{\"sysname\":\"PTNOV_MegaFireBlaze3Witches\",\"provider\":\"Playtech\",\"caption\":\"Mega Fire Blaze 3 Witches\",\"demoPlayNotSupported\":false,\"banner\":\"/media/193759/megafireblaze3witchesminigames.jpg\",\"gameUrl\":\"\"},{\"sysname\":\"PP_SugarRush1000\",\"provider\":\"Pragmatic_Play\",\"caption\":\"Sugar Rush 1000\",\"demoPlayNotSupported\":false,\"banner\":\"/media/166025/sugaru"
+    },
+    {
+      "url": "https://www.novibet.com/ngapi/desktop/en/cms/get-register-or-login/sports",
+      "status": 200,
+      "size": 337,
+      "odds_like": false,
+      "sample": "{\"pageType\":\"Sports\",\"bannerDesktop\":\"/media/38886/sports-popupdesktop.jpg\",\"bannerMobile\":\"/media/38885/sports-popupmobile.jpg\",\"popupTitle\":\"SPORTSBOOK\",\"popupSubtitle\":\"<p>EXCELLENT ODDS ON <br /> 65.000+ EVENTS</p>\",\"tnCButton\":{\"caption\":\"18+ | General Promotions Terms Apply | T&Cs Apply\",\"link\":\"/info/tnc\",\"openNewWindow\":false}}"
+    },
+    {
+      "url": "https://www.novibet.com/spt/api/configuration/getclientfeatures",
+      "status": 200,
+      "size": 149,
+      "odds_like": false,
+      "sample": "{\"$type\":\"BlueBrown.OnlineSportsbook.Gateway.Shared.ClientFeaturesModel, BlueBrown.OnlineSportsbook.Gateway.Shared\",\"predictionMarketsFeature\":false}"
+    },
+    {
+      "url": "https://www.novibet.com/ngapi/desktop/en/cms/getwarningNotification",
+      "status": 200,
+      "size": 72,
+      "odds_like": false,
+      "sample": "{\"dateTimeStart\":null,\"dateTimeEnd\":null,\"content\":\"\",\"isEnabled\":false}"
+    },
+    {
+      "url": "https://www.novibet.com/nat/config/api/getcurrentscoreconfig",
+      "status": 200,
+      "size": 537895,
+      "odds_like": false,
+      "sample": "{\"data\":[{\"sysName\":\"AMERICAN_FOOTBALL_HALFTIME_FULLTIME\",\"displayTitle\":\"live_market_info_so_far\",\"displayTitleSettled\":\"live_market_info_final\",\"displayTitles\":[{\"place\":\"BETSLIP\",\"title\":\"live_market_info_current_points_score\"},{\"place\":\"CLOSED_BETS\",\"title\":\"live_market_info_current_points_score\"},{\"place\":\"OPEN_BETS_RESULTED\",\"title\":\"live_market_info_current_points_score\"},{\"place\":\"CLOSED_BETS_RESULTED\",\"title\":\"live_market_info_current_points_score\"}],\"displayFormat\":\"${AMERICAN_FOOTBALL_HOME_POINTS_FT} - ${AMERICAN_FOOTBALL_AWAY_POINTS_FT}\",\"metricsSysnames\":[\"AMERICAN_FOOTBALL_HOME_P"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/navigation/menu/4324?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null",
+      "status": 200,
+      "size": 7943,
+      "odds_like": false,
+      "sample": "{\"locale\":\"en-US\",\"contentGroupId\":4324,\"items\":[{\"marketViewGroupId\":4372606,\"navigationGroupId\":4372606,\"sysname\":\"SOCCER\",\"caption\":\"Soccer\",\"path\":\"soccer\",\"regionId\":null,\"regionCaption\":null,\"imageId\":null,\"isSelected\":false,\"hasChildren\":false,\"tags\":[],\"subItems\":null},{\"marketViewGroupId\":4372811,\"navigationGroupId\":4372811,\"sysname\":\"BASKETBALL\",\"caption\":\"Basketball\",\"path\":\"basketball\",\"regionId\":null,\"regionCaption\":null,\"imageId\":null,\"isSelected\":false,\"hasChildren\":false,\"tags\":[],\"subItems\":null},{\"marketViewGroupId\":4372812,\"navigationGroupId\":4372812,\"sysname\":\"TENNIS\",\"capt"
+    },
+    {
+      "url": "https://www.novibet.com/spt/feed/navigation/menu/18?lang=en-US&timeZ=Romance%20Standard%20Time&oddsR=1&usrGrp=null",
+      "status": 200,
+      "size": 2004,
+      "odds_like": false,
+      "sample": "{\"locale\":\"en-US\",\"contentGroupId\":18,\"items\":[{\"marketViewGroupId\":7116310,\"navigationGroupId\":7116310,\"sysname\":\"ACCA_BET_BUILDER\",\"caption\":\"Bet Builder Plus+\",\"path\":\"popular\",\"regionId\":null,\"regionCaption\":null,\"imageId\":null,\"isSelected\":false,\"hasChildren\":false,\"tags\":[],\"subItems\":null},{\"marketViewGroupId\":5915113,\"navigationGroupId\":5915113,\"sysname\":\"UEFA_NATIONS_LEAGUE\",\"caption\":\"UEFA Nations League\",\"path\":\"popular\",\"regionId\":null,\"regionCaption\":null,\"imageId\":252289,\"isSelected\":false,\"hasChildren\":false,\"tags\":[],\"subItems\":null},{\"marketViewGroupId\":7299926,\"navigationGrou"
+    },
+    {
+      "url": "https://www.novibet.com/mrk/seo/api/metadata?key=LiveInPlay&currentPath=%2Flive-betting",
+      "status": 200,
+      "size": 1940,
+      "odds_like": false,
+      "sample": "{\"coreMetadata\":{\"seoPageTitle\":\"Live Betting Odds | Bet in Play | Novibet\",\"seoMetaDescription\":\"Live betting odds and in-play betting with Novibet, a safe and secure environment to bet online. Competitive odds, fantastic support and amazing promotions for new and existing customers. Join today and claim your welcome bonus!\",\"seoContent\":null,\"seoH1Header\":\"Live Betting\"},\"ogImageMetadata\":{\"ogImageUrl\":null,\"ogImageAltText\":null},\"canonicalLinkTag\":\"https://www.novibet.com/live-betting\",\"alternateLinks\":[{\"rel\":\"alternate\",\"hreflang\":\"en-gr\",\"href\":\"https://www.novibet.gr/en/live-betting\",\"m"
+    },
+    {
+      "url": "https://widgets.sir.sportradar.com/18684c6c63ac559e0056878a6d4944f4/licensing",
+      "status": 200,
+      "size": 5188,
+      "odds_like": false,
+      "sample": "{\"text\":\"U2FsdGVkX1/UJZyB6wJfMbBZ1kOIRHXMVgCihobbkIybkOIIhbl39fOfur+kNWdeaKgevgQ4VtaDQDV1x7bGAGyxvK49xOouLxmyp6LNskI0CJ4i5rgBW1lHv3bs8oS8cu6T+Yy1kVh+FoispxZh775qYbGoeSE2W0da64lz5K45nDQEzwVRZu5yUsbb9OS97PhxgTD2MMDElxpqFl6xtCJ3Jnqyc5qJLd2VHsPajPSIjV3F4NMoFwSLgUUQDj9qeCPh6fsDuJ+oi8q2phXqjZmCRp0N1zRapw071+WljbOZYK7JqEIPyybFUnI0snLrBLeWYQDSxdcnuXv7W7wtY7IiO2iFoWZcrGGwE/DL/O9Cpp0BcJ0zUYv0rP5ISY/1uEy7gKdu0f5FQBgi8bubcuz6Vqgsxtp+4/ljJzMUBMsEOQB+4MBM26FVgcxr8/xK6mhcyeWIKr7hzvKhqkBW7Cm8spXYGlwE6821bbPUT22Mgts5mZB/Qz3wi5AGoGSwEyaNeUWd1vtnIJcUf+XHllfxrVy4A4Gmjek+jEn/FtSUDRZvZBeQo0C625S9ABfjotB27iVB1PxpgLT"
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/match_info/76582718?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 5971,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"match_info\\/76582718\",\"doc\":[{\"event\":\"match_info\",\"_dob\":1794889874,\"_maxage\":10,\"data\":{\"_doc\":\"match_info\",\"match\":{\"_doc\":\"match\",\"_doctype\":\"soccer\",\"_id\":76582718,\"_sid\":1,\"_seasonid\":137948,\"_rcid\":26,\"_tid\":84818,\"_utid\":28163,\"_dt\":{\"_doc\":\"time\",\"time\":\"02:00\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794880800},\"round\":126,\"roundname\":{\"_doc\":\"cupround\",\"_id\":126,\"displaynumber\":null,\"name\":\"Conference Finals\",\"shortname\":\"F\",\"cuproundnumber\":null,\"statisticssortorder\":39},\"cuproundmatchnumber\":1,\"cuproundnumberofmatches\":1,\"week\":47,\"coverage\":{\"lineup\":0,\"for"
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/match_info/76582718?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 5971,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"match_info\\/76582718\",\"doc\":[{\"event\":\"match_info\",\"_dob\":1794889874,\"_maxage\":10,\"data\":{\"_doc\":\"match_info\",\"match\":{\"_doc\":\"match\",\"_doctype\":\"soccer\",\"_id\":76582718,\"_sid\":1,\"_seasonid\":137948,\"_rcid\":26,\"_tid\":84818,\"_utid\":28163,\"_dt\":{\"_doc\":\"time\",\"time\":\"02:00\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794880800},\"round\":126,\"roundname\":{\"_doc\":\"cupround\",\"_id\":126,\"displaynumber\":null,\"name\":\"Conference Finals\",\"shortname\":\"F\",\"cuproundnumber\":null,\"statisticssortorder\":39},\"cuproundmatchnumber\":1,\"cuproundnumberofmatches\":1,\"week\":47,\"coverage\":{\"lineup\":0,\"for"
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/match_timeline/76582718?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 70144,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"match_timeline\\/76582718\",\"doc\":[{\"event\":\"match_timeline\",\"_dob\":1794889885,\"_maxage\":20,\"data\":{\"match\":{\"_doc\":\"match\",\"_doctype\":\"soccer\",\"_id\":76582718,\"_sid\":1,\"_seasonid\":137948,\"_rcid\":26,\"_tid\":84818,\"_utid\":28163,\"_dt\":{\"_doc\":\"time\",\"time\":\"02:00\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794880800},\"round\":126,\"roundname\":{\"_doc\":\"cupround\",\"_id\":126,\"displaynumber\":null,\"name\":\"Conference Finals\",\"shortname\":\"F\",\"cuproundnumber\":null,\"statisticssortorder\":39},\"cuproundmatchnumber\":1,\"cuproundnumberofmatches\":1,\"week\":47,\"coverage\":{\"lineup\":0,\"formations\":0,\""
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/match_timelinedelta/76582718?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 2564,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"match_timelinedelta\\/76582718\",\"doc\":[{\"event\":\"match_timelinedelta\",\"_synced\":true,\"_dob\":1794889903,\"_maxage\":3,\"data\":{\"match\":{\"_doc\":\"match\",\"_doctype\":\"soccer\",\"_id\":76582718,\"_sid\":1,\"_seasonid\":137948,\"_rcid\":26,\"_tid\":84818,\"_utid\":28163,\"_dt\":{\"_doc\":\"time\",\"time\":\"02:00\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794880800},\"round\":126,\"roundname\":{\"_doc\":\"cupround\",\"_id\":126,\"displaynumber\":null,\"name\":\"Conference Finals\",\"shortname\":\"F\",\"cuproundnumber\":null,\"statisticssortorder\":39},\"cuproundmatchnumber\":1,\"cuproundnumberofmatches\":1,\"week\":47,\"coverage\":{\"li"
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/stats_season_meta/137948?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 1901,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"stats_season_meta\\/137948\",\"doc\":[{\"event\":\"stats_season_meta\",\"_dob\":1794698766,\"_maxage\":3600,\"data\":{\"season\":{\"_id\":\"137948\",\"_doc\":\"season\",\"_utid\":28163,\"_sid\":1,\"name\":\"USL Championship 2026\",\"abbr\":\"UC 2026\",\"start\":{\"_doc\":\"time\",\"time\":\"00:00\",\"date\":\"07\\/03\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1772841600},\"end\":{\"_doc\":\"time\",\"time\":\"23:59\",\"date\":\"23\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1795478399},\"neutralground\":false,\"friendly\":false,\"currentseasonid\":137948,\"year\":\"2026\",\"coverage\":{\"live\":{\"id\":843,\"level\":{\"name\":\"Level 5\",\"value\":5}},\"match_creation\":{\"id\":841,\""
+    },
+    {
+      "url": "https://widgets.fn.sportradar.com/common/en/Etc:UTC/gismo/stats_match_situation/76582718?T=exp=1794970274~acl=/*~data=eyJvIjoiaHR0cHM6Ly93d3cubm92aWJldC5jb20iLCJhIjoiMTg2ODRjNmM2M2FjNTU5ZTAwNTY4NzhhNmQ0OTQ0ZjQiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJvcmlnaW4ifQ~hmac=7aeb54a05969c62eb52b9405cc0b2ad4e0c4760ca126ab7df8be4940ec0a9230",
+      "status": 200,
+      "size": 28517,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"stats_match_situation\\/76582718\",\"doc\":[{\"event\":\"stats_match_situation\",\"_dob\":1794889870,\"_maxage\":10,\"data\":{\"_doc\":\"match_situation_stats\",\"matchid\":\"76582718\",\"data\":[{\"time\":1,\"injurytime\":0,\"safe\":0,\"safecount\":0,\"home\":{\"attack\":2,\"dangerous\":0,\"safe\":36,\"attackcount\":2,\"dangerouscount\":0,\"safecount\":1},\"away\":{\"attack\":16,\"dangerous\":0,\"safe\":6,\"attackcount\":2,\"dangerouscount\":0,\"safecount\":2}},{\"time\":2,\"injurytime\":0,\"safe\":0,\"safecount\":0,\"home\":{\"attack\":0,\"dangerous\":0,\"safe\":9,\"attackcount\":0,\"dangerouscount\":0,\"safecount\":1},\"away\":{\"attack\":11,\"dangerous\":36,\"safe"
+    }
+  ]
+}

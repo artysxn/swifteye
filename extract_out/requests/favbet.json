@@ -1,0 +1,149 @@
+[
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "124",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"frontend/partner_config/get\",\"params\":{\"by\":{\"service_id\":{\"$in\":[1]}},\"fields\":[\"hash\"]}}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "124",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"frontend/partner_config/get\",\"params\":{\"by\":{\"service_id\":{\"$in\":[0]}},\"fields\":[\"hash\"]}}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "139",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"frontend/sport/get\",\"params\":{\"by\":{\"lang\":\"en\",\"service_id\":1,\"in_play\":true,\"event_count\":\"sport_id\"}}}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "139",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"frontend/sport/get\",\"params\":{\"by\":{\"lang\":\"en\",\"service_id\":0,\"in_play\":true,\"event_count\":\"sport_id\"}}}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api/head_groups/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "40",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"lang\":\"en\",\"service_id\":{\"$in\":[1,0]}}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api/top_live/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "33",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"lang\":\"en\",\"tags\":[\"top_live\"]}"
+  },
+  {
+    "url": "https://www.favbet.hr/service/lineout/frontend_api2/",
+    "method": "POST",
+    "headers": {
+      "host": "www.favbet.hr",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "accept-encoding": "gzip, deflate, br, zstd",
+      "referer": "https://www.favbet.hr/en/live/all/",
+      "content-type": "application/json",
+      "content-length": "132",
+      "origin": "https://www.favbet.hr",
+      "connection": "keep-alive",
+      "cookie": "COUNTRY-ID=NO; PHPSESSID=FC89B11B78D0CF28240147CDA3CAD4BDE64E4DBA181E44C4C2D92F2359ECF971E8F5F579983A0ABA32DA0BDA824ACD40EEC32EEDD40E8C8859DAD29BE96DE597; upstream=1; TZ=Europe/Zagreb; COLOR_SCHEME=dark; SELECTED_COLOR_MODE=dark",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin"
+    },
+    "post_data": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"frontend/event/get\",\"params\":{\"by\":{\"lang\":\"en\",\"sport_id\":2,\"head_markets\":true,\"service_id\":1}}}"
+  }
+]

@@ -1,0 +1,128 @@
+{
+  "url": "https://statshub.sportradar.com/bet365/en/sport/1",
+  "title": "Bet365 - Soccer",
+  "page_text": "Search Settings favorites Favorites Soccer Soccer Tennis Tennis Basketball Basketball Ice Hockey Ice Hockey Baseball Baseball Handball Handball Volleyball Volleyball All Sports All Sports All Sports Soccer Sports, Tournaments, Teams, Players Premier League LaLiga Serie A Bundesliga Ligue 1 Previous day Calendar Today Next day Live Filters Matches Africa Cup of Nations, Qualification, Group A International Add to favorites arrow Pin match 02:00 PM Lesotho Gabon ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Pin match 09:00 PM Niger Morocco ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group B International Add to favorites arrow Pin match 02:00 PM Malawi Egypt ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Pin match 02:00 PM South Sudan Angola ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group C International Add to favorites arrow Pin match 05:00 PM Gambia Ivory Coast ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group D International Add to favorites arrow Pin match 05:00 PM Kenya South Africa ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group E International Add to favorites arrow Pin match 05:00 PM Sierra Leone Congo DR ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group F International Add to favorites arrow Pin match 08:00 PM Mauritania Burkina Faso ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group G International Add to favorites arrow Pin match 08:00 PM Congo Republic Comoros ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group H International Add to favorites arrow Pin match 05:00 PM Libya Tunisia ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Pin match 08:00 PM Botswana Uganda ‌ - ‌ - ‌ - ‌ - FT HT - - - Open quick stats Africa Cup of Nations, Qualification, Group I International Add to favorites arrow Pin",
+  "odds_endpoints": [
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches_markets/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 36311,
+      "odds_like": true,
+      "sample": "{\"queryUrl\":\"unified_sport_matches_markets\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches_markets\",\"_dob\":1794889776,\"_maxage\":600,\"data\":{\"matches\":{\"68932054\":{\"markets\":[{\"_doc\":\"oddsapi_market\",\"_bookmakerId\":74,\"_matchId\":68932054,\"_marketId\":1,\"_uts\":1794888192,\"specifiers\":null,\"name\":\"1x2\",\"nameShort\":\"1x2\",\"active\":true,\"type\":\"prematch\",\"outcomes\":[{\"_id\":\"sr:outcome:1\",\"name\":\"{$competitor1}\",\"odds\":2.25,\"active\":true},{\"_id\":\"sr:outcome:2\",\"name\":\"draw\",\"odds\":4,\"active\":true},{\"_id\":\"sr:outcome:3\",\"name\":\"{$competitor2}\",\"odds\":2.75,\"active\":true}],\"source\":\"sr:crawler_"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches_markets/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 36311,
+      "odds_like": true,
+      "sample": "{\"queryUrl\":\"unified_sport_matches_markets\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches_markets\",\"_dob\":1794889776,\"_maxage\":600,\"data\":{\"matches\":{\"68932054\":{\"markets\":[{\"_doc\":\"oddsapi_market\",\"_bookmakerId\":74,\"_matchId\":68932054,\"_marketId\":1,\"_uts\":1794888192,\"specifiers\":null,\"name\":\"1x2\",\"nameShort\":\"1x2\",\"active\":true,\"type\":\"prematch\",\"outcomes\":[{\"_id\":\"sr:outcome:1\",\"name\":\"{$competitor1}\",\"odds\":2.25,\"active\":true},{\"_id\":\"sr:outcome:2\",\"name\":\"draw\",\"odds\":4,\"active\":true},{\"_id\":\"sr:outcome:3\",\"name\":\"{$competitor2}\",\"odds\":2.75,\"active\":true}],\"source\":\"sr:crawler_"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches_markets/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 36311,
+      "odds_like": true,
+      "sample": "{\"queryUrl\":\"unified_sport_matches_markets\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches_markets\",\"_dob\":1794889776,\"_maxage\":600,\"data\":{\"matches\":{\"68932054\":{\"markets\":[{\"_doc\":\"oddsapi_market\",\"_bookmakerId\":74,\"_matchId\":68932054,\"_marketId\":1,\"_uts\":1794888192,\"specifiers\":null,\"name\":\"1x2\",\"nameShort\":\"1x2\",\"active\":true,\"type\":\"prematch\",\"outcomes\":[{\"_id\":\"sr:outcome:1\",\"name\":\"{$competitor1}\",\"odds\":2.25,\"active\":true},{\"_id\":\"sr:outcome:2\",\"name\":\"draw\",\"odds\":4,\"active\":true},{\"_id\":\"sr:outcome:3\",\"name\":\"{$competitor2}\",\"odds\":2.75,\"active\":true}],\"source\":\"sr:crawler_"
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://sh.fn.sportradar.com/common/en/Africa:Lagos/gismo/stats_sport_matches_prevnext/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 2370,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"stats_sport_matches_prevnext\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"stats_sport_matches_prevnext\",\"_dob\":1794882613,\"_maxage\":3600,\"data\":{\"previous\":{\"_doc\":\"match\",\"_doctype\":\"generic\",\"_id\":72517150,\"_sid\":1,\"_rcid\":47,\"_tid\":72687,\"_utid\":25841,\"round\":3,\"week\":33,\"teams\":{\"home\":{\"_doc\":\"team\",\"_id\":12926626,\"_sid\":1,\"uid\":327285,\"virtual\":false,\"name\":\"Sokol Kolbuszowa Dolna\",\"mediumname\":\"Sokol Kolbuszowa Dolna\",\"abbr\":\"SOK\",\"nickname\":null,\"iscountry\":false,\"haslogo\":false},\"away\":{\"_doc\":\"team\",\"_id\":5531586,\"_sid\":1,\"uid\":38737,\"virtual\":false,\"name\":\"Wisloka Debica\",\"mediu"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/common/en/Etc:UTC/gismo/odds_ukformat/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 9785,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"odds_ukformat\\/\",\"doc\":[{\"event\":\"odds_ukformat\",\"_dob\":1773993497,\"_maxage\":600,\"data\":[{\"dec\":1.00001,\"frac\":\"1\\/100000\"},{\"dec\":1.000013,\"frac\":\"1\\/80000\"},{\"dec\":1.000015,\"frac\":\"1\\/66000\"},{\"dec\":1.00002,\"frac\":\"1\\/50000\"},{\"dec\":1.000025,\"frac\":\"1\\/40000\"},{\"dec\":1.00003,\"frac\":\"1\\/33000\"},{\"dec\":1.000036,\"frac\":\"1\\/28000\"},{\"dec\":1.00004,\"frac\":\"1\\/25000\"},{\"dec\":1.000045,\"frac\":\"1\\/22000\"},{\"dec\":1.00005,\"frac\":\"1\\/20000\"},{\"dec\":1.000056,\"frac\":\"1\\/18000\"},{\"dec\":1.000063,\"frac\":\"1\\/16000\"},{\"dec\":1.000071,\"frac\":\"1\\/14000\"},{\"dec\":1.000081,\"frac\":\"1\\/12000\"},{\"dec\":1.000"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/common/en/Africa:Lagos/gismo/sport_matches_prevnext/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 9062,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"sport_matches_prevnext\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"sport_matches_prevnext\",\"_dob\":1794889720,\"_maxage\":3600,\"data\":{\"previous\":{\"_doc\":\"match\",\"_doctype\":\"soccer\",\"_id\":71936246,\"_sid\":1,\"_seasonid\":137750,\"_rcid\":20,\"_tid\":34468,\"_utid\":406,\"_dt\":{\"_doc\":\"time\",\"time\":\"21:15\",\"date\":\"16\\/11\\/26\",\"tz\":\"WAT\",\"tzoffset\":3600,\"uts\":1794860100},\"round\":17,\"roundname\":{\"_doc\":\"tableround\",\"_id\":17,\"name\":17},\"week\":47,\"coverage\":{\"lineup\":2,\"formations\":0,\"livetable\":104014,\"injuries\":0,\"ballspotting\":false,\"cornersonly\":false,\"multicast\":true,\"scoutmatch\":1,\"scoutcoveragestatu"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/event_get/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 232019,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"event_get\\/\",\"doc\":[{\"event\":\"event_get\",\"_synced\":true,\"_dob\":1794889769,\"_maxage\":10,\"data\":[{\"_doc\":\"event\",\"_doctype\":\"currentperiod\",\"_id\":2524222584,\"_scoutid\":null,\"_sid\":5,\"_rcid\":2517,\"_tid\":200954,\"_dc\":false,\"_typeid\":\"22\",\"uts\":1794882923,\"updated_uts\":1794889756,\"type\":\"currentperiod\",\"matchid\":76776538,\"disabled\":0,\"time\":-1,\"seconds\":-1,\"injurytime\":0,\"team\":\"\",\"name\":\"Interrupted\",\"updatedate\":{\"_doc\":\"time\",\"time\":\"04:29\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794889756},\"period\":40,\"status\":{\"_doc\":\"status\",\"_id\":80,\"name\":\"Interrupted\",\"shortName\":\"I"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/config_tree_mini/67/0/1?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 1417894,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"config_tree_mini\\/67\\/0\\/1\",\"doc\":[{\"event\":\"config_tree_mini\",\"_dob\":1794860229,\"_maxage\":600,\"_configid\":16904,\"data\":[{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":4,\"_sid\":1,\"_rcid\":4,\"name\":\"International\",\"cc\":null,\"tournaments\":[{\"_doc\":\"tournament_mini\",\"_id\":43005,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":43005,\"_utid\":0,\"name\":\"6x6 World Amateur Championships\",\"roundbyround\":false,\"seasonid\":null,\"currentseason\":null,\"_sk\":false},{\"_doc\":\"tournament_mini\",\"_id\":55016,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":55016,\"_utid\":0,\"name\":\"EMF"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 472616,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"unified_sport_matches\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches\",\"_dob\":1794889760,\"_maxage\":20,\"data\":{\"sport\":{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":257,\"_sid\":1,\"_rcid\":257,\"name\":\"Albania\",\"cc\":{\"_doc\":\"countrycode\",\"_id\":2,\"a2\":\"al\",\"name\":\"Albania\",\"a3\":\"ALB\",\"ioc\":\"ALB\",\"continentid\":1,\"continent\":\"Europe\",\"population\":2800000},\"tournaments\":[{\"_doc\":\"tournament\",\"_id\":6130,\"_sid\":1,\"_rcid\":257,\"_isk\":1000,\"_tid\":6130,\"_utid\":756,\"_gender\":\"men\",\"name\":\"Kupa e Shqiperise\",\"abbr\":\"KES\",\"livetable\":false"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 472616,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"unified_sport_matches\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches\",\"_dob\":1794889760,\"_maxage\":20,\"data\":{\"sport\":{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":257,\"_sid\":1,\"_rcid\":257,\"name\":\"Albania\",\"cc\":{\"_doc\":\"countrycode\",\"_id\":2,\"a2\":\"al\",\"name\":\"Albania\",\"a3\":\"ALB\",\"ioc\":\"ALB\",\"continentid\":1,\"continent\":\"Europe\",\"population\":2800000},\"tournaments\":[{\"_doc\":\"tournament\",\"_id\":6130,\"_sid\":1,\"_rcid\":257,\"_isk\":1000,\"_tid\":6130,\"_utid\":756,\"_gender\":\"men\",\"name\":\"Kupa e Shqiperise\",\"abbr\":\"KES\",\"livetable\":false"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/common/en/Etc:UTC/gismo/odds_ukformat/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 9785,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"odds_ukformat\\/\",\"doc\":[{\"event\":\"odds_ukformat\",\"_dob\":1773993497,\"_maxage\":600,\"data\":[{\"dec\":1.00001,\"frac\":\"1\\/100000\"},{\"dec\":1.000013,\"frac\":\"1\\/80000\"},{\"dec\":1.000015,\"frac\":\"1\\/66000\"},{\"dec\":1.00002,\"frac\":\"1\\/50000\"},{\"dec\":1.000025,\"frac\":\"1\\/40000\"},{\"dec\":1.00003,\"frac\":\"1\\/33000\"},{\"dec\":1.000036,\"frac\":\"1\\/28000\"},{\"dec\":1.00004,\"frac\":\"1\\/25000\"},{\"dec\":1.000045,\"frac\":\"1\\/22000\"},{\"dec\":1.00005,\"frac\":\"1\\/20000\"},{\"dec\":1.000056,\"frac\":\"1\\/18000\"},{\"dec\":1.000063,\"frac\":\"1\\/16000\"},{\"dec\":1.000071,\"frac\":\"1\\/14000\"},{\"dec\":1.000081,\"frac\":\"1\\/12000\"},{\"dec\":1.000"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/config_tree_mini/67/0/1?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 1417894,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"config_tree_mini\\/67\\/0\\/1\",\"doc\":[{\"event\":\"config_tree_mini\",\"_dob\":1794860229,\"_maxage\":600,\"_configid\":16904,\"data\":[{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":4,\"_sid\":1,\"_rcid\":4,\"name\":\"International\",\"cc\":null,\"tournaments\":[{\"_doc\":\"tournament_mini\",\"_id\":43005,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":43005,\"_utid\":0,\"name\":\"6x6 World Amateur Championships\",\"roundbyround\":false,\"seasonid\":null,\"currentseason\":null,\"_sk\":false},{\"_doc\":\"tournament_mini\",\"_id\":55016,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":55016,\"_utid\":0,\"name\":\"EMF"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/event_get/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 214069,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"event_get\\/\",\"doc\":[{\"event\":\"event_get\",\"_synced\":true,\"_dob\":1794889780,\"_maxage\":10,\"data\":[{\"_doc\":\"event\",\"_doctype\":\"currentperiod\",\"_id\":2524222584,\"_scoutid\":null,\"_sid\":5,\"_rcid\":2517,\"_tid\":200954,\"_dc\":false,\"_typeid\":\"22\",\"uts\":1794882923,\"updated_uts\":1794889756,\"type\":\"currentperiod\",\"matchid\":76776538,\"disabled\":0,\"time\":-1,\"seconds\":-1,\"injurytime\":0,\"team\":\"\",\"name\":\"Interrupted\",\"updatedate\":{\"_doc\":\"time\",\"time\":\"04:29\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794889756},\"period\":40,\"status\":{\"_doc\":\"status\",\"_id\":80,\"name\":\"Interrupted\",\"shortName\":\"I"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/common/en/Etc:UTC/gismo/odds_ukformat/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 9785,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"odds_ukformat\\/\",\"doc\":[{\"event\":\"odds_ukformat\",\"_dob\":1773993497,\"_maxage\":600,\"data\":[{\"dec\":1.00001,\"frac\":\"1\\/100000\"},{\"dec\":1.000013,\"frac\":\"1\\/80000\"},{\"dec\":1.000015,\"frac\":\"1\\/66000\"},{\"dec\":1.00002,\"frac\":\"1\\/50000\"},{\"dec\":1.000025,\"frac\":\"1\\/40000\"},{\"dec\":1.00003,\"frac\":\"1\\/33000\"},{\"dec\":1.000036,\"frac\":\"1\\/28000\"},{\"dec\":1.00004,\"frac\":\"1\\/25000\"},{\"dec\":1.000045,\"frac\":\"1\\/22000\"},{\"dec\":1.00005,\"frac\":\"1\\/20000\"},{\"dec\":1.000056,\"frac\":\"1\\/18000\"},{\"dec\":1.000063,\"frac\":\"1\\/16000\"},{\"dec\":1.000071,\"frac\":\"1\\/14000\"},{\"dec\":1.000081,\"frac\":\"1\\/12000\"},{\"dec\":1.000"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/config_tree_mini/67/0/1?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 1417894,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"config_tree_mini\\/67\\/0\\/1\",\"doc\":[{\"event\":\"config_tree_mini\",\"_dob\":1794860229,\"_maxage\":600,\"_configid\":16904,\"data\":[{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":4,\"_sid\":1,\"_rcid\":4,\"name\":\"International\",\"cc\":null,\"tournaments\":[{\"_doc\":\"tournament_mini\",\"_id\":43005,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":43005,\"_utid\":0,\"name\":\"6x6 World Amateur Championships\",\"roundbyround\":false,\"seasonid\":null,\"currentseason\":null,\"_sk\":false},{\"_doc\":\"tournament_mini\",\"_id\":55016,\"_sid\":1,\"_rcid\":4,\"_isk\":1,\"_tid\":55016,\"_utid\":0,\"name\":\"EMF"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Etc:UTC/gismo/event_get/?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 192575,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"event_get\\/\",\"doc\":[{\"event\":\"event_get\",\"_synced\":true,\"_dob\":1794889790,\"_maxage\":10,\"data\":[{\"_doc\":\"event\",\"_doctype\":\"currentperiod\",\"_id\":\"76582718-22\",\"_scoutid\":null,\"_sid\":1,\"_rcid\":26,\"_tid\":84818,\"_dc\":false,\"_typeid\":\"22\",\"uts\":1794880862,\"updated_uts\":1794889781,\"type\":\"currentperiod\",\"matchid\":76582718,\"disabled\":0,\"time\":-1,\"seconds\":-1,\"injurytime\":1,\"team\":\"\",\"name\":\"2nd extra\",\"updatedate\":{\"_doc\":\"time\",\"time\":\"04:29\",\"date\":\"17\\/11\\/26\",\"tz\":\"UTC\",\"tzoffset\":0,\"uts\":1794889781},\"period\":12,\"status\":{\"_doc\":\"status\",\"_id\":42,\"name\":\"2nd extra\",\"shortName\":\"EI2\"}"
+    },
+    {
+      "url": "https://sh.fn.sportradar.com/bet365/en/Africa:Lagos/gismo/unified_sport_matches/1/2026-11-17/0?T=exp=1794973984~acl=/*~data=eyJvIjoiaHR0cHM6Ly9zdGF0c2h1Yi5zcG9ydHJhZGFyLmNvbSIsImEiOiJiZXQzNjUiLCJhY3QiOiJvcmlnaW5jaGVjayIsIm9zcmMiOiJob3N0aGVhZGVyIn0~hmac=343304a863ea2a1fc6d83ae8930c03ba6d246867f7acdf6102869b0862cf292c",
+      "status": 200,
+      "size": 472616,
+      "odds_like": false,
+      "sample": "{\"queryUrl\":\"unified_sport_matches\\/1\\/2026-11-17\\/0\",\"doc\":[{\"event\":\"unified_sport_matches\",\"_dob\":1794889782,\"_maxage\":20,\"data\":{\"sport\":{\"_doc\":\"sport\",\"_id\":1,\"_sid\":1,\"name\":\"Soccer\",\"realcategories\":[{\"_doc\":\"realcategory\",\"_id\":257,\"_sid\":1,\"_rcid\":257,\"name\":\"Albania\",\"cc\":{\"_doc\":\"countrycode\",\"_id\":2,\"a2\":\"al\",\"name\":\"Albania\",\"a3\":\"ALB\",\"ioc\":\"ALB\",\"continentid\":1,\"continent\":\"Europe\",\"population\":2800000},\"tournaments\":[{\"_doc\":\"tournament\",\"_id\":6130,\"_sid\":1,\"_rcid\":257,\"_isk\":1000,\"_tid\":6130,\"_utid\":756,\"_gender\":\"men\",\"name\":\"Kupa e Shqiperise\",\"abbr\":\"KES\",\"livetable\":false"
+    }
+  ]
+}

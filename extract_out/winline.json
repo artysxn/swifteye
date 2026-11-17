@@ -1,0 +1,93 @@
+{
+  "url": "https://winline.ru/live",
+  "title": "Лайв ставки на спорт в линии ✔️ коэффициенты Winline",
+  "page_text": "Линия Live сейчас Игры 24/7 Киберспорт Главная ••• Войти Регистрация Футбол Теннис Баскетбол Хоккей Киберспорт Кибер FIFA Кибер NBA Кибер NHL Настольный теннис Бадминтон Бейсбол Нунез Л. Дутине Д. Риндерер Д. Хаппек С. Линфилд Свифтс (рез) 0 Каррик Рейнджерс (рез) 0 1Т 15' Мацумура Р. 4 Каригё Т. 1 Прерв. Мессина Ю. 0 Хирано Т. 5 Прерв. Мочизуки К. 0 Райски М. 0 Прерв. Нью Мехико Юнайтед 1 Сакраменто Репаблик 2 2ОТ 109' Алам Ш. 0 Эстефан Ж. 0 3сет Астрос Халиско 75 Солес де Мексикали 74 Итог Джакорис А. 4 Джонс А. 1 Прерв. Все Видео Футбол Теннис Баскетбол Хоккей Киберспорт Кибер FIFA Кибер NBA Кибер NHL Настольный теннис Бадминтон Бейсбол Футбол Исход 1 x 2 Фора 1 - 2 Тотал М - Б Россия | Лига Про 3Х3 (2х10) Центурион Меркурий Итог 0 0 0 0 2Т Матч - - - - - - - - - США | USL, Чемпионшип Нью Мехико Юнайтед Сакраменто Репаблик 2ОТ 109' +7 1 2 0 1 ОТ Матч 36.0 5.00 1.22 - - - 1.70 1.5 2.10 Северная Ирландия | Премьер Лига (резерв) Линфилд Свифтс (рез) Каррик Рейнджерс (рез) 1Т 15' 0 0 0 0 1Т Матч - - - - - - - - - Теннис Исход 1 2 Фора 1 - 2 Тотал М - Б Челленджер (М) | Кобе, Япония Милич О. Джонс М. 3сет +20 1 1 0 30 О Матч 3.08 1.27 1.85 + 3.5 - 1.85 1.70 26.5 2.00 Имамура М. Симидзу Ю. 2сет +26 1 0 40 0 О Матч - 12.5 - - - - - - 2 сет - 12.5 - - - - - - Макдональд Н. Смит К. +27 0 0 Матч 2.40 1.46 2.00 + 2.5 - 1.70 1.70 22.5 2.00 1 сет 2.31 1.47 1.80 + 1.5 - 1.90 2.00 9.5 1.70 Челленджер (М) | Сидней, Австралия Фам Д. Мория Х. 2сет +26 1 0 0 30 О Матч 1.25 3.20 1.85 - 2.5 + 1.85 1.90 24.5 1.80 2 сет 1.60 2.12 1.35 + 1.5 - 2.90 1.70 10.5 2.00 Бекрофт И. Эллис Б. 3сет +19 1 1 15 30 О Матч 1.15 4.06 2.55 - 4.5 + 1.38 2.31 31.5 1.47 Холмгрен А. Суреш Д. 2сет +31 1 0 0 0 О Матч 1.02 7.26 1.80 - 2.5 + 1.90 1.85 25.5 1.85 2 сет 1.16 3.74 1.08 + 1.5 - 6.50 1.70 10.5 2.00 Ту Л. Маккейб Д. 2сет +30 1 0 40 15 О Матч 2.00 1.70 1.60 + 2.5 - 2.12 1.90 28.5 1.80 2 сет 7.18 1.01 1.35 + 3.5 - 3.05 3.05 8.5 1.25 UTR (Ж) | Ньюпорт-Бич, США Папазян Т. Берд К. 3сет +18 1 1 40 A О Матч ",
+  "odds_endpoints": [
+    {
+      "url": "https://wsys.winline.ru/bp/loyalty_promos.json",
+      "status": 200,
+      "size": 21739,
+      "odds_like": true,
+      "sample": "{\"result\":[{\"id\":2321,\"type\":1003,\"isLuckyDay\":false,\"announceStartAt\":null,\"announceEndAt\":\"2026-11-16T14:30:00Z\",\"startAt\":\"2026-11-16T14:30:00Z\",\"endAt\":\"2026-11-16T15:35:00Z\",\"isFinished\":false,\"resultCalculationStartAt\":\"2026-11-16T15:35:00Z\",\"resultCalculationEndAt\":\"2026-11-16T15:35:00Z\",\"withOrder\":false,\"trackOnAllCompleted\":false,\"gradesLootboxIds\":{},\"promoTasks\":[{\"task\":{\"id\":4380,\"title\":\"ТЕСТ. Секретный промокод 16.11.2026  Ставки на 3к 17:30-17:57\",\"subtitle\":\"ТЕСТ. Секретный промокод 16.11.2026  Ставки на 3к 17:30-17:57\",\"target\":3000,\"startAt\":\"2026-11-16T14:30:00Z\",\"endAt\":\""
+    }
+  ],
+  "all_json_endpoints": [
+    {
+      "url": "https://mc.yandex.com/watch/103805807/1?wmode=7&page-url=https%3A%2F%2Fwinline.ru%2Flive&charset=utf-8&uah=che%0A0&browser-info=pv%3A1%3Avf%3Adddrt18gjyll9elpqh7ilrr3dhowrf%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2710%3Acn%3A1%3Adp%3A0%3Als%3A1014644570055%3Ahid%3A826566542%3Az%3A60%3Ai%3A20261117052845%3Aet%3A1794889726%3Aetms%3A1794889725946%3Ac%3A1%3Arn%3A423548678%3Arqn%3A1%3Au%3A1794889726755320061%3Aw%3A976x947%3As%3A1920x1080x24%3Ask%3A1%3Afp%3A544%3Ads%3A39%2C83%2C31%2C0%2C-1%2C0%2C%2C225%2C%2C%2C%2C%2C%3Aco%3A0%3Acpf%3A1%3Ans%3A1794889725214%3Arqnl%3A1%3Ast%3A1794889726%3At%3A%D0%9B%D0%B0%D0%B9%D0%B2%20%D1%81%D1%82%D0%B0%D0%B2%D0%BA%D0%B8%20%D0%BD%D0%B0%20%D1%81%D0%BF%D0%BE%D1%80%D1%82%20%D0%B2%20%D0%BB%D0%B8%D0%BD%D0%B8%D0%B8%20%E2%9C%94%EF%B8%8F%20%D0%BA%D0%BE%D1%8D%D1%84%D1%84%D0%B8%D1%86%D0%B8%D0%B5%D0%BD%D1%82%D1%8B%20Winline&t=clt%28375%29clc%280-0-0%29rqnt%281%29aw%281%29nvt%280%29rcm%281%29cdl%28na%29eco%28827456%29ti%281%29&redirnss=1",
+      "status": 200,
+      "size": 748,
+      "odds_like": false,
+      "sample": "{\"settings\":{\"auto_goals\":1,\"button_goals\":0,\"c_recp\":\"1.00000\",\"form_goals\":1,\"pcs\":\"1\",\"publisher\":{\"schema\":\"json_ld\"},\"webvisor\":{\"ad_recp\":\"0\",\"arch_type\":\"none\",\"date\":\"2026-11-08 00:08:01\",\"forms\":1,\"recp\":\"0\"},\"sbp\": {\"a\":\"ltfUU7qIuIEibJ51xSaaFpAyKkY16QWqcD0bXQNJyY3M0x0usD6QGhNYWmi7Cu1d\", \"b\":\"AxhodaSG/npT9t1NkfpooaRyzkN0lgJ5iQGOM4zCewD/nF6MGw64ckKcYX+0zsKR\"},\"eu\":1,\"region\":\"NO\",\"nss\":1,\"hittoken\":\"1794889723_132338375a97137c794b87e508ea7d0015b9f3e5a8a1ab6ef36da615963d6cb1\",\"cf\":1,\"mcf\":1,\"aytm\": true,\"wstoken\":\"11206.eHtNia_y51zQpaO0PtIkM1uSia9owPbf5afWSyOYq9R4vuPUgTZTsUTDMfsZx91sV3d"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/promo/v3/settings",
+      "status": 200,
+      "size": 37993,
+      "odds_like": false,
+      "sample": "{\"main\": {\"title1\": \"ПРОГРАММА\", \"title2\": \"ЛОЯЛЬНОСТИ\", \"subTitle\": \"Получай максимум выгоды:\\nфрибеты, игра Мины и кэшбэк до 100%\", \"background\": \"https://winline.ru/resources/images/loyalty/main/Main_BG.png\", \"benefitButtonTxt\": \"УЗНАТЬ ПРЕИМУЩЕСТВА\", \"benefitButtonApp\": \"https://winline.ru/api/static-data/cpl/landing_loyalty_system_app/\", \"benefitButtonWeb\": \"https://winline.ru/api/static-data/cpl/landing_loyalty_system/\", \"benefitButtonMWeb\": \"https://winline.ru/api/static-data/cpl/landing_loyalty_system/\", \"winButtonTxt\": \"К БОНУСАМ\", \"winInfoTxt\": \"Доступен бонус\", \"timerTxt\": \"Следующи"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/cyber-config/v2/default",
+      "status": 200,
+      "size": 2771,
+      "odds_like": false,
+      "sample": "{\"filters\": [{\"name\": \"DOTA 2\", \"type\": \"country_id\", \"id\": 20086, \"sort\": 10, \"icon\": \"\", \"iconDesk\": \"Dota2\", \"nameDesk\": \"ATOD 2\"}, {\"name\": \"CS\", \"type\": \"country_id\", \"id\": 20087, \"sort\": 20, \"icon\": \"\", \"iconDesk\": \"CS2\"}, {\"name\": \"LoL\", \"type\": \"country_id\", \"id\": 20092, \"sort\": 30, \"icon\": \"\", \"iconDesk\": \"LoL\"}, {\"name\": \"Valorant\", \"type\": \"country_id\", \"id\": 20095, \"sort\": 40, \"icon\": \"\", \"iconDesk\": \"Valorant\"}, {\"name\": \"Mobile Legends\", \"type\": \"country_id\", \"id\": 20225, \"sort\": 50, \"icon\": \"\", \"iconDesk\": \"MLBB\"}, {\"name\": \"Standoff 2\", \"type\": \"country_id\", \"id\": 20246, \"sort\""
+    },
+    {
+      "url": "https://winline.ru/api/cls/packs/web-full.json",
+      "status": 200,
+      "size": 1108859,
+      "odds_like": false,
+      "sample": "{\"iconImageFiles\": [], \"customIcons\": [{\"iconName\": \"sport1\", \"iconData\": \"<svg version=\\\"1.1\\\" id=\\\"Layer_1\\\" xmlns=\\\"http://www.w3.org/2000/svg\\\" xmlns:xlink=\\\"http://www.w3.org/1999/xlink\\\" x=\\\"0px\\\" y=\\\"0px\\\"\\n\\t viewBox=\\\"0 0 60 60\\\" style=\\\"enable-background:new 0 0 60 60;\\\" xml:space=\\\"preserve\\\">\\n<style type=\\\"text/css\\\">\\n\\t.st0{fill:#A3A4A4;}\\n</style>\\n<g>\\n\\t<g>\\n\\t\\t<path class=\\\"st0\\\" d=\\\"M30,0C13.4,0,0,13.4,0,30s13.4,30,30,30s30-13.4,30-30S46.6,0,30,0z M30,58C14.5,58,2,45.5,2,30S14.5,2,30,2\\n\\t\\t\\ts28,12.5,28,28S45.5,58,30,58z\\\"/>\\n\\t</g>\\n\\t<g>\\n\\t\\t<path class=\\\"st0\\\" d=\\\"M25"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/promo/v3/pages",
+      "status": 200,
+      "size": 81423,
+      "odds_like": false,
+      "sample": "[{\"name\": \"cashback\", \"type\": 7, \"eventInApp\": \"ias/106089\", \"luckyEventInApp\": \"ias/106088\", \"takeFreebetInApp\": \"iam/592\", \"luckyTakeFreebetInApp\": \"iam/594\", \"webTakeFreebetInApp\": \"iam/593\", \"webLuckyTakeFreebetInApp\": \"iam/595\", \"header\": {\"timeLable\": {\"color\": \"#1414191A\", \"textColor\": \"#141419\"}, \"luckyLable\": {\"title\": \"СЧАСТЛИВЫЙ ДЕНЬ\", \"color\": \"#1761FF\", \"textColor\": \"#FFFFFF\"}, \"pic\": \"https://winline.ru/resources/images/loyalty/mechanics/cashback.png\", \"animationPic\": \"https://winline.ru/resources/images/loyalty/mechanics/cashback.json\", \"animationPicIos\": \"\", \"animationPicAndroi"
+    },
+    {
+      "url": "https://winline.ru/api/v2/getip?_format=json",
+      "status": 200,
+      "size": 25,
+      "odds_like": false,
+      "sample": "{\"my_ip\": \"158.248.9.68\"}"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/promo/v2/dailybonus/0",
+      "status": 200,
+      "size": 3977,
+      "odds_like": false,
+      "sample": "{\"jackpot\": {\"preview\": {\"pic\": \"https://winline.ru/resources/images/new_loyalty/loyalty_images/loyalty_2025/daily_bonus_preview.png\", \"name\": \"Ежедневный фрибет\", \"descactive\": \"Узнай, какой приз\\nдостанется тебе сегодня!\", \"descnotactive\": \"Выполняй условия сегодня\\nи вращай колесо фрибетов\", \"descused\": \"Сегодня ты уже получил приз,\\nвыполняй условия завтра\\nи крути еще!\", \"prizeinfo\": \"Твой приз за сегодня {prizeList}\"}, \"details\": {\"title\": \"Ежедневный фрибет\", \"pic\": \"https://winline.ru/resources/images/new_loyalty/loyalty_images/loyalty_2025/daily_bonus_detail.png\", \"drop_text\": \"До акт"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/settings/desktop",
+      "status": 200,
+      "size": 5019,
+      "odds_like": false,
+      "sample": "{\n  \"general\": {},\n  \"feature\": {\n    \"ident\": {\n      \"errorDisplayTTL_s\": 86400,\n      \"innEnabled\": 1,\n      \"snilsEnabled\": 1\n    },\n    \"vault\": {\n      \"onboardingId\": \"51634\",\n      \"noLoginOnboardingId\": \"52474\",\n      \"minDeposit\": 1000\n    },\n    \"winpass\": {\n      \"areaEnabled\": 0,\n      \"winpassEnabled\": 0,\n      \"urlOnboarding\": \"https://youtu.be/CiSUsDYMZ_4?si=55No7CltC1PngOKT\"\n    },\n    \"pickem\": {\n      \"enabled\": 0\n    },\n    \"lottery\": {\n      \"gamesBanner\": 1\n    },\n    \"tournaments\": {\n      \"enabled\": false,\n      \"lastDay\": true\n    },\n    \"selfLimiting\": {\n      \"esia\":"
+    },
+    {
+      "url": "https://wsys.winline.ru/bp/active_season.json",
+      "status": 200,
+      "size": 5302,
+      "odds_like": false,
+      "sample": "{\"result\":[{\"id\":2209,\"type\":1000,\"isLuckyDay\":true,\"announceStartAt\":null,\"announceEndAt\":\"2026-10-09T12:00:00Z\",\"startAt\":\"2026-10-09T12:00:00Z\",\"endAt\":\"2026-10-09T13:00:00Z\",\"wheelSectorsCount\":4,\"minBetAmount\":50,\"minDepAmount\":0,\"promotionTasksType\":2,\"grades\":[{\"id\":5353,\"promotionLootBoxId\":1893,\"gradeStart\":0,\"contents\":[{\"order\":2,\"rewardId\":539812,\"freebetAmount\":500},{\"order\":4,\"rewardId\":539814,\"freebetAmount\":2000},{\"order\":5,\"rewardId\":539815,\"freebetAmount\":5000},{\"order\":1,\"rewardId\":539811,\"freebetAmount\":250},{\"order\":3,\"rewardId\":539813,\"freebetAmount\":1000}]}],\"tasks\":[{\"i"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/alter/2/13088",
+      "status": 200,
+      "size": 22117,
+      "odds_like": false,
+      "sample": "{\"t\": [{\"deeplink\": \"Custom/123\", \"img_app\": \"https://qcdnfront.winline.ru/resources/images/app_topbar/WSS_NOV.png\", \"img_web\": \"https://qcdnfront.winline.ru/resources/images/app_topbar/WSS_NOV.png\", \"n_img_web\": \"https://qcdnfront.winline.ru/resources/images/app_topbar/WSS_NOV_kiber.png\", \"is_test\": false, \"country_id\": \"20087\", \"id\": 159, \"order\": 3}, {\"deeplink\": \"Custom/116\", \"img_app\": \"https://qcdnfront.winline.ru/resources/images/app_topbar/PGL_Cluj_Napoca_2027.png\", \"img_web\": \"https://qcdnfront.winline.ru/resources/images/app_topbar/PGL_Cluj_Napoca_2027.png\", \"n_img_web\": \"https://qcd"
+    },
+    {
+      "url": "https://winline.ru/api/static-data/alter/1/102872",
+      "status": 200,
+      "size": 117488,
+      "odds_like": false,
+      "sample": "{\"t\": [{\"is_crm0\": true, \"deeplink\": \"br_main\", \"img_app\": \"https://a.winline.ru/resources/images/app_topbar/BR.png\", \"img_web\": \"https://a.winline.ru/resources/images/app_topbar/BR.png\", \"name\": \"BetRace\", \"is_test\": false, \"n_img_web\": \"https://a.winline.ru/resources/images/app_topbar/BR.png\", \"product\": 14, \"id\": 1, \"order\": 23}, {\"is_crm0\": false, \"deeplink\": \"Custom/8\", \"img_app\": \"https://winline.ru/resources/images/app_topbar/KHL_2026.png\", \"img_web\": \"https://winline.ru/resources/images/app_topbar/KHL_2026.png\", \"id\": 7, \"order\": 6}, {\"deeplink\": \"default\", \"img_app\": \"https://winline."
+    }
+  ]
+}
