@@ -21,6 +21,7 @@ use std::path::Path;
 #[derive(Clone, Debug, Serialize)]
 pub struct RankEvent {
     pub match_id: i64,
+    pub sport: String,
     pub home: String,
     pub away: String,
     pub outcome: String,
@@ -80,6 +81,29 @@ pub struct Opportunity {
     pub capturable_at_least: Vec<(f64, usize, f64)>,
 }
 
+/// How far a prediction market (the "baseline") trails a reference bookmaker: the numbers
+/// that say whether its price can be sniped after a bookmaker moves.
+#[derive(Clone, Debug, Serialize)]
+pub struct Snipe {
+    /// "polymarket" or "kalshi".
+    pub baseline: String,
+    /// "first" = whichever bookmaker moved first on each move; otherwise a bookmaker name.
+    pub reference: String,
+    /// Moves where both the baseline and the reference moved.
+    pub n: usize,
+    /// baseline time - reference time (positive = the baseline was later).
+    pub mean_ms: Option<i64>,
+    pub median_ms: Option<i64>,
+    /// Share of those moves where the baseline was later.
+    pub behind_share: Option<f64>,
+    /// Least-squares trend of the delay over time, ms of delay per hour of wall time.
+    pub trend_ms_per_h: Option<f64>,
+    /// Fitted line at the first and last point: [(ts, delay), (ts, delay)].
+    pub trend_line: Vec<(Ms, f64)>,
+    /// (move time, delay) per move, oldest first (at most 3000, evenly thinned).
+    pub points: Vec<(Ms, i64)>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Rankings {
     pub sources: Vec<SourceRank>,
@@ -88,6 +112,11 @@ pub struct Rankings {
     pub opportunity_kalshi: Opportunity,
     pub events: Vec<RankEvent>,
     pub matches: usize,
+    /// The bookmaker that leads most across all games in the window (lowest median time
+    /// behind the first mover, with enough moves to count).
+    pub fastest_book: Option<String>,
+    /// Polymarket and Kalshi vs the fastest bookmaker in the moment and vs `fastest_book`.
+    pub snipe: Vec<Snipe>,
 }
 
 fn quant(v: &[i64], q: f64) -> Option<i64> {
@@ -117,9 +146,15 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
         if p.match_id.is_some_and(|m| m != *mid) {
             continue;
         }
-        let (home, away): (String, String) = c
-            .query_row("SELECT home, away FROM matches WHERE id = ?1", params![mid], |r| Ok((r.get(0)?, r.get(1)?)))
+        let (home, away, sport): (String, String, String) = c
+            .query_row("SELECT home, away, sport FROM matches WHERE id = ?1", params![mid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap_or_default();
+        if let Some(want) = &p.sport {
+            let ok = if want == "esports" { crate::books::is_esports_sport(&sport) } else { &sport == want };
+            if !ok {
+                continue;
+            }
+        }
         let mut series: BTreeMap<(String, String), Series> = BTreeMap::new();
         let mut st = c.prepare_cached(
             "SELECT book, outcome, ts_ms, book_ts_ms, new_price FROM changes
@@ -217,6 +252,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                 let pm_to = end_of.get(PM).copied();
                 events.push(RankEvent {
                     match_id: *mid,
+                    sport: sport.clone(),
                     home: home.clone(),
                     away: away.clone(),
                     outcome: outcome.into(),
@@ -305,7 +341,82 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
     let mut ms: Vec<i64> = events.iter().map(|e| e.match_id).collect();
     ms.sort();
     ms.dedup();
-    Ok(Rankings { sources, opportunity, opportunity_kalshi, events, matches: ms.len() })
+    let fastest_book = p.fastest.clone().or_else(|| fastest(&sources));
+    let mut snipe = Vec::new();
+    for base in [PM, KALSHI] {
+        snipe.push(snipe_for(&events, base, None));
+        if let Some(fb) = &fastest_book {
+            snipe.push(snipe_for(&events, base, Some(fb)));
+        }
+    }
+    Ok(Rankings { sources, opportunity, opportunity_kalshi, events, matches: ms.len(), fastest_book, snipe })
+}
+
+/// Bookmaker with the lowest median time behind the first mover, among those with enough
+/// moves (see `min_n`), else the best of what there is.
+fn fastest(sources: &[SourceRank]) -> Option<String> {
+    let books: Vec<&SourceRank> = sources.iter().filter(|s| s.source != PM && s.source != KALSHI && s.median_behind_first_ms.is_some()).collect();
+    // Enough moves to trust the median: 10, and at least a tenth of the busiest bookmaker's.
+    let busiest = books.iter().map(|s| s.moved).max().unwrap_or(0);
+    let min_n = if busiest >= 10 { (busiest / 10).max(10) } else { 1 };
+    books
+        .into_iter()
+        .filter(|s| s.moved >= min_n)
+        .min_by(|a, b| {
+            a.median_behind_first_ms
+                .cmp(&b.median_behind_first_ms)
+                .then(b.first_share.partial_cmp(&a.first_share).unwrap_or(std::cmp::Ordering::Equal))
+                .then(b.moved.cmp(&a.moved))
+        })
+        .map(|s| s.source.clone())
+}
+
+pub fn snipe_for(events: &[RankEvent], base: &str, reference: Option<&str>) -> Snipe {
+    let mut pts: Vec<(Ms, i64)> = Vec::new();
+    for e in events {
+        let Some(bt) = e.order.iter().find(|x| x.0 == base).map(|x| x.1) else { continue };
+        let rt = match reference {
+            None => e.first_book_ms,
+            Some(r) => e.order.iter().find(|x| x.0 == r).map(|x| x.1),
+        };
+        if let Some(rt) = rt {
+            pts.push((rt, bt - rt));
+        }
+    }
+    pts.sort_by_key(|p| p.0);
+    let n = pts.len();
+    let delays: Vec<i64> = pts.iter().map(|p| p.1).collect();
+    let mean = (n > 0).then(|| (delays.iter().sum::<i64>() as f64 / n as f64).round() as i64);
+    // Least squares on (hours since first point, delay).
+    let (slope, line) = if n >= 3 && pts[n - 1].0 > pts[0].0 {
+        let t0 = pts[0].0;
+        let xs: Vec<f64> = pts.iter().map(|p| (p.0 - t0) as f64 / 3_600_000.0).collect();
+        let ys: Vec<f64> = delays.iter().map(|d| *d as f64).collect();
+        let (mx, my) = (xs.iter().sum::<f64>() / n as f64, ys.iter().sum::<f64>() / n as f64);
+        let sxx: f64 = xs.iter().map(|x| (x - mx).powi(2)).sum();
+        let sxy: f64 = xs.iter().zip(&ys).map(|(x, y)| (x - mx) * (y - my)).sum();
+        if sxx > 0.0 {
+            let b = sxy / sxx;
+            let a = my - b * mx;
+            (Some(b), vec![(pts[0].0, a), (pts[n - 1].0, a + b * xs[n - 1])])
+        } else {
+            (None, Vec::new())
+        }
+    } else {
+        (None, Vec::new())
+    };
+    let step = (n / 3000).max(1);
+    Snipe {
+        baseline: base.into(),
+        reference: reference.unwrap_or("first").into(),
+        n,
+        mean_ms: mean,
+        median_ms: quant(&delays, 0.5),
+        behind_share: (n > 0).then(|| delays.iter().filter(|d| **d > 0).count() as f64 / n as f64),
+        trend_ms_per_h: slope,
+        trend_line: line,
+        points: pts.into_iter().step_by(step).collect(),
+    }
 }
 
 /// How often `market` was still behind when the first bookmaker moved, and how far it still had to go.
@@ -343,6 +454,24 @@ fn opportunity_for(events: &[RankEvent], market: &str, get: impl Fn(&RankEvent) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snipe_mean_and_trend() {
+        let ev = |t: Ms, d: i64| RankEvent {
+            match_id: 1, sport: "football".into(), home: String::new(), away: String::new(), outcome: "home".into(), direction: 1,
+            order: vec![("unibet".into(), t), (PM.into(), t + d)], missed: vec![],
+            first_book: Some("unibet".into()), first_book_ms: Some(t), pm_ms: Some(t + d), pm_at_first_book: None,
+            pm_to: None, pm_lead_ms: Some(d), capturable: None, kalshi_ms: None, kalshi_lead_ms: None, kalshi_capturable: None,
+        };
+        // Delay grows 1 s per hour: 2 s, 3 s, 4 s.
+        let evs = vec![ev(0, 2000), ev(3_600_000, 3000), ev(7_200_000, 4000)];
+        let s = snipe_for(&evs, PM, None);
+        assert_eq!(s.n, 3);
+        assert_eq!(s.mean_ms, Some(3000));
+        assert!((s.trend_ms_per_h.unwrap() - 1000.0).abs() < 1e-6);
+        assert_eq!(snipe_for(&evs, PM, Some("unibet")).median_ms, Some(3000));
+        assert_eq!(snipe_for(&evs, KALSHI, None).n, 0);
+    }
 
     #[test]
     fn quantile_picks_middle() {

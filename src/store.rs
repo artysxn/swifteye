@@ -65,6 +65,19 @@ CREATE TABLE IF NOT EXISTS pm_quotes(
   bid REAL, ask REAL, last REAL
 );
 CREATE INDEX IF NOT EXISTS pm_quotes_match ON pm_quotes(match_id, ts_ms);
+
+-- Kalshi top of book per contract (event ticker + outcome), probabilities 0..1.
+-- est = 1: rebuilt from Kalshi's 1-minute candles (bid/ask closes) for earlier hours.
+CREATE TABLE IF NOT EXISTS kalshi_quotes(
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  server_ts_ms INTEGER,
+  event TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  bid REAL, ask REAL,
+  est INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS kalshi_quotes_ev ON kalshi_quotes(event, outcome, ts_ms);
 "#;
 
 pub fn open(path: &Path) -> Result<Connection> {
@@ -187,10 +200,14 @@ fn flush(c: &mut Connection, buf: &mut Vec<Write>) -> Result<()> {
         let mut ins_pm = tx.prepare_cached(
             "INSERT INTO pm_quotes(ts_ms,server_ts_ms,match_id,event_id,outcome,bid,ask,last) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         )?;
+        let mut ins_k = tx.prepare_cached("INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est) VALUES(?1,?2,?3,?4,?5,?6,?7)")?;
         for w in buf.drain(..) {
             match w {
                 Write::PmQuote { ts_ms, server_ts_ms, match_id, event_id, outcome, bid, ask, last } => {
                     ins_pm.execute(params![ts_ms, server_ts_ms, match_id, event_id, outcome.as_str(), bid, ask, last])?;
+                }
+                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est } => {
+                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64])?;
                 }
                 Write::Change(ch) => {
                     ins_change.execute(params![

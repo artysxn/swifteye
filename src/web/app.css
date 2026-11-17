@@ -224,6 +224,13 @@ img.lg { width: 16px; height: 16px; border-radius: 4px; flex: none; object-fit: 
 .sel-opt.on .ic { visibility: visible; }
 .sel-opt.hi { background: var(--bg-3); color: var(--text); }
 .sel-opt small { color: var(--text-3); margin-left: 6px; }
+/* Sport / game icons inside selects (not the check mark, which is also .ic). */
+.sp-ic { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; margin-right: 8px; vertical-align: -4px; }
+img.sp-ic { object-fit: cover; }
+.sel-opt .sp-ic .ic, .sel-btn .sp-ic .ic { margin: 0; visibility: visible; color: var(--text-2); font-size: 18px; transform: none; }
+.sel-opt.on .sp-ic .ic { color: var(--accent); }
+.sel-btn span.v { display: inline-flex; align-items: center; }
+.sel-group { padding: 10px 10px 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .sel-empty { padding: 12px; color: var(--text-3); }
 
 .switch { position: relative; display: inline-block; width: 34px; height: 20px; flex: none; }
@@ -431,3 +438,15 @@ a[data-tip], a[data-tipsrc], button[data-tip], tr[data-tipq], .more[data-tip] { 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 3px solid var(--bg); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* Snipe window page */
+.sn-setup { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 28px; margin-bottom: 26px; }
+.sn-setup .note { margin-bottom: 8px; }
+.sn-facts { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 20px; }
+.sn-fact { display: flex; gap: 12px; align-items: flex-start; line-height: 1.55; color: var(--text-2); }
+.sn-fact > .ic { color: var(--accent); font-size: 20px; margin-top: 1px; }
+.sn-fact b { color: var(--text); }
+.sn-row { margin: 34px 0 10px; font-weight: 650; }
+b.pos { color: var(--up, #3ddc97); }
+b.neg { color: var(--down, #ff6b6b); }
+tr.on td { background: var(--bg-2); }

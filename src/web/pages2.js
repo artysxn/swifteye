@@ -55,7 +55,7 @@ SE.pages.match = {
         <button data-t="lines">${ic('stacked_bar_chart')}Lines</button>
         <button data-t="timeline">${ic('history')}Changes</button>
       </div><div id="mBody"></div>`;
-    let tab = 'prices', detail = null, chart = null, changes = [];
+    let tab = 'prices', detail = null, chart = null, changes = [], snChart = null;
     const cs = { outcome: 'home', scale: 'prob' };
     $$('#mTabs button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; $$('#mTabs button').forEach((x) => x.classList.toggle('on', x === b)); draw(true); }));
 
@@ -122,8 +122,19 @@ SE.pages.match = {
       body.innerHTML = block('total', ['over', 'under'], 'Total goals', 'functions') + block('handicap', ['home', 'away'], 'Handicap, home line', 'balance');
     }
     async function drawMoves(body) {
-      body.innerHTML = P.sec('timeline', 'Who moved first', '<div id="mEv"><div class="empty">Loading</div></div>', '', 'Every move several sources made on this match, with each source placed where it crossed halfway.');
-      const r = await api(`/rankings?since=0&match=${id}&min_jump=${SE.pref('minJump')}&window_s=${SE.pref('windowS')}&limit=500`);
+      body.innerHTML = P.sec('my_location', 'Snipe window', '<div id="mSn"><div class="empty">Loading</div></div>', '', 'How far Polymarket and Kalshi trailed the bookmakers on this match. "Fastest" is the bookmaker that leads most across all games in the last 24 hours.') +
+        P.sec('timeline', 'Who moved first', '<div id="mEv"><div class="empty">Loading</div></div>', '', 'Every move several sources made on this match, with each source placed where it crossed halfway.');
+      const jw = `min_jump=${SE.pref('minJump')}&window_s=${SE.pref('windowS')}`;
+      // The all-games fastest bookmaker (cached 5 min), so this match is timed against the same book.
+      if (!SE._fastest || Date.now() - SE._fastest.at > 300000) {
+        const g = await api(`/rankings?since=${Date.now() - 86400000}&${jw}&limit=0`).catch(() => null);
+        SE._fastest = { at: Date.now(), book: g?.rankings?.fastest_book || '' };
+      }
+      const r = await api(`/rankings?since=0&match=${id}&${jw}&limit=500&fastest=${encodeURIComponent(SE._fastest.book)}`);
+      if (!$('#mSn')) return;
+      snChart?.destroy();
+      snChart = P.snipeBox($('#mSn'));
+      snChart.update(r.rankings);
       const ev = r.rankings.events.filter((e) => e.match_id === id).reverse();
       $('#mEv').innerHTML = ev.length ? ev.map((e) => P.eventRow(e)).join('') : '<div class="empty">No shared moves on this match yet.</div>';
     }
@@ -140,18 +151,18 @@ SE.pages.match = {
     }
     function drawChart(body) {
       body.innerHTML = P.sec('monitoring', '1X2 over time', '<div class="chart" id="mChart" style="height:400px"></div><div class="legend" id="mLegend"></div>', '<div id="cO"></div><div id="cS"></div>', 'Drag across the chart to zoom, double-click to reset. Click a legend entry to hide it.');
-      SE.seg($('#cO'), [['home', '1'], ['draw', 'X'], ['away', '2']], cs.outcome, (v) => { cs.outcome = v; renderChart(); });
-      SE.seg($('#cS'), [['prob', 'Probability'], ['odds', 'Odds']], cs.scale, (v) => { cs.scale = v; renderChart(); });
+      SE.destroyChart(chart);
+      chart = null;
+      SE.seg($('#cO'), [['home', '1'], ['draw', 'X'], ['away', '2']], cs.outcome, (v) => { cs.outcome = v; SE.destroyChart(chart); chart = null; renderChart(); });
+      SE.seg($('#cS'), [['prob', 'Probability'], ['odds', 'Odds']], cs.scale, (v) => { cs.scale = v; SE.destroyChart(chart); chart = null; renderChart(); });
       renderChart();
     }
     function renderChart() {
       if (!$('#mChart')) return;
       const { xs, series } = seriesFor();
-      SE.destroyChart(chart);
-      chart = null;
-      if (!xs.length) { $('#mChart').innerHTML = `<div class="empty">${ic('show_chart')}No 1X2 history recorded for this match yet.</div>`; return; }
-      chart = SE.chart($('#mChart'), xs, series, { yFmt: cs.scale === 'prob' ? (v) => (v == null ? '' : (v * 100).toFixed(0) + '%') : (v) => (v == null ? '' : v.toFixed(2)) });
-      SE.legend($('#mLegend'), series, chart);
+      // Keep the viewer's zoom and hidden lines when new prices arrive (rebuilding reset them).
+      chart = SE.chartKeep($('#mChart'), chart, xs, series, { yFmt: cs.scale === 'prob' ? (v) => (v == null ? '' : (v * 100).toFixed(0) + '%') : (v) => (v == null ? '' : v.toFixed(2)) }, $('#mLegend'));
+      if (!chart) $('#mChart').innerHTML = `<div class="empty">${ic('show_chart')}No 1X2 history recorded for this match yet.</div>`;
     }
     async function drawTimeline(body) {
       body.innerHTML = P.sec('history', 'Every price change', '<div id="tT"></div>', '<div id="tM"></div><button class="btn" id="tCsv">' + ic('download') + 'CSV</button>');
@@ -179,7 +190,7 @@ SE.pages.match = {
       draw(true);
     })();
     SE.every(2500, async () => { if (await loadDetail()) if (tab === 'prices' || tab === 'lines') draw(false); });
-    return () => { off(); SE.destroyChart(chart); };
+    return () => { off(); SE.destroyChart(chart); snChart?.destroy(); };
   },
 };
 
@@ -334,6 +345,7 @@ SE.pages.sheet = {
     }
     async function load() {
       const d = await api('/quotes');
+      if (!$('#sSync')) return; // the page was left while this loaded
       all = d.rows.map((a) => Object.fromEntries(d.columns.map((c, i) => [c, a[i]])));
       byKey = new Map(all.map((r) => [keyOf(r), r]));
       const books = [...new Set(all.map((r) => r.book))].sort();

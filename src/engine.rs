@@ -109,6 +109,17 @@ pub enum Write {
         ask: Option<f64>,
         last: Option<f64>,
     },
+    /// Kalshi top of book for one contract (probabilities). `est` = rebuilt from Kalshi's
+    /// 1-minute candles for hours recorded before real quotes were kept.
+    KQuote {
+        ts_ms: Ms,
+        server_ts_ms: Option<Ms>,
+        event: String,
+        outcome: Outcome,
+        bid: Option<f64>,
+        ask: Option<f64>,
+        est: bool,
+    },
 }
 
 #[derive(Default)]

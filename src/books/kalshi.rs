@@ -13,6 +13,7 @@
 //!   Price stored = decimal odds from the mid of the Yes bid/ask.
 
 use super::*;
+use crate::engine::Write;
 use crate::kalacct::KalshiCreds;
 use crate::matcher::Names;
 use futures::{SinkExt, StreamExt};
@@ -48,17 +49,35 @@ struct Shared {
     book: PriceBook,
     /// The socket is connected and subscribed.
     ws_live: bool,
+    /// contract ticker -> (event ticker, outcome), for recording quotes.
+    tickers: HashMap<String, (String, Outcome)>,
+    /// Last recorded (bid, ask) per contract, so only changes are written.
+    recorded: HashMap<String, (Option<f64>, Option<f64>)>,
+}
+
+impl Shared {
+    /// A `kalshi_quotes` row when this contract's top of book changed.
+    fn record(&mut self, ticker: &str, bid: Option<f64>, ask: Option<f64>, server_ts: Option<Ms>) -> Option<Write> {
+        let (event, outcome) = self.tickers.get(ticker)?.clone();
+        if self.recorded.get(ticker) == Some(&(bid, ask)) {
+            return None;
+        }
+        self.recorded.insert(ticker.to_string(), (bid, ask));
+        Some(Write::KQuote { ts_ms: now_ms(), server_ts_ms: server_ts, event, outcome, bid, ask, est: false })
+    }
 }
 
 pub struct Kalshi {
     shared: Arc<Mutex<Shared>>,
+    tx: tokio::sync::mpsc::Sender<Write>,
     keyed: bool,
     last_rest: Ms,
 }
 
 impl Kalshi {
     /// Starts the discovery task (and the WebSocket when a key is saved) and returns the poller.
-    pub fn new(hours: f64, follows: impl Fn(&str) -> bool, creds: KalshiCreds) -> Self {
+    /// `tx` = the store writer: every change of a contract's real bid/ask goes to `kalshi_quotes`.
+    pub fn new(hours: f64, follows: impl Fn(&str) -> bool, creds: KalshiCreds, tx: tokio::sync::mpsc::Sender<Write>) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let keyed = crate::kalacct::has_key(&creds);
         let sports: HashSet<&'static str> = SPORTS.iter().chain(ESPORTS.iter()).copied().filter(|s| follows(s)).collect();
@@ -89,7 +108,11 @@ impl Kalshi {
                     Ok(found) => {
                         let n = found.len();
                         let changed = current.len() != n;
-                        s.lock().games = found;
+                        {
+                            let mut sh = s.lock();
+                            sh.tickers = found.iter().flat_map(|g| g.tickers.iter().map(move |(o, t)| (t.clone(), (g.event.clone(), *o)))).collect();
+                            sh.games = found;
+                        }
                         if changed {
                             tracing::info!("kalshi: {n} games in the window (discovery {} s)", (now_ms() - t0) / 1000);
                         }
@@ -100,9 +123,9 @@ impl Kalshi {
             }
         });
         if keyed {
-            tokio::spawn(ws_loop(shared.clone(), creds));
+            tokio::spawn(ws_loop(shared.clone(), creds, tx.clone()));
         }
-        Kalshi { shared, keyed, last_rest: 0 }
+        Kalshi { shared, tx, keyed, last_rest: 0 }
     }
 }
 
@@ -307,10 +330,10 @@ async fn rest_prices(http: &reqwest::Client, tickers: &[&str]) -> Result<(PriceB
 
 /// Authenticated WebSocket: subscribe the `ticker` channel for every contract in the window,
 /// add new contracts as discovery finds them, reconnect with backoff.
-async fn ws_loop(shared: Arc<Mutex<Shared>>, creds: KalshiCreds) {
+async fn ws_loop(shared: Arc<Mutex<Shared>>, creds: KalshiCreds, tx: tokio::sync::mpsc::Sender<Write>) {
     let mut backoff = 2u64;
     loop {
-        match ws_session(&shared, &creds).await {
+        match ws_session(&shared, &creds, &tx).await {
             Ok(()) => backoff = 2,
             Err(e) => {
                 tracing::warn!("kalshi ws: {e:#} (reconnect in {backoff}s)");
@@ -322,7 +345,7 @@ async fn ws_loop(shared: Arc<Mutex<Shared>>, creds: KalshiCreds) {
     }
 }
 
-async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds) -> Result<()> {
+async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &tokio::sync::mpsc::Sender<Write>) -> Result<()> {
     let mut req = WS_URL.into_client_request()?;
     for (k, v) in crate::kalacct::headers(creds, "GET", WS_PATH)? {
         req.headers_mut().insert(k, v.parse()?);
@@ -372,7 +395,14 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds) -> Result<
                                 let ask = prob(m, "yes_ask_dollars", "yes_ask").filter(|x| *x > 0.0 && *x < 1.0);
                                 // `ts` is in seconds; prefer a ms stamp when the feed has one.
                                 let ts = int(&m["ts_ms"]).or_else(|| int(&m["ts"]).map(|s| if s < 10_000_000_000 { s * 1000 } else { s }));
-                                shared.lock().book.insert(tk, (bid, ask, ts));
+                                let w = {
+                                    let mut sh = shared.lock();
+                                    sh.book.insert(tk.clone(), (bid, ask, ts));
+                                    sh.record(&tk, bid, ask, ts)
+                                };
+                                if let Some(w) = w {
+                                    let _ = wtx.try_send(w);
+                                }
                             }
                             Some("error") => tracing::warn!("kalshi ws error: {}", v["msg"]),
                             _ => {}
@@ -418,13 +448,22 @@ impl super::Book for Kalshi {
             let (book, t) = rest_prices(http, &rest_for).await?;
             recv_ms = t;
             self.last_rest = now;
-            let mut s = self.shared.lock();
-            for (k, v) in book {
-                // An older REST read must not overwrite a price the socket pushed just now.
-                let fresh_push = ws_live && s.book.get(&k).is_some_and(|old| old.2.is_some_and(|ts| ts > t - 2_000));
-                if !fresh_push {
-                    s.book.insert(k, v);
+            let mut rows = Vec::new();
+            {
+                let mut s = self.shared.lock();
+                for (k, v) in book {
+                    // An older REST read must not overwrite a price the socket pushed just now.
+                    let fresh_push = ws_live && s.book.get(&k).is_some_and(|old| old.2.is_some_and(|ts| ts > t - 2_000));
+                    if !fresh_push {
+                        if let Some(w) = s.record(&k, v.0, v.1, None) {
+                            rows.push(w);
+                        }
+                        s.book.insert(k, v);
+                    }
                 }
+            }
+            for w in rows {
+                let _ = self.tx.try_send(w);
             }
         }
         let book = self.shared.lock().book.clone();
@@ -458,4 +497,10 @@ impl super::Book for Kalshi {
             .collect();
         Ok(Snapshot { events, recv_ms })
     }
+}
+
+/// (outcome, contract ticker) for a Kalshi event JSON (`/events/{ticker}` with its markets),
+/// named the same way discovery names them. Used to rebuild past quotes.
+pub(crate) fn event_contracts(e: &Value, sport: &'static str) -> Vec<(Outcome, String)> {
+    parse_event(e, "", sport).map(|g| g.tickers).unwrap_or_default()
 }

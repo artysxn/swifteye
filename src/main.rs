@@ -8,6 +8,7 @@ mod matcher;
 mod model;
 mod pmacct;
 mod rank;
+mod snipe;
 mod store;
 
 use engine::{Engine, Write};
@@ -147,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     start_books(&app);
+    snipe::spawn_warmer(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);
@@ -209,6 +211,12 @@ fn start_books(app: &Arc<App>) {
         ("melbet", "melbet.com", ""),
         ("betwinner", "betwinner.com", ""),
         ("megapari", "megapari.com", ""),
+        // Newer brands: the feed refuses requests without the brand's own partner id (`ref` in
+        // the requests its live page makes). Their domains are mirrors that move; override with param.
+        ("paripesa", "paripesa.me", "&country=137&partner=188"),
+        ("22bet", "22bet21.com", "&country=137&partner=151"),
+        ("22bit", "22bit1.com", "&country=137&partner=407"),
+        ("1xbit", "1xbit1.com", "&country=137&partner=65"),
     ] {
         start!(name, 1000, |p: Option<String>| linebet::Linebet {
             name,
@@ -228,6 +236,15 @@ fn start_books(app: &Arc<App>) {
         origin: "https://www.vinn.com".into(),
         pre: pre(),
     });
+    // BetKing Ukraine runs on Altenar too (integration "betking").
+    start!("betking", 1000, |p: Option<String>| altenar::Altenar {
+        name: "betking",
+        integration: p.unwrap_or_else(|| "betking".into()),
+        country: "UA".into(),
+        origin: "https://betking.com.ua".into(),
+        pre: pre(),
+    });
+    start!("olimp", 1000, |_p: Option<String>| olimp::Olimp);
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
     // Kalshi: second prediction-market baseline, polled in batches.
@@ -235,7 +252,7 @@ fn start_books(app: &Arc<App>) {
     // runs every 250 ms; without one each poll is a batched REST call. Key edits apply on restart.
     let kcreds = kalacct::load(&app.db_path);
     let kpoll = if kalacct::has_key(&kcreds) { 250 } else { 1000 };
-    start!("kalshi", kpoll, |_p: Option<String>| kalshi::Kalshi::new(ph, follows, kcreds.clone()));
+    start!("kalshi", kpoll, |_p: Option<String>| kalshi::Kalshi::new(ph, follows, kcreds.clone(), app.tx.clone()));
 
     // Polymarket is push (WebSocket), not polled. param = minutes before kick-off to start watching.
     let pc = get("polymarket");

@@ -8,7 +8,7 @@ SE.$ = $;
 SE.$$ = $$;
 
 // ---------------------------------------------------------------- preferences
-const PREF_DEFAULTS = { theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90, baseline: 'polymarket' };
+const PREF_DEFAULTS = { theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90, baseline: 'polymarket', sport: 'all' };
 SE.pref = (k) => {
   try {
     const v = localStorage.getItem('se.' + k);
@@ -152,8 +152,34 @@ SE.marketLabel = (m) => ({ '1x2': '1X2', total: 'Total goals', handicap: 'Handic
 SE.BOOK_COLORS = {
   polymarket: '#50e4b2', sportybet: '#ff6b5b', betika: '#c6e83a', betpawa: '#9aa5a1',
   linebet: '#2f9e5b', fonbet: '#ff3b4f', unibet: '#7d8cff', vinn: '#f5b83d', kalshi: '#28d07f', thunderpick: '#8b5cf6', novibet: '#1e88e5',
+  pinnacle: '#ff5a1f', m88: '#c8102e', melbet: '#fcc419', betwinner: '#7bc043', megapari: '#38bdf8', leovegas: '#b45309', paf: '#f04e37',
+  paripesa: '#1d4ed8', '22bet': '#0f766e', '22bit': '#7c3aed', '1xbit': '#0ea5e9', betking: '#facc15', olimp: '#dc2626',
 };
-SE.BOOK_NAMES = { polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi', thunderpick: 'Thunderpick', novibet: 'Novibet' };
+SE.BOOK_NAMES = {
+  polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi', thunderpick: 'Thunderpick', novibet: 'Novibet',
+  pinnacle: 'Pinnacle', m88: 'M88', melbet: 'Melbet', betwinner: 'BetWinner', megapari: 'Megapari', leovegas: 'LeoVegas', paf: 'Paf',
+  paripesa: 'PariPesa', '22bet': '22Bet', '22bit': '22Bit', '1xbit': '1xBit', betking: 'BetKing', olimp: 'Olimpbet',
+};
+// ---------------------------------------------------------------- sports / games
+// key, label, icon: a Material Symbol name for traditional sports, a game logo for e-sports.
+SE.SPORTS = [
+  ['football', 'Football', 'sports_soccer'], ['basketball', 'Basketball', 'sports_basketball'], ['tennis', 'Tennis', 'sports_tennis'],
+  ['hockey', 'Ice hockey', 'sports_hockey'], ['baseball', 'Baseball', 'sports_baseball'], ['volleyball', 'Volleyball', 'sports_volleyball'],
+  ['amfootball', 'American football', 'sports_football'], ['mma', 'MMA', 'sports_mma'], ['tabletennis', 'Table tennis', 'sports_tennis'], ['handball', 'Handball', 'sports_handball'],
+];
+SE.GAMES = [
+  ['cs2', 'Counter-Strike 2'], ['dota2', 'Dota 2'], ['lol', 'League of Legends'], ['valorant', 'Valorant'], ['ow', 'Overwatch'], ['rl', 'Rocket League'],
+  ['r6', 'Rainbow Six'], ['cod', 'Call of Duty'], ['sc2', 'StarCraft II'], ['mlbb', 'Mobile Legends'], ['hok', 'Honor of Kings'], ['pubg', 'PUBG'],
+];
+SE.isEsport = (k) => k === 'esports' || SE.GAMES.some((g) => g[0] === k);
+SE.sportName = (k) => (k === 'all' ? 'All sports' : k === 'esports' ? 'All e-sports' : (SE.SPORTS.find((s) => s[0] === k) || SE.GAMES.find((g) => g[0] === k) || [k, k])[1]);
+SE.sportIcon = (k) => {
+  if (k === 'all') return '<span class="sp-ic">' + SE.ic('apps') + '</span>';
+  if (k === 'esports') return '<span class="sp-ic">' + SE.ic('sports_esports') + '</span>';
+  if (SE.GAMES.some((g) => g[0] === k)) return `<img class="sp-ic" src="/assets/img/game-${SE.esc(k)}.png" alt="">`;
+  const s = SE.SPORTS.find((x) => x[0] === k);
+  return '<span class="sp-ic">' + SE.ic(s ? s[2] : 'sports') + '</span>';
+};
 SE.bookColor = (b) => SE.BOOK_COLORS[b] || '#8e8e93';
 SE.bookName = (b) => SE.BOOK_NAMES[b] || b;
 SE.logo = (b) => `<img class="lg" src="/assets/img/${SE.esc(b)}.png" alt="" onerror="this.style.visibility='hidden'">`;
@@ -314,7 +340,8 @@ SE.select = (el, opts) => {
   const btn = $('.sel-btn', el);
   const label = () => {
     const o = options.find((x) => String(x[0]) === String(value));
-    $('.v', btn).textContent = o ? o[1] : opts.placeholder || 'Select';
+    // o[3] = optional icon HTML (trusted, built by the caller), shown before the label.
+    $('.v', btn).innerHTML = (o?.[3] || '') + SE.esc(o ? o[1] : opts.placeholder || 'Select');
   };
   let pop = null, hi = -1, shown = [];
   const outside = (e) => { if (!pop?.contains(e.target) && !el.contains(e.target)) close(); };
@@ -346,7 +373,7 @@ SE.select = (el, opts) => {
     shown = options.filter((o) => !ql || String(o[1]).toLowerCase().includes(ql));
     const list = $('.sel-list', pop);
     list.innerHTML = shown.length
-      ? shown.map((o, i) => `<div class="sel-opt ${String(o[0]) === String(value) ? 'on' : ''} ${i === hi ? 'hi' : ''}" data-i="${i}">${SE.esc(o[1])}${o[2] ? `<small>${SE.esc(o[2])}</small>` : ''}${SE.ic('check')}</div>`).join('')
+      ? shown.map((o, i) => `<div class="sel-opt ${String(o[0]) === String(value) ? 'on' : ''} ${i === hi ? 'hi' : ''}" data-i="${i}">${o[3] || ''}${SE.esc(o[1])}${o[2] ? `<small>${SE.esc(o[2])}</small>` : ''}${SE.ic('check')}</div>`).join('')
       : '<div class="sel-empty">No matches</div>';
     $$('.sel-opt', list).forEach((d) => {
       d.addEventListener('mousedown', (e) => { e.preventDefault(); pick(shown[+d.dataset.i][0]); });
@@ -409,7 +436,7 @@ SE.ratePerMin = () => {
 
 // ---------------------------------------------------------------- charts (uPlot)
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-/** series: [{ label, color, values, book?, width?, dash? }] */
+/** series: [{ label, color, values, book?, width?, dash?, points? (scatter), linear? (straight segments) }] */
 SE.chart = (el, xs, series, opts = {}) => {
   el.innerHTML = '';
   const yFmt = opts.yFmt || ((v) => (v == null ? '' : v.toFixed(2)));
@@ -432,8 +459,9 @@ SE.chart = (el, xs, series, opts = {}) => {
       series: [
         {},
         ...series.map((s) => ({
-          label: s.label, stroke: s.color, width: s.width || 1.6, dash: s.dash, spanGaps: true,
-          paths: opts.step === false ? undefined : uPlot.paths.stepped({ align: 1 }), points: { show: false },
+          label: s.label, stroke: s.color, width: s.points ? 0 : s.width || 1.6, dash: s.dash, spanGaps: true,
+          paths: s.points ? () => null : opts.step === false || s.linear ? undefined : uPlot.paths.stepped({ align: 1 }),
+          points: s.points ? { show: true, size: 6, stroke: s.color, fill: s.color, width: 0 } : { show: false },
         })),
       ],
       hooks: {
@@ -460,6 +488,38 @@ SE.chart = (el, xs, series, opts = {}) => {
   return u;
 };
 SE.destroyChart = (u) => { if (u) { u._ro?.disconnect(); u.destroy(); } };
+/**
+ * Update a chart with new data without losing what the viewer did to it: a zoom stays
+ * zoomed (new points still arrive), hidden series stay hidden. Same series → setData in
+ * place; different series → rebuild, then restore zoom and hidden series by label.
+ * Returns the chart to keep (pass it back next time).
+ */
+SE.chartKeep = (el, prev, xs, series, opts = {}, legendEl = null) => {
+  const sig = series.map((s) => s.label).join('|');
+  let zoom = null, hidden = new Set();
+  if (prev) {
+    const d0 = prev.data[0], sx = prev.scales.x;
+    if (d0.length && sx.min != null && (sx.min > d0[0] + 1 || sx.max < d0[d0.length - 1] - 1)) zoom = { min: sx.min, max: sx.max };
+    prev.series.forEach((s, i) => { if (i > 0 && !s.show) hidden.add(s.label); });
+    if (prev._sig === sig && document.body.contains(prev.root)) {
+      prev.setData([xs, ...series.map((s) => s.values)], !zoom);
+      if (zoom) prev.setScale('x', zoom);
+      return prev;
+    }
+    SE.destroyChart(prev);
+  }
+  if (!xs.length) return null;
+  const u = SE.chart(el, xs, series, opts);
+  u._sig = sig;
+  if (legendEl) SE.legend(legendEl, series, u);
+  series.forEach((s, i) => {
+    if (!hidden.has(s.label)) return;
+    u.setSeries(i + 1, { show: false });
+    legendEl?.querySelector(`label[data-i="${i + 1}"]`)?.classList.add('off');
+  });
+  if (zoom) u.setScale('x', zoom);
+  return u;
+};
 SE.alignSeries = (lists) => {
   const xs = [...new Set(lists.flatMap((l) => l.map((p) => p[0])))].sort((a, b) => a - b);
   const values = lists.map((l) => {

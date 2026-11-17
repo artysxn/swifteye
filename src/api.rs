@@ -32,6 +32,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/assets/uplot.css", get(|| async { asset("vendor/uPlot.min.css", "text/css; charset=utf-8", include_str!("web/vendor/uPlot.min.css")) }))
         .route("/assets/img/{name}", get(img))
         .route("/rankings", get(rankings))
+        .route("/snipe", get(snipe))
         .route("/api", get(index))
         .route("/ui", get(ui))
         .route("/quotes", get(quotes))
@@ -500,11 +501,11 @@ async fn unlink(State(app): S, Path((book, event_id)): Path<(String, String)>) -
     }
 }
 
-#[derive(Deserialize, Default)]
-struct LagQ {
+#[derive(Deserialize, Default, Clone)]
+pub struct LagQ {
     /// ms since epoch; default 24 h ago
-    since: Option<i64>,
-    until: Option<i64>,
+    pub since: Option<i64>,
+    pub until: Option<i64>,
     /// minimum implied-probability move that counts as a jump (default 0.04)
     min_jump: Option<f64>,
     /// how far either side of a jump to look for the other side's reaction (default 90)
@@ -520,10 +521,15 @@ struct LagQ {
     trigger_book: Option<String>,
     follower_book: Option<String>,
     limit: Option<usize>,
+    /// Rankings: time the prediction markets against this bookmaker instead of the window's
+    /// own fastest (the match page passes the all-games fastest book).
+    fastest: Option<String>,
+    /// Rankings: one sport key or "esports".
+    sport: Option<String>,
 }
 
 impl LagQ {
-    fn params(&self) -> crate::lag::Params {
+    pub fn params(&self) -> crate::lag::Params {
         let now = now_ms();
         crate::lag::Params {
             since: self.since.unwrap_or(now - 24 * 3600 * 1000),
@@ -534,6 +540,8 @@ impl LagQ {
             source_clock: self.clock.as_deref() == Some("source"),
             match_id: self.match_id,
             book: self.book.clone(),
+            fastest: self.fastest.clone().filter(|f| !f.is_empty()),
+            sport: self.sport.clone().filter(|f| !f.is_empty() && f != "all"),
         }
     }
 }
@@ -779,6 +787,27 @@ async fn img(Path(name): Path<String>) -> Response {
         "fonbet.png" => Some(include_bytes!("web/img/fonbet.png")),
         "vinn.png" => Some(include_bytes!("web/img/vinn.png")),
         "kalshi.png" => Some(include_bytes!("web/img/kalshi.png")),
+        "pinnacle.png" => Some(include_bytes!("web/img/pinnacle.png")),
+        "m88.png" => Some(include_bytes!("web/img/m88.png")),
+        "melbet.png" => Some(include_bytes!("web/img/melbet.png")),
+        "betwinner.png" => Some(include_bytes!("web/img/betwinner.png")),
+        "megapari.png" => Some(include_bytes!("web/img/megapari.png")),
+        "leovegas.png" => Some(include_bytes!("web/img/leovegas.png")),
+        "paf.png" => Some(include_bytes!("web/img/paf.png")),
+        "thunderpick.png" => Some(include_bytes!("web/img/thunderpick.png")),
+        "novibet.png" => Some(include_bytes!("web/img/novibet.png")),
+        "game-cs2.png" => Some(include_bytes!("web/img/game-cs2.png")),
+        "game-dota2.png" => Some(include_bytes!("web/img/game-dota2.png")),
+        "game-lol.png" => Some(include_bytes!("web/img/game-lol.png")),
+        "game-valorant.png" => Some(include_bytes!("web/img/game-valorant.png")),
+        "game-ow.png" => Some(include_bytes!("web/img/game-ow.png")),
+        "game-rl.png" => Some(include_bytes!("web/img/game-rl.png")),
+        "game-r6.png" => Some(include_bytes!("web/img/game-r6.png")),
+        "game-cod.png" => Some(include_bytes!("web/img/game-cod.png")),
+        "game-sc2.png" => Some(include_bytes!("web/img/game-sc2.png")),
+        "game-mlbb.png" => Some(include_bytes!("web/img/game-mlbb.png")),
+        "game-hok.png" => Some(include_bytes!("web/img/game-hok.png")),
+        "game-pubg.png" => Some(include_bytes!("web/img/game-pubg.png")),
         _ => None,
     };
     match bytes {
@@ -788,20 +817,29 @@ async fn img(Path(name): Path<String>) -> Response {
 }
 
 /// Who moves first across all sources, plus how often Polymarket can still be bought before it reacts.
+/// Served from a cache (see snipe.rs): instant after the first load, refreshed in the background.
 async fn rankings(State(app): S, Query(q): Query<LagQ>) -> Response {
-    let path = app.db_path.clone();
-    let p = q.params();
     let limit = q.limit.unwrap_or(400);
-    match tokio::task::spawn_blocking(move || crate::rank::compute(&path, &p)).await {
-        Ok(Ok(mut r)) => {
+    match crate::snipe::rankings_cached(&app, &q).await {
+        Ok((r, age_ms)) => {
             let n = r.events.len();
-            if n > limit {
-                r.events.drain(..n - limit);
+            let mut v = serde_json::to_value(&*r).unwrap_or(Value::Null);
+            if let Some(ev) = v["events"].as_array_mut() {
+                if n > limit {
+                    ev.drain(..n - limit);
+                }
             }
-            Json(json!({"since": q.params().since, "event_count": n, "rankings": r})).into_response()
+            Json(json!({"since": q.params().since, "event_count": n, "age_ms": age_ms, "rankings": v})).into_response()
         }
-        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// Paper trading on bookmaker-led moves against Polymarket and Kalshi (see snipe.rs).
+async fn snipe(State(app): S, Query(q): Query<LagQ>, Query(s): Query<crate::snipe::SimQ>) -> Response {
+    match crate::snipe::simulate_cached(&app, &q, &s).await {
+        Ok(v) => Json((*v).clone()).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
 }
 

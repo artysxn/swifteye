@@ -32,6 +32,10 @@ pub struct Params {
     pub source_clock: bool,
     pub match_id: Option<i64>,
     pub book: Option<String>,
+    /// Rankings only: reference bookmaker for the "vs fastest overall" delay (None = pick it).
+    pub fastest: Option<String>,
+    /// Rankings only: one sport key, or "esports" for every e-sports title (None = all).
+    pub sport: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

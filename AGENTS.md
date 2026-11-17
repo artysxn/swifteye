@@ -174,6 +174,17 @@ list as `EventIn`s with normalized `QuoteIn`s), add `pub mod x;` to
 - Probed and NOT usable from here: bwin, Betano, Betsson, Stake, bet9ja, vbet (403/bot walls),
   Cloudbet (needs API key), Superbet (endpoint guess 404). Rivalry `/api/v1/matches` answers (e-sports book, not wired).
 
+## 8c. More bookmakers (2026-11-17, round 2)
+
+See `docs/BOOKMAKERS.md` for every site probed (status, protection, platform, how its odds feed
+works or would work). Added: PariPesa, 22Bet, 22Bit, 1xBit (1xBet classic feed + the brand's
+`partner` id, which these newer brands require), BetKing UA (Altenar `betking`), Olimpbet
+(`books/olimp.rs`). Tools: `tools/probe_books.mjs`, `tools/find_apis.mjs`.
+
+Snipe window research: `tools/snipe_research.mjs` (gates in `src/snipe.rs`, chosen on the first
+60% of the data, checked on the last 40%). Kalshi real quotes in `kalshi_quotes` (est=1 rows =
+backfill from Kalshi's 1-minute candles, run at startup).
+
 ## 9. Hard rules
 
 - Never change the system clock; correct timestamps in software (clock.rs).

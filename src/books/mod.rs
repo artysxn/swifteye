@@ -10,6 +10,7 @@ pub mod kambi;
 pub mod linebet;
 pub mod m88;
 pub mod novibet;
+pub mod olimp;
 pub mod pinnacle;
 pub mod polymarket;
 pub mod sportybet;

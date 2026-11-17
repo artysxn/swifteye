@@ -107,15 +107,36 @@ P.race = (sources) => {
 
 P.rangeSince = (h) => Date.now() - h * 3600000;
 
-/** Game picker: every match in scope, with search. value '' = all games. */
+/** Sport / game picker with icons and live match counts. Remembered per browser (pref 'sport'). */
+P.sportOk = (sport, want = SE.pref('sport')) => !want || want === 'all' || (want === 'esports' ? SE.isEsport(sport) : sport === want);
+P.sportQ = () => { const s = SE.pref('sport'); return s && s !== 'all' ? '&sport=' + encodeURIComponent(s) : ''; };
+P.sportSelect = (el, onChange, width = '220px') => {
+  const opt = (k, n) => [k, SE.sportName(k), n ? String(n) : '', SE.sportIcon(k)];
+  const start = SE.pref('sport') || 'all';
+  const sel = SE.select(el, { options: start === 'all' ? [opt('all')] : [opt('all'), opt(start)], value: start, search: true, width, onChange: (v) => { SE.setPref('sport', v); onChange(v); } });
+  (async () => {
+    try {
+      const d = await api('/matches');
+      const n = {};
+      for (const m of d.matches) { n[m.sport] = (n[m.sport] || 0) + 1; if (SE.isEsport(m.sport)) n.esports = (n.esports || 0) + 1; }
+      const cur = SE.pref('sport') || 'all';
+      // Every followed sport/game with matches now, plus the current choice even if it has none.
+      const keep = (k) => n[k] || k === cur;
+      sel.set([opt('all', d.matches.length), ...SE.SPORTS.filter((s) => keep(s[0])).map((s) => opt(s[0], n[s[0]])), ...(keep('esports') ? [opt('esports', n.esports)] : []), ...SE.GAMES.filter((g) => keep(g[0])).map((g) => opt(g[0], n[g[0]]))], cur);
+    } catch {}
+  })();
+  return sel;
+};
+
+/** Game picker: every match in scope (of the chosen sport), with search. value '' = all games. */
 P.gameSelect = (el, onChange, width = '280px') => {
   const sel = SE.select(el, { options: [['', 'All games']], value: '', search: true, width, onChange });
   const load = async () => {
     try {
       const d = await api('/matches');
       const cur = sel.value();
-      const opts = d.matches.sort((a, b) => (b.live - a.live) || (a.start_ms || 0) - (b.start_ms || 0))
-        .map((m) => [String(m.id), `${m.home} v ${m.away}`, m.live ? 'live' : SE.fmtKick(m.start_ms)]);
+      const opts = d.matches.filter((m) => P.sportOk(m.sport)).sort((a, b) => (b.live - a.live) || (a.start_ms || 0) - (b.start_ms || 0))
+        .map((m) => [String(m.id), `${m.home} v ${m.away}`, m.live ? 'live' : SE.fmtKick(m.start_ms), SE.sportIcon(m.sport)]);
       sel.set([['', 'All games'], ...opts], opts.some((o) => o[0] === cur) ? cur : '');
     } catch {}
   };
@@ -126,6 +147,59 @@ P.gameSelect = (el, onChange, width = '280px') => {
 P.baselineSeg = (el, onChange) => SE.seg(el, [['polymarket', SE.logo('polymarket') + 'Polymarket', 'Compare bookmakers against Polymarket.'], ['kalshi', SE.logo('kalshi') + 'Kalshi', 'Compare bookmakers against Kalshi.']], SE.pref('baseline'), (v) => { SE.setPref('baseline', v); onChange(v); });
 P.oppOf = (R) => (SE.pref('baseline') === 'kalshi' ? R.opportunity_kalshi : R.opportunity);
 P.baseName = () => SE.bookName(SE.pref('baseline'));
+
+// ---------------------------------------------------------------- snipe window
+// How long Polymarket and Kalshi trail (a) whichever bookmaker moved first on each move and
+// (b) the bookmaker that is fastest across all games. Average +N s, median, share late,
+// and a least-squares trendline over time. Positive = the prediction market was later.
+G.snipeFirst = 'Average time between the first bookmaker crossing halfway through a move and this prediction market doing the same. Positive = the prediction market was later, so its old price was still there to take.';
+G.snipeBook = 'The same, timed against one bookmaker: the one that is fastest across all games in this range (lowest median time behind the first mover).';
+P.snipeBox = (el) => {
+  el.innerHTML = `<div class="stats sn-tiles"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin:22px 0 8px;flex-wrap:wrap">
+      <span class="note sn-note">Delay of each move, with a trendline per prediction market</span><div class="sn-ref"></div></div>
+    <div class="chart sn-chart" style="height:300px"></div><div class="legend sn-legend"></div>`;
+  const tiles = el.querySelector('.sn-tiles'), ch = el.querySelector('.sn-chart'), lg = el.querySelector('.sn-legend'), segEl = el.querySelector('.sn-ref');
+  let chart = null, ref = 'first', last = null;
+  const find = (b, r) => (last?.snipe || []).find((x) => x.baseline === b && x.reference === r);
+  const secs = (ms) => (ms == null ? '' : (ms > 0 ? '+' : ms < 0 ? '-' : '') + (Math.abs(ms) / 1000).toFixed(1) + ' s');
+  const trend = (s) => {
+    if (s?.trend_ms_per_h == null) return '';
+    const v = s.trend_ms_per_h, span = s.points.length > 1 ? s.points[s.points.length - 1][0] - s.points[0][0] : 0;
+    // Per day once the data covers more than two days, else per hour.
+    return span > 2 * 86400000 ? `trend ${secs(v * 24)}/day` : `trend ${secs(v)}/h`;
+  };
+  const tile = (s, label, tip) => `<div class="stat" data-tip="${esc(tip)}"><div class="stat-label">${ic('timer')}${label}</div>
+    <div class="stat-value">${s && s.n ? `<b class="${s.mean_ms > 0 ? 'up' : 'down'}">${secs(s.mean_ms)}</b>` : '<span class="faint">-</span>'}</div>
+    <div class="stat-foot">${s && s.n ? `median ${secs(s.median_ms)} · later in ${SE.fmtPct(s.behind_share)} of ${s.n}${trend(s) ? ' · ' + trend(s) : ''}` : 'no shared moves yet'}</div></div>`;
+  function draw() {
+    if (!last) return;
+    const r = ref === 'first' ? 'first' : last.fastest_book;
+    const bases = [[PM, 'Polymarket'], ['kalshi', 'Kalshi']].map(([b, n]) => ({ b, n, s: r ? find(b, r) : null })).filter((x) => x.s && x.s.n);
+    const ts = new Set();
+    for (const x of bases) { x.s.points.forEach((p) => ts.add(p[0])); x.s.trend_line.forEach((p) => ts.add(p[0])); }
+    const xs = [...ts].sort((a, b) => a - b), at = new Map(xs.map((t, i) => [t, i]));
+    const col = (pairs) => { const v = new Array(xs.length).fill(null); for (const [t, y] of pairs) v[at.get(t)] = y / 1000; return v; };
+    // Polymarket and Kalshi are both green in the source palette; here they need to differ.
+    // Points are faint, trendlines drawn last and solid so they read over the cloud.
+    const colour = { [PM]: ['rgba(91,141,239,.45)', '#7aa7ff'], kalshi: ['rgba(40,208,127,.45)', '#5ff0a8'] };
+    const series = bases.map((x) => ({ label: x.n, book: x.b, color: colour[x.b][0], values: col(x.s.points), points: true }));
+    for (const x of bases) if (x.s.trend_line.length === 2) series.push({ label: x.n + ' trend', color: colour[x.b][1], values: col(x.s.trend_line), linear: true, width: 3 });
+    chart = SE.chartKeep(ch, chart, xs, series, { yFmt: (v) => (v == null ? '' : secs(v * 1000)) }, lg);
+    if (!chart) { ch.innerHTML = `<div class="empty">${ic('timer_off')}No moves where a prediction market followed ${r && r !== 'first' ? SE.esc(SE.bookName(r)) : 'a bookmaker'} in this range.</div>`; lg.innerHTML = ''; }
+  }
+  return {
+    update(R) {
+      last = R;
+      const fb = R.fastest_book, fbName = fb ? SE.esc(SE.bookName(fb)) : 'fastest book';
+      tiles.innerHTML = tile(find(PM, 'first'), 'Polymarket vs first mover', G.snipeFirst) + tile(fb && find(PM, fb), `Polymarket vs ${fbName}`, G.snipeBook) +
+        tile(find('kalshi', 'first'), 'Kalshi vs first mover', G.snipeFirst.replace('this prediction market', 'Kalshi')) + tile(fb && find('kalshi', fb), `Kalshi vs ${fbName}`, G.snipeBook);
+      SE.seg(segEl, [['first', 'vs first mover', 'Each move timed against whichever bookmaker moved first.'], ['book', 'vs ' + (fb ? SE.bookName(fb) : 'fastest book'), G.snipeBook]], ref, (v) => { ref = v; draw(); });
+      draw();
+    },
+    destroy() { SE.destroyChart(chart); chart = null; },
+  };
+};
 
 // ================================================================ Overview
 SE.pages.dashboard = {
@@ -229,7 +303,7 @@ SE.pages.dashboard = {
 SE.pages.rankings = {
   title: 'Rankings',
   render(el) {
-    el.innerHTML = P.head('Rankings', '<div id="kG"></div><div id="kB"></div><div id="kR"></div><div id="kJ"></div><div id="kW"></div><div id="kC"></div>') +
+    el.innerHTML = P.head('Rankings', '<div id="kS"></div><div id="kG"></div><div id="kB"></div><div id="kR"></div><div id="kJ"></div><div id="kW"></div><div id="kC"></div>') +
       P.stats(
         P.stat('kE', 'timeline', 'Moves measured', 'Moves at least two sources made, or a bookmaker made while Polymarket was watched.'),
         P.stat('kM', 'sports_soccer', 'Matches', 'Matches those moves came from.'),
@@ -237,6 +311,7 @@ SE.pages.rankings = {
         P.stat('kBy', 'shopping_cart_checkout', 'Buy before <span class="bn">Polymarket</span> reacts', G.buy),
         P.stat('kP', 'straighten', '<span class="bn">Polymarket</span> move still to come', G.left),
       ) +
+      P.sec('my_location', 'Snipe window', '<div id="kSn"></div>', '', 'How far the prediction markets trail the bookmakers. A positive average means their old price was still up for that long after a bookmaker moved.') +
       P.sec('leaderboard', 'Leaderboard', '<div id="kT"></div>', '', 'Sources ordered by how close they are, in the median, to whoever moved first.') +
       `<div class="grid g-2" style="margin-top:40px">
         ${P.sec('speed', 'Behind the first mover', '<div id="kRace"></div>', '', G.behind)}
@@ -245,7 +320,9 @@ SE.pages.rankings = {
       P.sec('timeline', 'Every move', '<div id="kEv"></div>', '<div id="kEvF"></div>');
 
     let hours = 24, jump = SE.pref('minJump'), win = SE.pref('windowS'), clock = 'receive', evFilter = 'all', last = null, game = '';
-    P.gameSelect($('#kG'), (v) => { game = v; load(); });
+    const sn = P.snipeBox($('#kSn'));
+    const gs = P.gameSelect($('#kG'), (v) => { game = v; load(); });
+    P.sportSelect($('#kS'), () => { game = ''; gs.load(); load(); });
     P.baselineSeg($('#kB'), () => load());
     SE.seg($('#kR'), [[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d']], hours, (v) => { hours = +v; load(); });
     SE.seg($('#kJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], jump, (v) => { jump = +v; load(); });
@@ -275,7 +352,7 @@ SE.pages.rankings = {
       $('#kEv').innerHTML = ev.length ? ev.slice(0, 150).map((e) => P.eventRow(e)).join('') : '<div class="empty">No moves match this filter.</div>';
     }
     async function load() {
-      const r = await api(`/rankings?since=${P.rangeSince(hours)}&min_jump=${jump}&window_s=${win}&clock=${clock}&limit=400${game ? '&match=' + game : ''}`);
+      const r = await api(`/rankings?since=${P.rangeSince(hours)}&min_jump=${jump}&window_s=${win}&clock=${clock}&limit=400${game ? '&match=' + game : ''}${P.sportQ()}`);
       const R = (last = r.rankings), o = P.oppOf(R);
       $$('.bn', el).forEach((x) => (x.textContent = P.baseName()));
       P.set('kE', SE.fmtInt(r.event_count));
@@ -285,6 +362,7 @@ SE.pages.rankings = {
       P.set('kBy', o.events ? SE.fmtPct(ge2?.[2]) : '<span class="faint">-</span>', o.events ? `${ge2?.[1]} of ${o.events} moves` : '');
       P.set('kP', o.median_capturable_pts == null ? '<span class="faint">-</span>' : `${(o.median_capturable_pts * 100).toFixed(1)}<small>pts</small>`, 'median');
       t.set(R.sources.map((s, i) => ({ ...s, pos: i + 1 })));
+      sn.update(R);
       $('#kRace').innerHTML = P.race(R.sources);
       $('#kOpp').innerHTML = o.events
         ? `<div class="note" style="margin-bottom:8px">${P.baseName()} still behind when the first bookmaker had moved</div>` +
@@ -296,6 +374,179 @@ SE.pages.rankings = {
     }
     load();
     SE.every(30000, load);
+    return () => sn.destroy();
+  },
+};
+
+// ================================================================ Snipe window
+// Paper trading on "a bookmaker moved, the prediction market has not yet". The model ONLY buys
+// when it can see at that moment that Polymarket / Kalshi is delayed, and sells when the price
+// catches up (or gives up after a set time). The setup, the rates that decide it, paper P&L.
+SE.pages.snipe = {
+  title: 'Snipe window',
+  render(el) {
+    el.innerHTML = P.head('Snipe window', '<div id="pS"></div><div id="pR"></div><div id="pJ"></div>') +
+      `<div class="note" style="margin:-8px 0 22px">Paper money only: nothing is traded. When a bookmaker moves, the model checks the prediction market at that moment and buys ONLY if it is still delayed (it has made little of the bookmaker\'s move) and the gain if it catches up beats spread and fees. It sells at the bid as soon as the price catches up, or gives up after the set time.</div>` +
+      P.sec('tune', 'Setup', `<div class="sn-setup">
+          <div><div class="note">Trigger</div><div id="pT"></div></div>
+          <div><div class="note">Reaction</div><div id="pRe"></div></div>
+          <div><div class="note">Order reaches the market after</div><div id="pFi"></div></div>
+          <div><div class="note">Slippage on every buy and sale</div><div id="pSl"></div></div>
+          <div><div class="note">Sell when the market has made</div><div id="pCa"></div></div>
+          <div><div class="note">Give up after</div><div id="pH"></div></div>
+          <div><div class="note">Stake per trade</div><div id="pSt"></div></div>
+          <div><div class="note">Polymarket fee</div><div id="pF"></div></div>
+        </div><div id="pFacts" class="sn-facts"></div>`) +
+      `<div id="pTiles"></div>` +
+      `<div class="grid g-2" style="margin-top:40px">
+        ${P.sec('filter_alt', 'Polymarket: when it bought', '<div id="pFunPm"></div>', '', 'Every bookmaker move, and why the model did or did not buy.')}
+        ${P.sec('filter_alt', 'Kalshi: when it bought', '<div id="pFunK"></div>', '', 'Every bookmaker move, and why the model did or did not buy.')}
+      </div>` +
+      `<div class="grid g-2" style="margin-top:40px">
+        ${P.sec('percent', 'Polymarket still behind', '<div id="pLadPm"></div>', '', G.buy)}
+        ${P.sec('percent', 'Kalshi still behind', '<div id="pLadK"></div>', '', G.buy.replace(/Polymarket/g, 'Kalshi'))}
+      </div>` +
+      P.sec('show_chart', 'Paper P&amp;L over time', '<div class="chart" id="pEq" style="height:320px"></div><div class="legend" id="pEqL"></div>', '', 'Running total of every paper trade at the chosen hold time.') +
+      P.sec('timer', 'Give-up time compared', '<div id="pHolds"></div>', '', 'The same buys, giving up (selling at the bid) after each time if the price has not caught up.') +
+      `<div class="grid g-2" style="margin-top:40px">
+        ${P.sec('savings', 'Where the money comes from', '<div id="pLead"></div>', '<div id="pLeadB"></div>', 'Trades grouped by how far the prediction market really was behind, known only afterwards. "Already moved" and "did not follow" are the trades that cannot win.')}
+        ${P.sec('category', 'By exit, sport and trigger', '<div id="pReason"></div><div id="pSport" style="margin-top:22px"></div><div id="pTrig" style="margin-top:22px"></div>', '<div id="pGrpB"></div>')}
+      </div>` +
+      P.sec('receipt_long', 'Recent paper trades', '<div id="pTr"></div>', '<div id="pTrB"></div>');
+
+    const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 0, ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket' };
+    let data = null, eq = null;
+    P.sportSelect($('#pS'), () => load());
+    SE.seg($('#pR'), [[6, '6h'], [24, '24h'], [72, '3d'], [168, '7d']], st.hours, (v) => { st.hours = +v; load(); });
+    SE.seg($('#pJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], st.jump, (v) => { st.jump = +v; load(); });
+    const segs = () => {
+      SE.seg($('#pT'), [['first', 'First bookmaker', 'Trade on whichever bookmaker moves first.'], ['fastest', data?.fastest_book ? SE.bookName(data.fastest_book) : 'Fastest book', 'Trade only on the bookmaker that is fastest across all games.']], st.trigger, (v) => { st.trigger = v; load(); });
+    };
+    segs();
+    SE.seg($('#pRe'), [[250, '0.25 s'], [1000, '1 s'], [2000, '2 s'], [5000, '5 s']], st.reaction, (v) => { st.reaction = +v; load(); });
+    SE.seg($('#pH'), [['auto', 'Auto', 'Each market\'s own: Polymarket 2 min, Kalshi 5 min (Kalshi follows slower).'], [30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']], st.hold, (v) => { st.hold = v === 'auto' ? v : +v; draw(); });
+    SE.seg($('#pCa'), [[50, '50%'], [75, '75%'], [100, '100%']], st.ca, (v) => { st.ca = +v; load(); });
+    SE.seg($('#pFi'), [[0, 'instantly'], [250, '0.25 s'], [500, '0.5 s'], [1000, '1 s']], st.fill, (v) => { st.fill = +v; load(); });
+    SE.seg($('#pSl'), [[0, '0¢'], [1, '1¢'], [2, '2¢'], [3, '3¢']], st.slip, (v) => { st.slip = +v; load(); });
+    SE.seg($('#pSt'), [[10, '$10'], [100, '$100'], [1000, '$1,000']], st.stake, (v) => { st.stake = +v; load(); });
+    SE.seg($('#pF'), [[0, '0%', 'No Polymarket fee.'], [50, '0.5%'], [100, '1%'], [200, '2%']], st.fee, (v) => { st.fee = +v; load(); });
+    for (const [id, k] of [['#pLeadB', 'leadB'], ['#pGrpB', 'grpB'], ['#pTrB', 'trB']]) SE.seg($(id), [['polymarket', SE.logo('polymarket') + 'Polymarket'], ['kalshi', SE.logo('kalshi') + 'Kalshi']], st[k], (v) => { st[k] = v; draw(); });
+
+    const money = (x) => (x == null ? '' : (x < 0 ? '-$' : '$') + Math.abs(x).toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) < 100 ? 2 : 0 }));
+    const pnl = (x) => `<b class="${x > 0 ? 'pos' : x < 0 ? 'neg' : ''}">${x > 0 ? '+' : ''}${money(x)}</b>`;
+    const secs = (ms) => (ms == null ? '-' : (ms > 0 ? '+' : ms < 0 ? '-' : '') + (Math.abs(ms) / 1000).toFixed(1) + ' s');
+    const base = (b) => data?.baselines.find((x) => x.baseline === b);
+    const holdS = (b) => (st.hold === 'auto' ? base(b)?.gate?.give_up_s ?? 120 : st.hold);
+    const holdOf = (b) => base(b)?.holds.find((h) => h.hold_s === holdS(b));
+    const SKIP = {
+      no_data: ['No price to compare', 'The market or the bookmaker had no quote at that moment.'],
+      book_reverted: ['Bookmaker moved back', 'By the time we could act, the bookmaker\'s move had gone.'],
+      already_moved: ['Market already moved', 'Not delayed: the market had already made more than its allowed share of the move.'],
+      too_few_books: ['Too few bookmakers moved', 'Only one bookmaker had moved; the market rarely follows a single book.'],
+      price_unknown: ['Real price unknown', 'No recorded Kalshi quote or minute candle for that moment, so no honest price to trade at.'],
+      spread_too_wide: ['Spread too wide', 'Buying and selling back would cost more than the rule allows.'],
+      market_quiet: ['Market quiet', 'The market had not changed for too long.'],
+      price_extreme: ['Price at an extreme', 'Under 2c or over 98c.'],
+      price_too_low: ['Price too low', 'Cheap long shots rarely catch up in time.'],
+      gap_too_small: ['Gap too small', 'Delayed, but the gain if it caught up would not beat spread, slippage and fees.'],
+      price_ran: ['Price ran before the fill', 'By the time the order landed the price was more than 2c worse.'],
+    };
+    const gateText = (g) => [
+      `${g.min_books}+ bookmaker${g.min_books > 1 ? 's' : ''} moved`,
+      `market made ≤ ${Math.round(g.max_followed * 100)}% of the move`,
+      `spread ≤ ${Math.round(g.max_spread * 100)}¢`,
+      g.min_entry > 0 ? `price ≥ ${Math.round(g.min_entry * 100)}¢` : '',
+      g.min_edge > 0 ? `expected gain ≥ ${Math.round(g.min_edge * 100)}¢` : 'expected gain > 0',
+      g.need_real ? 'real price known' : '',
+      `give up after ${g.give_up_s < 60 ? g.give_up_s + ' s' : g.give_up_s / 60 + ' min'}`,
+    ].filter(Boolean).join(' · ');
+    const name = (b) => SE.bookName(b);
+
+    const grpTable = (rows, keyLabel, keyFmt) => rows?.length ? `<table class="tbl"><thead><tr><th>${keyLabel}</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">P&amp;L</th><th class="r">Per trade</th></tr></thead><tbody>${
+      rows.map((g) => `<tr><td>${keyFmt(g.key)}</td><td class="r">${SE.fmtInt(g.trades)}</td><td class="r">${SE.fmtPct(g.win_rate)}</td><td class="r">${pnl(g.pnl)}</td><td class="r muted">${money(g.pnl / g.trades)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">No trades.</div>';
+
+    function draw() {
+      if (!data) return;
+      const fb = data.fastest_book;
+      segs();
+      // ---- setup facts
+      const sr = (data.sources || []).find((x) => x.source === fb);
+      const sn = (b, r) => (data.snipe || []).find((x) => x.baseline === b && x.reference === r);
+      const best = (b) => { const hs = (base(b)?.holds || []).filter((h) => h.trades >= 10); return hs.length ? hs.reduce((a, h) => (h.roi > a.roi ? h : a)) : null; };
+      const fact = (icon, html) => `<div class="sn-fact">${ic(icon)}<div>${html}</div></div>`;
+      $('#pFacts').innerHTML =
+        fact('visibility', fb ? `<b>Watch ${SE.book(fb, 'sm')}</b>: fastest bookmaker across all games${sr ? `, ${SE.fmtSpan(sr.median_behind_first_ms) || 'no time'} behind the first mover in the median, first on ${SE.fmtPct(sr.first_share)} of its moves` : ''}.` : 'Not enough moves yet to name the fastest bookmaker.') +
+        ['polymarket', 'kalshi'].map((b) => {
+          const s1 = sn(b, 'first'), o = base(b)?.opportunity, g2 = o?.lead_at_least.find((x) => x[0] === 2000), bh = best(b);
+          const f = base(b)?.funnel;
+          return fact('timer', `<b>${name(b)}</b>: on average <b>${secs(s1?.mean_ms)}</b> after the first bookmaker (median ${secs(s1?.median_ms)}); still ≥ 2 s behind on <b>${SE.fmtPct(g2?.[2])}</b> of ${SE.fmtInt(o?.events || 0)} moves. The model found it delayed and bought on <b>${SE.fmtInt(f?.entered || 0)}</b> of ${SE.fmtInt(f?.triggers || 0)} bookmaker moves. ${bh ? `Best give-up time: <b>${bh.hold_s < 60 ? bh.hold_s + ' s' : bh.hold_s / 60 + ' min'}</b> (${SE.fmtPct(bh.roi, 1)} per trade).` : ''}`);
+        }).join('') +
+        ['polymarket', 'kalshi'].map((b) => fact('rule', `<b>${name(b)} buys only when:</b> ${esc(gateText(base(b)?.gate || {}))}. Sells at the bid once it has made <b>${SE.fmtPct(data.settings.catch)}</b> of the bookmaker\'s move.`)).join('') +
+        fact('info', `Decides ${data.settings.reaction_ms / 1000} s after the bookmaker moves; the order lands ${data.settings.fill_ms / 1000} s later at that moment\'s price, ${Math.round(data.settings.slip * 100)}¢ worse on every buy and sale, and is not taken if the price ran more than ${Math.round(data.settings.cap * 100)}¢. ${money(data.settings.stake)} a trade, Polymarket fee ${data.settings.pm_fee_bps / 100}% a side, Kalshi taker fee. Polymarket prices are its real order book; Kalshi uses its real quotes since they were recorded and its own 1-minute candles before that (${(() => { const q = base('kalshi')?.quote_source || {}; return `this range: ${SE.fmtInt(q.book || 0)} buys on recorded quotes, ${SE.fmtInt(q.candle || 0)} on candles`; })()}). Order-book depth is not modelled.`);
+      // ---- tiles
+      $('#pTiles').innerHTML = ['polymarket', 'kalshi'].map((b) => {
+        const h = holdOf(b), o = base(b)?.opportunity, g2 = o?.lead_at_least.find((x) => x[0] === 2000);
+        const t = (icon, label, val, foot = '', tip = '') => `<div class="stat" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="stat-label">${ic(icon)}${label}</div><div class="stat-value">${val}</div><div class="stat-foot">${foot}</div></div>`;
+        return `<div class="sn-row">${SE.book(b)}</div>` + P.stats(
+          t('payments', 'Net P&amp;L', h ? pnl(h.pnl) : '-', h ? `${SE.fmtInt(h.trades)} trades at ${money(data.settings.stake)}` : ''),
+          t('trending_up', 'Return per trade', h?.roi != null ? `<b class="${h.roi > 0 ? 'pos' : 'neg'}">${SE.fmtPct(h.roi, 2)}</b>` : '-', h?.median_return != null ? `median ${SE.fmtPct(h.median_return, 2)}` : ''),
+          t('check_circle', 'Win rate', h?.win_rate != null ? SE.fmtPct(h.win_rate, 1) : '-', h ? `${SE.fmtInt(h.wins)} of ${SE.fmtInt(h.trades)}` : ''),
+          t('south', 'Max drawdown', h ? money(-h.max_drawdown) : '-', 'worst fall from a peak'),
+          t('bolt', 'Caught up', h?.catch_rate != null ? SE.fmtPct(h.catch_rate) : '-', h?.median_held_ms != null ? `median held ${SE.fmtSpan(h.median_held_ms)}` : '', 'Share of buys where the price caught up before the give-up time.'),
+          t('hourglass_top', 'Still ≥ 2 s behind', g2 ? SE.fmtPct(g2[2]) : '-', o ? `${SE.fmtInt(g2?.[1] || 0)} of ${SE.fmtInt(o.events)} moves` : '', G.buy.replace(/Polymarket/g, name(b))),
+        );
+      }).join('');
+      // ---- funnels: why it did or did not buy
+      for (const [id, b] of [['#pFunPm', 'polymarket'], ['#pFunK', 'kalshi']]) {
+        const f = base(b)?.funnel;
+        const rows = Object.entries(f?.skipped || {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => [(SKIP[k] || [k])[0], n, n / f.triggers, (SKIP[k] || [k, ''])[1]]);
+        $(id).innerHTML = f?.triggers ? P.ladder([
+          ['Bookmaker moves', f.triggers, 1],
+          ...rows,
+          ['Bought (delayed)', f.entered, f.entered / f.triggers, 'Every rule passed: the market was delayed and the gap was worth it.'],
+        ], f.triggers) : `<div class="empty">No bookmaker moves while ${name(b)} was watched.</div>`;
+      }
+      // ---- ladders
+      for (const [id, b] of [['#pLadPm', 'polymarket'], ['#pLadK', 'kalshi']]) {
+        const o = base(b)?.opportunity;
+        $(id).innerHTML = o?.events
+          ? P.ladder(o.lead_at_least.map(([ms, n, sh]) => [ms === 0 ? 'Any gap' : SE.fmtSpan(ms) + ' or more', n, sh]), o.events) +
+            `<div class="note" style="margin:18px 0 8px">Move still to come at that moment</div>` + P.ladder(o.capturable_at_least.map(([pts, n, sh]) => [`${Math.round(pts * 100)} pts or more`, n, sh, G.left]), o.events)
+          : `<div class="empty">No bookmaker moves while ${name(b)} was watched.</div>`;
+      }
+      // ---- equity curve
+      const curves = ['polymarket', 'kalshi'].map((b) => ({ b, c: holdOf(b)?.curve || [] })).filter((x) => x.c.length);
+      const xs = [...new Set(curves.flatMap((x) => x.c.map((p) => p[0])))].sort((a, b) => a - b);
+      const al = SE.alignSeries(curves.map((x) => x.c));
+      const colour = { polymarket: '#7aa7ff', kalshi: '#5ff0a8' };
+      eq = SE.chartKeep($('#pEq'), eq, xs, curves.map((x, i) => ({ label: name(x.b), book: x.b, color: colour[x.b], values: al.values[i], linear: true, width: 2 })), { yFmt: (v) => (v == null ? '' : money(v)) }, $('#pEqL'));
+      if (!eq) $('#pEq').innerHTML = `<div class="empty">${ic('show_chart')}No completed paper trades in this range.</div>`;
+      // ---- holds
+      const hs = base('polymarket')?.holds.map((h) => h.hold_s) || [];
+      $('#pHolds').innerHTML = `<div class="scroll"><table class="tbl"><thead><tr><th>Give up after</th>${['polymarket', 'kalshi'].map((b) => `<th class="r">${SE.book(b, 'sm')} trades</th><th class="r">Caught up</th><th class="r">Win rate</th><th class="r">P&amp;L</th><th class="r">Per trade</th>`).join('')}</tr></thead><tbody>${
+        hs.map((hold) => `<tr class="${hold === st.hold ? 'on' : ''}"><td><b>${hold < 60 ? hold + ' s' : hold / 60 + ' min'}</b></td>${['polymarket', 'kalshi'].map((b) => { const h = base(b)?.holds.find((x) => x.hold_s === hold); return h ? `<td class="r">${SE.fmtInt(h.trades)}</td><td class="r">${SE.fmtPct(h.catch_rate)}</td><td class="r">${SE.fmtPct(h.win_rate, 1)}</td><td class="r">${pnl(h.pnl)}</td><td class="r muted">${SE.fmtPct(h.roi, 2)}</td>` : '<td></td><td></td><td></td><td></td><td></td>'; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+      // ---- groups
+      $('#pLead').innerHTML = grpTable(holdOf(st.leadB)?.by_lead, 'Market was', (k) => esc(k));
+      $('#pReason').innerHTML = grpTable(holdOf(st.grpB)?.by_reason, 'Exit', (k) => (k === 'caught up' ? ic('bolt') + 'Price caught up' : ic('hourglass_bottom') + 'Gave up'));
+      $('#pSport').innerHTML = grpTable(holdOf(st.grpB)?.by_sport, 'Sport', (k) => SE.sportIcon(k) + esc(SE.sportName(k)));
+      $('#pTrig').innerHTML = grpTable(holdOf(st.grpB)?.by_trigger, 'Trigger', (k) => SE.book(k, 'sm'));
+      // ---- recent
+      const tr = holdOf(st.trB)?.recent || [];
+      $('#pTr').innerHTML = tr.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Time</th><th>Match</th><th>Bet</th><th>Trigger</th><th class="r">Book move</th><th class="r">Market had done</th><th class="r">Entry</th><th class="r">Exit</th><th>Exit</th><th class="r">Held</th><th class="r">P&amp;L</th></tr></thead><tbody>${
+        tr.map((t) => `<tr><td class="mono muted">${SE.fmtDateTime(t.ts)}</td><td><a href="#/match/${t.match_id}">${SE.sportIcon(t.sport)}${SE.vs(t.home, t.away)}</a></td><td>${t.dir > 0 ? 'Yes' : 'No'} <b>${esc(SE.outcomeLong ? SE.outcomeLong(t.outcome) : t.outcome)}</b></td><td>${SE.book(t.trigger, 'sm')}</td><td class="r">${(t.book_move * 100).toFixed(1)} pts</td><td class="r muted">${SE.fmtPct(t.followed)}</td><td class="r">${(t.entry * 100).toFixed(1)}¢</td><td class="r">${(t.exit * 100).toFixed(1)}¢</td><td class="muted">${t.reason}</td><td class="r muted">${SE.fmtSpan(t.exit_ts - t.ts)}</td><td class="r">${pnl(t.pnl)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No trades.</div>';
+    }
+
+    async function load() {
+      $('#pTiles').innerHTML = `<div class="empty">${ic('hourglass_top')}Simulating…</div>`;
+      const q = `/snipe?since=${P.rangeSince(st.hours)}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
+      const d = await api(q).catch((e) => { $('#pTiles').innerHTML = `<div class="empty">${ic('error')}${esc(String(e.message || e))}</div>`; return null; });
+      if (!d) return;
+      data = d;
+      draw();
+    }
+    load();
+    SE.every(60000, load);
+    return () => SE.destroyChart(eq);
   },
 };
 
