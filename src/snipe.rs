@@ -463,7 +463,7 @@ fn kalshi_fee(contracts: f64, p: f64) -> f64 {
 }
 
 /// Give-up times compared on the page (seconds).
-const HOLDS_S: [i64; 4] = [30, 60, 120, 300];
+const HOLDS_S: [i64; 7] = [30, 60, 120, 300, 600, 1200, 1800];
 /// How long before the trigger the "before the move" levels are read.
 const PRE_MS: Ms = 10_000;
 
