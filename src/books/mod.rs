@@ -2,13 +2,18 @@
 //! own live page loads, and turns it into a normalised `Snapshot`.
 
 pub mod altenar;
+pub mod betby;
+pub mod betcity;
 pub mod betika;
 pub mod betpawa;
 pub mod fonbet;
 pub mod kalshi;
 pub mod kambi;
+pub mod leon;
 pub mod linebet;
 pub mod m88;
+pub mod marathon;
+pub mod mostbet;
 pub mod novibet;
 pub mod olimp;
 pub mod pinnacle;

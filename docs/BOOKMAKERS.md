@@ -19,6 +19,12 @@ not wired yet; **blocked** = challenge / geo-block / refused from here.
 | 1xBit | 1xBet platform, `1xbit1.com`, `partner=65` | `1xbit.com` serves a block page. |
 | BetKing (Ukraine) | Altenar widget API, integration `betking`, country UA | same adapter as VINN; football. |
 | Olimpbet | `olimp.bet/api/v4/0/live/sports-with-competitions-with-events?vids[]=` | all live sports; English names in `names["2"]`; П1/Х/П2 outcomes, price in the field `probability`; two-way winner in market 2 (tennis) / 4366 (basketball). Live only. |
+| Duel | Betby platform (`books/betby.rs`): `api-a-c7818b61-600.sptpub.com/api/v4/{live,prematch}/brand/2482975601191952386/en/0` → `top_events_versions` + `rest_events_versions` → `.../en/{version}` slices | Sportradar market ids (1 = 1X2; 186 / 219 / 406 / 251 / 340 = two-way winner, outcomes 4/5). Any other Betby brand needs only its API host + brand id from its page's requests. |
+| Mostbet | `GET /api/v3/user/line/list?t=2&l=100&of=N` (t=2 live, t=1 pre-match; ≤ 100 per page) on its current mirror (`0djawb3.com`) | outcomes alias 1/x/2, `odd`, `active`. Mirror is the `param` (mostbet.com sends browsers to it). |
+| Leon | `leon.bet/api-2/betline/events/inplayupcomingall?ctag=en-US-7da6p&hideClosed=true&flags=reg,urlv2,orn2,cn,mm2,rrc,cmg` | the `ctag` build suffix is required (plain `en-US` → INVALID_CODE; `param` overrides it); without `nodup` each event carries its league/sport; e-sports game in `league.region.name`. |
+| Marathonbet | `marathonbet.com/eag/event-line/api/v1/sports/menu` + `/sports/{treeId}/all-tournaments/live` with the site's app headers `X-PAN-SOURCE: REDESIGN_WEB`, `X-PAN-TARGET: BROWSER`, `X-PAN-VERSION: 2.8.2` | fractional prices `{n,d}`; `Match_Result` / `Match_Winner_OT`. Live only. |
+| Betcity | `ad.betcity.ru/d/on_air/bets` (all live with markets) | `main["69"]` P1/X/P2 with Betcity's own change stamp `md`; Russian names (e-sports teams are Latin), so non-e-sports games link only when transliteration is close. |
+| PARI | Fonbet platform: `line-vk02-w.pb06e2-resources.ru/events/list?lang=en&version=N&scopeMarket=2300` | same adapter as Fonbet (now all sports for both). |
 
 Already wired before: Melbet, BetWinner, Megapari, Linebet (1xBet platform, classic feed, no partner
 needed), M88, Fonbet, Pinnacle, Kambi brands, Thunderpick, SportyBet, betPawa, Betika, VINN.
@@ -33,18 +39,14 @@ feed is used.
 
 | Book | What was found | What wiring needs |
 |---|---|---|
-| Betcity (betcity.ru) | `ad.betcity.ru/d/on_air/events?rev=8&ver=124&csn=ooca9s` = open JSON of every live event (ids, teams, score, timer) | odds come from a per-event call (not traced); names are Russian only (`name_ht`/`name_at`, no `lang` switch) → needs transliteration/alias matching. |
-| Mostbet | redirects to rotating mirrors (`0djawb3.com` today); `GET /api/v3/user/line/list?t=1\|2` open JSON (line hierarchy with outcome aliases P1/X/P2), `/api/v1/allsports/sports`, `/api/v1/websocket/credentials` (live updates by socket) | pagination (20 lines per page), mirror discovery, then parse `line_dto_collection`. |
-| Leon (leon.bet) | open SPA; all sportsbook data is `POST /api-1` (GraphQL-style, operations defined in its JS bundle); the old `/api-2/betline/*` answers `INVALID_CODE` | read the operation documents from the bundle and replay the events query. |
 | Olimpbet KZ / UZ | same platform as olimp.bet (`/api/v4/0/...`) | `olimpbet.kz` is Cloudflare-challenged from here; `olimp.bet` (RU) is wired. |
 | Baltbet | server-rendered pages + `/api/grouping/events`, `/api/events` (POST from `uniru.bundle.js`), SignalR hub `/api/signalr` for live | trace the POST bodies on its live page. |
 | Zenit (zenit.win / zenitbet.com) | "almara" platform: socket at `/wss` (`/wss/xhr/` long-poll fallback), routes `/live/26`, `/line/football/...` | decode the socket protocol. |
 | Winline | binary WebSocket `wss://wss.winline.ru/data_ng?client=newsite&nb=true` | decode the binary frames (as noted in AGENTS.md). |
-| 1win (1win.com / 1win.pro) | open Vue SPA; sportsbook loads only after its app bundle runs (`/resources/v1/app/assets/bff-*.js`) | read the bff client to find the live-events endpoint. |
-| Pari (pari.ru) | open, a JS-only shell (no data in the HTML) | trace its live page requests in a browser. |
-| Marathonbet (.com) | open (Cloudflare in front but no challenge); live pages are server-rendered HTML with odds in data attributes | HTML parsing of `/en/live/...`; `.ru` is challenged. |
-| GG.BET | `gg.bet` answers 200 today (it was 403 earlier); markers suggest its own platform | trace requests. |
-| Duel, Dafabet, Fun88, Bet25, BetKing (Nigeria) | homepages open | not traced yet. |
+| 1win (1win.com / 1win.pro) | matches: `POST api-gateway.top-parser.com/matches/get-many?l=en-001&p=44ba10e5-7df2-47ab-a44d-dc93803c7a6e` body `{"service":"live","sportId":18,"limit":100}` (open, teams + start, no prices); odds are not in any request its page makes (likely a worker / socket) | find the odds channel. |
+| GG.BET | everything over GraphQL on a WebSocket `wss://gg-b-gql.gg.bet/graphql` (subprotocol graphql-ws) with persisted queries (`GetSportEventListByFilters` sha256 `44839cf8…`, `OnUpdateSportEvent`); a fresh socket is refused `connection_error: unauthorized` without the session token the page holds; `gg.bet/graphql` over HTTP does not know the persisted query | would need the page's guest session token in `connection_init` (not taken: that is the site's credential). |
+| BetKing (Nigeria) | `sportsapicdn-desktop.betking.com/api/feeds/prematch/...` (open JSON: `lastminute/en/1/15/`, `mostpopularsports/...`, `matches/custommenu/en/4`); live page redirects to the sports home | pre-match only so far; live feed not seen. |
+| Dafabet, Fun88, Bet25 | homepages open; the browser pane refuses gambling domains like these (and Marathonbet), so their requests could not be traced there | trace from a normal browser. |
 
 ## Blocked from here (not bypassed)
 

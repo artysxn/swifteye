@@ -9,7 +9,11 @@ use super::*;
 use std::collections::HashMap;
 
 pub struct Fonbet {
+    /// "fonbet", or "pari" (PARI runs on the same platform, its own hosts and market scope).
+    pub name: &'static str,
     pub host: String,
+    /// `scopeMarket` of the brand's site (Fonbet 1600, PARI 2300).
+    pub scope: u32,
     /// Look-ahead for pre-match games (the line feed already includes them).
     pub pre_hours: f64,
     version: u64,
@@ -24,9 +28,11 @@ pub struct Fonbet {
 }
 
 impl Fonbet {
-    pub fn new(host: String, pre_hours: f64) -> Self {
+    pub fn new(name: &'static str, host: String, scope: u32, pre_hours: f64) -> Self {
         Fonbet {
+            name,
             host,
+            scope,
             pre_hours,
             version: 0,
             last_full_ms: 0,
@@ -91,7 +97,7 @@ impl Fonbet {
 
 impl Book for Fonbet {
     fn name(&self) -> &'static str {
-        "fonbet"
+        self.name
     }
     fn source(&self) -> String {
         format!("{}/events/list (incremental by packetVersion)", self.host)
@@ -99,7 +105,7 @@ impl Book for Fonbet {
     async fn fetch(&mut self, http: &reqwest::Client) -> Result<Snapshot> {
         let full = self.version == 0 || now_ms() - self.last_full_ms > 30_000;
         let ver = if full { 0 } else { self.version };
-        let url = format!("https://{}/events/list?lang=en&version={ver}&scopeMarket=1600", self.host);
+        let url = format!("https://{}/events/list?lang=en&version={ver}&scopeMarket={}", self.host, self.scope);
         let (v, recv_ms) = fetch_json(http.get(url)).await?;
         if full {
             self.events.clear();
@@ -131,17 +137,24 @@ impl Book for Fonbet {
                 }
             }
             let seg = e["sportId"].as_i64().unwrap_or(0);
-            if self.root_sport(seg) != 1 {
-                continue;
-            }
             let league = self.segments.get(&seg).map(|s| s.1.clone()).unwrap_or_default();
+            // Sport from the root segment's name ("Football", "Tennis", "Hockey", ...);
+            // e-sports carry the game in the league name.
+            let root = self.segments.get(&self.root_sport(seg)).map(|s| s.1.clone()).unwrap_or_default();
+            let sport: &str = match sport_key(&root) {
+                Some(x) => x,
+                None => match esport_key(&league).or_else(|| esport_key(&root)) {
+                    Some(x) => x,
+                    None => continue,
+                },
+            };
             let misc = self.misc.get(&id);
             let score = misc.and_then(|m| Some(format!("{}-{}", m["score1"].as_i64()?, m["score2"].as_i64()?)));
             let clock = self.timers.get(&id).cloned();
             let blocked = self.blocked.get(&id).copied().unwrap_or(false);
             let mut ev = EventIn {
                 id: id.to_string(),
-                sport: "football".into(),
+                sport: sport.into(),
                 league: league.replace(". ", " / "),
                 home: text(&e["team1"]),
                 away: text(&e["team2"]),
@@ -160,6 +173,12 @@ impl Book for Fonbet {
                     if fs.contains_key(&fid) {
                         ev.quotes.push(QuoteIn::new(Market::X12, None, o, price(fid)));
                     }
+                }
+                // Totals and handicaps only for football (other sports use other factor ids).
+                if sport != "football" {
+                    ev.quotes = winner_quotes(sport, ev.quotes);
+                    out.push(ev);
+                    continue;
                 }
                 if let Some(l) = pt(930).or(pt(931)) {
                     for (fid, o) in [(930, Outcome::Over), (931, Outcome::Under)] {

@@ -179,7 +179,8 @@ list as `EventIn`s with normalized `QuoteIn`s), add `pub mod x;` to
 See `docs/BOOKMAKERS.md` for every site probed (status, protection, platform, how its odds feed
 works or would work). Added: PariPesa, 22Bet, 22Bit, 1xBit (1xBet classic feed + the brand's
 `partner` id, which these newer brands require), BetKing UA (Altenar `betking`), Olimpbet
-(`books/olimp.rs`). Tools: `tools/probe_books.mjs`, `tools/find_apis.mjs`.
+(`books/olimp.rs`), Duel (`books/betby.rs`, reusable for any Betby brand), Mostbet, Leon,
+Marathonbet, Betcity, PARI (Fonbet platform; Fonbet adapter now covers every sport). Tools: `tools/probe_books.mjs`, `tools/find_apis.mjs`.
 
 Snipe window research: `tools/snipe_research.mjs` (gates in `src/snipe.rs`, chosen on the first
 60% of the data, checked on the last 40%). Kalshi real quotes in `kalshi_quotes` (est=1 rows =

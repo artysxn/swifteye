@@ -228,7 +228,9 @@ fn start_books(app: &Arc<App>) {
     }
     start!("m88", 1500, |_p: Option<String>| m88::M88::new(follows, pre()));
     start!("pinnacle", 2000, |_p: Option<String>| pinnacle::Pinnacle::new(follows, pre()));
-    start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new(p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into()), ph));
+    start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new("fonbet", p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into()), 1600, ph));
+    // PARI (pari.ru) runs on Fonbet's platform: same feed on its own line hosts, market scope 2300.
+    start!("pari", 1000, |p: Option<String>| fonbet::Fonbet::new("pari", p.unwrap_or_else(|| "line-vk02-w.pb06e2-resources.ru".into()), 2300, ph));
     start!("vinn", 1000, |p: Option<String>| altenar::Altenar {
         name: "vinn",
         integration: p.unwrap_or_else(|| "vinn".into()),
@@ -245,6 +247,20 @@ fn start_books(app: &Arc<App>) {
         pre: pre(),
     });
     start!("olimp", 1000, |_p: Option<String>| olimp::Olimp);
+    start!("betcity", 1000, |_p: Option<String>| betcity::Betcity);
+    // Marathonbet: param = its app version for the X-PAN-VERSION header.
+    start!("marathon", 2000, |p: Option<String>| marathon::Marathon {
+        version: p.unwrap_or_else(|| "2.8.2".into()),
+        follows: books::SPORTS.iter().copied().filter(|s| cfg.follows(s)).collect(),
+    });
+    // Leon: param = the ctag (locale + build tag) its live page uses.
+    start!("leon", 1500, |p: Option<String>| leon::Leon { ctag: p.unwrap_or_else(|| "en-US-7da6p".into()) });
+    // Mostbet moves between mirror domains; param = the current one.
+    start!("mostbet", 2000, |p: Option<String>| mostbet::Mostbet { host: p.unwrap_or_else(|| "0djawb3.com".into()), pre: Pre::new(ph, 60_000) });
+    // Betby brands: (name, API host, brand id, site). Pre-match is ~600 KB, refreshed every minute.
+    for (name, api, brand, origin) in [("duel", "https://api-a-c7818b61-600.sptpub.com", "2482975601191952386", "https://duel.com")] {
+        start!(name, 1500, |_p: Option<String>| betby::Betby { name, api: api.into(), brand: brand.into(), origin: origin.into(), pre: Pre::new(ph, 60_000) });
+    }
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
     // Kalshi: second prediction-market baseline, polled in batches.

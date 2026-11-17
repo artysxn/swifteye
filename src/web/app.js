@@ -154,11 +154,13 @@ SE.BOOK_COLORS = {
   linebet: '#2f9e5b', fonbet: '#ff3b4f', unibet: '#7d8cff', vinn: '#f5b83d', kalshi: '#28d07f', thunderpick: '#8b5cf6', novibet: '#1e88e5',
   pinnacle: '#ff5a1f', m88: '#c8102e', melbet: '#fcc419', betwinner: '#7bc043', megapari: '#38bdf8', leovegas: '#b45309', paf: '#f04e37',
   paripesa: '#1d4ed8', '22bet': '#0f766e', '22bit': '#7c3aed', '1xbit': '#0ea5e9', betking: '#facc15', olimp: '#dc2626',
+  duel: '#e5e7eb', mostbet: '#2563eb', leon: '#f59e0b', marathon: '#0b5394', betcity: '#3b82f6', pari: '#a3e635',
 };
 SE.BOOK_NAMES = {
   polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi', thunderpick: 'Thunderpick', novibet: 'Novibet',
   pinnacle: 'Pinnacle', m88: 'M88', melbet: 'Melbet', betwinner: 'BetWinner', megapari: 'Megapari', leovegas: 'LeoVegas', paf: 'Paf',
   paripesa: 'PariPesa', '22bet': '22Bet', '22bit': '22Bit', '1xbit': '1xBit', betking: 'BetKing', olimp: 'Olimpbet',
+  duel: 'Duel', mostbet: 'Mostbet', leon: 'Leon', marathon: 'Marathonbet', betcity: 'Betcity', pari: 'PARI',
 };
 // ---------------------------------------------------------------- sports / games
 // key, label, icon: a Material Symbol name for traditional sports, a game logo for e-sports.
