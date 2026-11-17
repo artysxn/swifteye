@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swifteye</title>
+<link rel="icon" type="image/png" href="/assets/img/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,500,1,0&display=block">
+<link rel="stylesheet" href="/assets/uplot.css">
+<link rel="stylesheet" href="/assets/app.css">
+<script>
+  try { const t = JSON.parse(localStorage.getItem('se.theme') || 'null'); if (t) document.documentElement.dataset.theme = t; } catch {}
+</script>
+</head>
+<body>
+<div class="shell">
+  <aside class="nav">
+    <a class="brand" href="#/dashboard"><img src="/assets/img/logo.png" alt=""><span class="brand-name">Swifteye</span></a>
+
+    <nav class="nav-main">
+      <div class="nav-group">Delay</div>
+      <a href="#/dashboard" data-route="dashboard"><span class="ic">space_dashboard</span>Overview</a>
+      <a href="#/rankings" data-route="rankings"><span class="ic">leaderboard</span>Rankings</a>
+      <a href="#/latency" data-route="latency"><span class="ic">timer</span>Latency</a>
+
+      <div class="nav-group">Markets</div>
+      <a href="#/live" data-route="live"><span class="ic">sports_soccer</span>Live matches<span class="count" id="navLive"></span></a>
+      <a href="#/sheet" data-route="sheet"><span class="ic">table_view</span>Sheet</a>
+      <a href="#/charts" data-route="charts"><span class="ic">monitoring</span>Charts</a>
+      <a href="#/movers" data-route="movers"><span class="ic">swap_vert</span>Movers</a>
+      <a href="#/edges" data-route="edges"><span class="ic">balance</span>Edges</a>
+
+      <div class="nav-group">Tools</div>
+      <a href="#/query" data-route="query"><span class="ic">database</span>Query</a>
+      <a href="#/docs" data-route="docs"><span class="ic">code</span>API</a>
+      <a href="#/control" data-route="control"><span class="ic">tune</span>Control panel</a>
+      <a href="#/polymarket" data-route="polymarket"><span class="ic">account_balance_wallet</span>Polymarket</a>
+    </nav>
+
+    <div class="nav-foot">
+      <a href="#/stats" data-route="stats"><span class="ic">insights</span>Statistics</a>
+      <a href="#/settings" data-route="settings"><span class="ic">settings</span>Settings</a>
+      <a class="me" href="#/settings" data-tip="Your Polymarket link status. Add keys in Settings.">
+        <span class="avatar">A</span>
+        <span class="me-text"><span class="me-name">artysxn</span><span class="me-sub" id="meSub">Local</span></span>
+        <span class="dot" id="meDot"></span>
+      </a>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <section class="page" id="page"></section>
+  </main>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/uplot.js"></script>
+<script src="/assets/app.js"></script>
+<script src="/assets/pages.js"></script>
+<script src="/assets/pages2.js"></script>
+<script src="/assets/pages3.js"></script>
+</body>
+</html>

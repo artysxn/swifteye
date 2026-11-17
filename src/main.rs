@@ -5,6 +5,8 @@ mod engine;
 mod lag;
 mod matcher;
 mod model;
+mod pmacct;
+mod rank;
 mod store;
 
 use engine::{Engine, Write};

@@ -11,6 +11,8 @@ pub type QKey = (Market, i32, Outcome);
 #[derive(Clone, Debug, Serialize)]
 pub struct QuoteState {
     pub price: Option<f64>,
+    /// The price before the last change (for arrows / flashes in the UI).
+    pub prev: Option<f64>,
     pub updated_ms: Ms,
     pub book_ts: Option<Ms>,
 }
@@ -43,6 +45,8 @@ pub struct BookStatus {
     pub name: &'static str,
     pub source: String,
     pub poll_ms: u64,
+    /// Paused from the control panel: the source is not polled / not applied.
+    pub paused: bool,
     pub polls: u64,
     pub errors: u64,
     pub last_ok_ms: Option<Ms>,
@@ -98,6 +102,25 @@ impl Engine {
         st.status.name = name;
         st.status.source = source;
         st.status.poll_ms = poll_ms;
+    }
+
+    /// Pause/resume a source or change how often it is polled. Returns the new status.
+    pub fn control(&mut self, book: &str, paused: Option<bool>, poll_ms: Option<u64>) -> Option<BookStatus> {
+        let b = self.books.iter_mut().find(|(n, _)| **n == book)?.1;
+        if let Some(p) = paused {
+            b.status.paused = p;
+        }
+        if let Some(ms) = poll_ms {
+            if b.status.poll_ms > 0 {
+                b.status.poll_ms = ms.clamp(250, 60_000);
+            }
+        }
+        Some(b.status.clone())
+    }
+
+    /// (paused, poll interval) for the poll loop.
+    pub fn schedule(&self, book: &str) -> (bool, u64) {
+        self.books.get(book).map_or((false, 1000), |b| (b.status.paused, b.status.poll_ms.max(250)))
     }
 
     pub fn poll_error(&mut self, book: &'static str, err: String) {
@@ -221,7 +244,12 @@ impl Engine {
                     }));
                 }
                 let updated_ms = if kind.is_some() || prev.is_none() { now } else { prev.unwrap().updated_ms };
-                es.quotes.insert(*k, QuoteState { price: q.price, updated_ms, book_ts: q.book_ts });
+                let prev_price = match (kind, prev) {
+                    (Some(_), Some(p)) => p.price.or(p.prev),
+                    (None, Some(p)) => p.prev,
+                    _ => None,
+                };
+                es.quotes.insert(*k, QuoteState { price: q.price, prev: prev_price, updated_ms, book_ts: q.book_ts });
             }
             // Lines the book stopped listing.
             let gone: Vec<QKey> = es.quotes.keys().filter(|k| !incoming.contains_key(k)).copied().collect();

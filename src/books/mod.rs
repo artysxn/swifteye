@@ -58,14 +58,19 @@ pub async fn fetch_json(req: reqwest::RequestBuilder) -> Result<(Value, Ms)> {
 }
 
 /// Poll one book forever.
-pub async fn run<B: Book>(mut book: B, app: Arc<App>, poll_ms: u64) {
+pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
     let name = book.name();
     let http = http_client();
-    let mut iv = tokio::time::interval(Duration::from_millis(poll_ms));
-    iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut backoff = Duration::ZERO;
+    let mut next = tokio::time::Instant::now();
     loop {
-        iv.tick().await;
+        // Interval and pause are read every cycle so the control panel takes effect live.
+        let (paused, poll_ms) = app.engine.lock().schedule(name);
+        tokio::time::sleep_until(next).await;
+        next = tokio::time::Instant::now() + Duration::from_millis(poll_ms);
+        if paused {
+            continue;
+        }
         if !backoff.is_zero() {
             tokio::time::sleep(backoff).await;
         }

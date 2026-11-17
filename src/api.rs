@@ -22,8 +22,23 @@ type S = State<Arc<App>>;
 
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
-        .route("/", get(index))
+        .route("/", get(|| async { asset("index.html", "text/html; charset=utf-8", include_str!("web/index.html")) }))
+        .route("/assets/app.css", get(|| async { asset("app.css", "text/css; charset=utf-8", include_str!("web/app.css")) }))
+        .route("/assets/app.js", get(|| async { asset("app.js", "text/javascript; charset=utf-8", include_str!("web/app.js")) }))
+        .route("/assets/pages.js", get(|| async { asset("pages.js", "text/javascript; charset=utf-8", include_str!("web/pages.js")) }))
+        .route("/assets/pages2.js", get(|| async { asset("pages2.js", "text/javascript; charset=utf-8", include_str!("web/pages2.js")) }))
+        .route("/assets/pages3.js", get(|| async { asset("pages3.js", "text/javascript; charset=utf-8", include_str!("web/pages3.js")) }))
+        .route("/assets/uplot.js", get(|| async { asset("vendor/uPlot.iife.min.js", "text/javascript; charset=utf-8", include_str!("web/vendor/uPlot.iife.min.js")) }))
+        .route("/assets/uplot.css", get(|| async { asset("vendor/uPlot.min.css", "text/css; charset=utf-8", include_str!("web/vendor/uPlot.min.css")) }))
+        .route("/assets/img/{name}", get(img))
+        .route("/rankings", get(rankings))
+        .route("/api", get(index))
         .route("/ui", get(ui))
+        .route("/quotes", get(quotes))
+        .route("/info", get(info))
+        .route("/control/books/{name}", post(control_book))
+        .route("/pm/settings", get(pm_settings_get).post(pm_settings_post))
+        .route("/pm/account", get(pm_account))
         .route("/books", get(books))
         .route("/matches", get(matches))
         .route("/matches/{id}", get(match_detail))
@@ -603,6 +618,142 @@ async fn lag_books_events(State(app): S, Query(q): Query<LagQ>) -> Response {
         evs.drain(..evs.len() - limit);
     }
     Json(json!({"count": n, "events": evs})).into_response()
+}
+
+/// Web files are compiled in. Set ODDSFEED_WEB_DIR=<repo>/src/web to serve them from disk while editing.
+fn asset(name: &'static str, ct: &'static str, body: &'static str) -> Response {
+    let headers = [(axum::http::header::CONTENT_TYPE, ct), (axum::http::header::CACHE_CONTROL, "no-cache")];
+    if let Ok(dir) = std::env::var("ODDSFEED_WEB_DIR") {
+        if let Ok(text) = std::fs::read_to_string(std::path::Path::new(&dir).join(name)) {
+            return (headers, text).into_response();
+        }
+    }
+    (headers, body).into_response()
+}
+
+/// Every current quote as flat rows: the spreadsheet view.
+async fn quotes(State(app): S) -> Json<Value> {
+    let eng = app.engine.lock();
+    let mut rows = Vec::new();
+    for (book, bs) in &eng.books {
+        for es in bs.events.values() {
+            let m = eng.matcher.matches.get(&es.match_id);
+            for (k, q) in &es.quotes {
+                rows.push(json!([
+                    es.match_id,
+                    m.map(|m| m.home.as_str()).unwrap_or(&es.meta.home),
+                    m.map(|m| m.away.as_str()).unwrap_or(&es.meta.away),
+                    es.meta.league,
+                    es.meta.score,
+                    es.meta.clock,
+                    book,
+                    k.0,
+                    line_from_key(k.1),
+                    k.2,
+                    q.price,
+                    q.prev,
+                    q.updated_ms,
+                    q.book_ts,
+                ]));
+            }
+        }
+    }
+    Json(json!({
+        "now_ms": now_ms(),
+        "columns": ["match_id","home","away","league","score","clock","book","market","line","outcome","price","prev","updated_ms","book_ts_ms"],
+        "rows": rows,
+    }))
+}
+
+/// Service facts for Settings / Dashboard: uptime, database size, clock, config.
+async fn info(State(app): S) -> Json<Value> {
+    let db = &app.db_path;
+    let size: u64 = ["", "-wal", "-shm"]
+        .iter()
+        .filter_map(|s| std::fs::metadata(format!("{}{}", db.display(), s)).ok())
+        .map(|m| m.len())
+        .sum();
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "started_ms": app.started_ms,
+        "now_ms": now_ms(),
+        "db_path": std::fs::canonicalize(db).unwrap_or(db.clone()).display().to_string().trim_start_matches(r"\\?\").to_string(),
+        "db_bytes": size,
+        "bind": app.cfg.bind,
+        "include_esoccer": app.cfg.include_esoccer,
+        "clock": crate::clock::status(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ControlQ {
+    paused: Option<bool>,
+    poll_ms: Option<u64>,
+}
+
+async fn control_book(State(app): S, Path(name): Path<String>, Json(b): Json<ControlQ>) -> Response {
+    match app.engine.lock().control(&name, b.paused, b.poll_ms) {
+        Some(st) => Json(json!({"ok": true, "status": st})).into_response(),
+        None => err(StatusCode::NOT_FOUND, "unknown source"),
+    }
+}
+
+async fn pm_settings_get(State(app): S) -> Json<Value> {
+    Json(crate::pmacct::public_view(&crate::pmacct::load(&app.db_path)))
+}
+
+async fn pm_settings_post(State(app): S, Json(edit): Json<Value>) -> Response {
+    let c = crate::pmacct::merge(crate::pmacct::load(&app.db_path), &edit);
+    match crate::pmacct::save(&app.db_path, &c) {
+        Ok(()) => Json(crate::pmacct::public_view(&c)).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
+}
+
+async fn pm_account(State(app): S) -> Json<Value> {
+    let c = crate::pmacct::load(&app.db_path);
+    let http = crate::books::http_client();
+    Json(crate::pmacct::snapshot(&http, &c).await)
+}
+
+/// Logo and source icons, compiled in.
+async fn img(Path(name): Path<String>) -> Response {
+    let bytes: Option<&'static [u8]> = match name.as_str() {
+        "logo.png" => Some(include_bytes!("web/img/logo.png")),
+        "favicon.png" => Some(include_bytes!("web/img/favicon.png")),
+        "polymarket.png" => Some(include_bytes!("web/img/polymarket.png")),
+        "unibet.png" => Some(include_bytes!("web/img/unibet.png")),
+        "sportybet.png" => Some(include_bytes!("web/img/sportybet.png")),
+        "betpawa.png" => Some(include_bytes!("web/img/betpawa.png")),
+        "betika.png" => Some(include_bytes!("web/img/betika.png")),
+        "linebet.png" => Some(include_bytes!("web/img/linebet.png")),
+        "fonbet.png" => Some(include_bytes!("web/img/fonbet.png")),
+        "vinn.png" => Some(include_bytes!("web/img/vinn.png")),
+        "kalshi.png" => Some(include_bytes!("web/img/kalshi.png")),
+        _ => None,
+    };
+    match bytes {
+        Some(b) => ([(axum::http::header::CONTENT_TYPE, "image/png"), (axum::http::header::CACHE_CONTROL, "max-age=86400")], b).into_response(),
+        None => err(StatusCode::NOT_FOUND, "no such image"),
+    }
+}
+
+/// Who moves first across all sources, plus how often Polymarket can still be bought before it reacts.
+async fn rankings(State(app): S, Query(q): Query<LagQ>) -> Response {
+    let path = app.db_path.clone();
+    let p = q.params();
+    let limit = q.limit.unwrap_or(400);
+    match tokio::task::spawn_blocking(move || crate::rank::compute(&path, &p)).await {
+        Ok(Ok(mut r)) => {
+            let n = r.events.len();
+            if n > limit {
+                r.events.drain(..n - limit);
+            }
+            Json(json!({"since": q.params().since, "event_count": n, "rankings": r})).into_response()
+        }
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 async fn ui() -> Html<&'static str> {

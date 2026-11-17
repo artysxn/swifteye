@@ -225,6 +225,9 @@ fn absorb(item: &Value, toks: &mut HashMap<String, Tok>, wanted: &std::collectio
 
 /// Publish the current state of every watched game as one snapshot.
 async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, recv: Ms, changed: &[String]) {
+    if app.engine.lock().schedule(NAME).0 {
+        return; // paused from the control panel
+    }
     let mut evs = Vec::with_capacity(events.len());
     for e in events {
         let mut quotes = Vec::new();

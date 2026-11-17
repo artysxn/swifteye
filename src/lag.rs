@@ -67,9 +67,9 @@ pub struct Summary {
     pub polymarket_first_share: Option<f64>,
 }
 
-type Series = Vec<(Ms, f64)>;
+pub(crate) type Series = Vec<(Ms, f64)>;
 
-fn value_at(s: &Series, t: Ms) -> Option<f64> {
+pub(crate) fn value_at(s: &Series, t: Ms) -> Option<f64> {
     let i = s.partition_point(|p| p.0 <= t);
     if i == 0 {
         None
@@ -91,7 +91,7 @@ fn cross_time(s: &Series, from: Ms, to: Ms, level: f64, up: bool) -> Option<Ms> 
 }
 
 /// (time of halfway crossing, level before, level after)
-fn jumps(s: &Series, min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, f64)> {
+pub(crate) fn jumps(s: &Series, min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, f64)> {
     let mut out = Vec::new();
     let mut skip_until = Ms::MIN;
     for &(t, p) in s {
@@ -115,7 +115,7 @@ fn jumps(s: &Series, min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, f64)> {
 }
 
 /// How a follower series reacted around time `t` to a move from `from` to `to`.
-fn follow(f: &Series, t: Ms, from: f64, to: f64, window: i64) -> (Option<Ms>, Option<f64>, Option<f64>, bool) {
+pub(crate) fn follow(f: &Series, t: Ms, from: f64, to: f64, window: i64) -> (Option<Ms>, Option<f64>, Option<f64>, bool) {
     // Level before: at the start of the window, or the first value seen inside it
     // (the series may start mid-window, e.g. just after we subscribed).
     let before = value_at(f, t - window).or_else(|| f.iter().find(|p| p.0 >= t - window && p.0 <= t).map(|p| p.1));

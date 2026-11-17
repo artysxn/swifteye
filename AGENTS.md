@@ -148,3 +148,19 @@ list as `EventIn`s with normalized `QuoteIn`s), add `pub mod x;` to
 - Keep the API bound to 127.0.0.1 (no auth).
 - Don't commit or push without the user asking (this folder is not a git repo).
 - Report results honestly: say what was and wasn't verified.
+
+## 10. Web app (added 2026-11-17)
+
+- Served at `/` by the same binary. Files: `src/web/index.html`, `app.css`, `app.js` (core: API, live stream,
+  tooltips, styled selects, charts, tables), `pages.js` (Overview, Rankings, Latency), `pages2.js`
+  (Live, Match, Sheet, Charts), `pages3.js` (Movers, Edges, Query, API docs, Control panel, Polymarket,
+  Statistics, Settings), `img/` (logo + source icons), `vendor/` (uPlot).
+- They are compiled in. While editing, run with `ODDSFEED_WEB_DIR=<repo>/src/web` to serve them from disk,
+  then do a full page reload (hash navigation does not reload CSS/JS).
+- Tooltips: any element with `data-tip` (text or HTML), `data-tipsrc="<source>"` (source speed card) or
+  `data-tipq` (price card, use `SE.qattr({...})`). Dropdowns: `SE.select(el, {options, value, onChange})`.
+- `GET /rankings` (src/rank.rs): per-move ordering of every source, leaderboard, and the Polymarket
+  opportunity numbers (how often Polymarket was still 1/2/5/10/30 s behind the first bookmaker, and how
+  many points it still had to move). Same parameters as `/lag`.
+- Other new endpoints: `/quotes` (every current price), `/info`, `/control/books/{name}`,
+  `/pm/settings`, `/pm/account` (Polymarket Data API v2 + signed CLOB reads; never trades).
