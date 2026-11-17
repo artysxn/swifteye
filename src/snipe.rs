@@ -239,7 +239,13 @@ pub struct Gate {
 /// * Kalshi follows slowly (median ~18 s behind): only a 5-min give-up paid. Real prices only,
 ///   spread <= 4c, expected gain >= 2c: +$13.7 a trade before (18), +$10.0 after (24).
 /// Small samples (one day); re-run the research as data grows.
-pub const PM_GATE: Gate = Gate { min_edge: 0.0, max_followed: 0.10, min_books: 2, max_spread: 0.02, max_age_ms: 86_400_000, min_entry: 0.40, need_real: true, give_up_s: 120 };
+/// Sweep 19 Nov 2026 (48 h, ~5,500 Polymarket rule combinations x confirm gap 0/0.5/1 s x give-up,
+/// best on the first 60% by profit, checked on the last 40%): 2+ independent books, spread <= 2c,
+/// expected gain >= 1c, no price floor, give-up 5 min: +$17.3 a trade (10) then +$22.5 (4), against
+/// +$6.9 / +$15.6 for the previous rule. 2,412 of 2,448 train-profitable combos also made money on
+/// test: the Polymarket delay edge is robust. Kalshi was not (168 of 1,028; its test "profit" was two
+/// 4c buys on one 86-point swing, -$542 without the top 3 trades), so its gate stays strict.
+pub const PM_GATE: Gate = Gate { min_edge: 0.01, max_followed: 0.10, min_books: 2, max_spread: 0.02, max_age_ms: 86_400_000, min_entry: 0.0, need_real: true, give_up_s: 300 };
 pub const K_GATE: Gate = Gate { min_edge: 0.02, max_followed: 0.25, min_books: 2, max_spread: 0.04, max_age_ms: 86_400_000, min_entry: 0.0, need_real: true, give_up_s: 300 };
 
 impl SimQ {

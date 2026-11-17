@@ -424,7 +424,7 @@ SE.pages.snipe = {
     };
     segs();
     SE.seg($('#pRe'), [[250, '0.25 s'], [1000, '1 s'], [2000, '2 s'], [5000, '5 s']], st.reaction, (v) => { st.reaction = +v; load(); });
-    SE.seg($('#pH'), [['auto', 'Auto', 'Each market\'s own: Polymarket 2 min, Kalshi 5 min (Kalshi follows slower).'], [30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']], st.hold, (v) => { st.hold = v === 'auto' ? v : +v; draw(); });
+    SE.seg($('#pH'), [['auto', 'Auto', 'Each market\'s own give-up time (both 5 min).'], [30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min']], st.hold, (v) => { st.hold = v === 'auto' ? v : +v; draw(); });
     SE.seg($('#pCa'), [[50, '50%'], [75, '75%'], [100, '100%']], st.ca, (v) => { st.ca = +v; load(); });
     SE.seg($('#pFi'), [[0, 'instantly'], [250, '0.25 s'], [500, '0.5 s'], [1000, '1 s']], st.fill, (v) => { st.fill = +v; load(); });
     SE.seg($('#pSl'), [[0, '0¢'], [1, '1¢'], [2, '2¢'], [3, '3¢']], st.slip, (v) => { st.slip = +v; load(); });
