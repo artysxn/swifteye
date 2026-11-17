@@ -2,6 +2,7 @@ mod api;
 mod books;
 mod clock;
 mod engine;
+mod kalacct;
 mod lag;
 mod matcher;
 mod model;
@@ -27,6 +28,14 @@ pub struct Config {
     pub db: String,
     /// Keep e-sports / simulated football (FIFA 2x4 min leagues etc.).
     pub include_esoccer: bool,
+    /// Follow real e-sports (CS2, LoL, Dota 2, Valorant, ...) alongside football.
+    pub esports: bool,
+    /// Only record and show matches that Polymarket or Kalshi and at least one bookmaker list.
+    pub prediction_only: bool,
+    /// How far ahead to follow games before kick-off (0 = live only).
+    pub prematch_hours: f64,
+    /// How often to refresh the bookmakers' pre-match lists.
+    pub prematch_refresh_ms: i64,
     pub books: HashMap<String, BookCfg>,
 }
 
@@ -45,6 +54,10 @@ impl Default for Config {
             bind: "127.0.0.1:8787".into(),
             db: "oddsfeed.db".into(),
             include_esoccer: false,
+            esports: true,
+            prediction_only: true,
+            prematch_hours: 8.0,
+            prematch_refresh_ms: 15_000,
             books: HashMap::new(),
         }
     }
@@ -96,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
     clock::spawn_resync();
 
     let mut engine = Engine::default();
+    engine.prediction_only = cfg.prediction_only;
     store::open(&db_path)?;
     store::restore(&db_path, &mut engine)?;
     tracing::info!("db {} ({} recent matches restored)", db_path.display(), engine.matcher.matches.len());
@@ -149,33 +163,42 @@ fn start_books(app: &Arc<App>) {
         }};
     }
 
+    let (ph, pr) = (cfg.prematch_hours, cfg.prematch_refresh_ms.max(3_000));
+    let pre = || Pre::new(ph, pr);
+
     start!("unibet", 1000, |p: Option<String>| kambi::Kambi {
         name: "unibet",
         offering: p.unwrap_or_else(|| "ubse".into()),
         market: "SE".into(),
         lang: "en_GB".into(),
+        pre: pre(),
     });
-    start!("sportybet", 1000, |p: Option<String>| sportybet::SportyBet { country: p.unwrap_or_else(|| "ng".into()) });
+    start!("sportybet", 1000, |p: Option<String>| sportybet::SportyBet { country: p.unwrap_or_else(|| "ng".into()), pre: pre() });
     start!("betpawa", 1500, |p: Option<String>| {
         let host = p.unwrap_or_else(|| "www.betpawa.ng".into());
-        betpawa::BetPawa { brand: if host.ends_with(".ng") { "betpawa-nigeria".into() } else { "betpawa".into() }, host }
+        betpawa::BetPawa { brand: if host.ends_with(".ng") { "betpawa-nigeria".into() } else { "betpawa".into() }, host, pre: pre() }
     });
-    start!("betika", 1000, |_p: Option<String>| betika::Betika);
-    start!("linebet", 1000, |p: Option<String>| linebet::Linebet { host: p.unwrap_or_else(|| "linebet.com".into()) });
-    start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new(p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into())));
+    start!("betika", 1000, |_p: Option<String>| betika::Betika { pre: pre() });
+    start!("linebet", 1000, |p: Option<String>| linebet::Linebet { host: p.unwrap_or_else(|| "linebet.com".into()), pre: pre() });
+    start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new(p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into()), ph));
     start!("vinn", 1000, |p: Option<String>| altenar::Altenar {
         name: "vinn",
         integration: p.unwrap_or_else(|| "vinn".into()),
         country: "NO".into(),
         origin: "https://www.vinn.com".into(),
+        pre: pre(),
     });
+    start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
+    start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
+    // Kalshi: second prediction-market baseline, polled in batches.
+    start!("kalshi", 1000, |_p: Option<String>| kalshi::Kalshi::new(ph, cfg.esports));
 
     // Polymarket is push (WebSocket), not polled. param = minutes before kick-off to start watching.
     let pc = get("polymarket");
     if pc.enabled.unwrap_or(true) {
-        let prematch: i64 = pc.param.as_deref().and_then(|s| s.parse().ok()).unwrap_or(30);
+        let prematch: i64 = pc.param.as_deref().and_then(|s| s.parse().ok()).unwrap_or((ph * 60.0) as i64).max(30);
         app.engine.lock().register(polymarket::NAME, polymarket::source(), 0);
-        tracing::info!("polymarket: WebSocket — {}", polymarket::source());
+        tracing::info!("polymarket: WebSocket, games up to {prematch} min before kick-off");
         tokio::spawn(polymarket::run(app.clone(), prematch));
     }
 }

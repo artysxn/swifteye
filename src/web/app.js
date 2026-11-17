@@ -8,7 +8,7 @@ SE.$ = $;
 SE.$$ = $$;
 
 // ---------------------------------------------------------------- preferences
-const PREF_DEFAULTS = { theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90 };
+const PREF_DEFAULTS = { theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90, baseline: 'polymarket' };
 SE.pref = (k) => {
   try {
     const v = localStorage.getItem('se.' + k);
@@ -117,6 +117,26 @@ SE.fmtDateTime = (ms) => {
   const mo = utc ? d.getUTCMonth() : d.getMonth(), day = utc ? d.getUTCDate() : d.getDate();
   return `${day} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[mo]} ${SE.fmtTime(ms)}`;
 };
+/** Kick-off: "14:30" today, "Wed 14:30" otherwise. */
+SE.fmtKick = (ms) => {
+  if (!ms) return '';
+  const d = new Date(ms), n = new Date();
+  const same = d.toDateString() === n.toDateString();
+  return (same ? '' : 'Sun Mon Tue Wed Thu Fri Sat'.split(' ')[SE.pref('tz') === 'utc' ? d.getUTCDay() : d.getDay()] + ' ') + SE.fmtTime(ms).slice(0, 5);
+};
+/** "Starts in 2h 10m" style countdown. */
+SE.fmtIn = (ms) => {
+  if (!ms) return '';
+  const d = ms - Date.now();
+  if (d <= 0) return 'kicking off';
+  const m = Math.round(d / 60000);
+  return m < 60 ? `in ${m}m` : `in ${Math.floor(m / 60)}h ${m % 60}m`;
+};
+/** Status cell: score and clock when live, kick-off when not. */
+SE.status = (r) => (r.live
+  ? `<b>${SE.esc(r.score || '')}</b> <span class="faint">${SE.esc(r.clock || '')}</span>`
+  : `<span class="chip" data-tip="Not started. Odds before kick-off are tracked up to 8 hours ahead.">Pre-match</span> <span class="muted">${SE.fmtKick(r.start_ms)}</span>`);
+SE.PRED = ['polymarket', 'kalshi'];
 SE.vs = (home, away) => `${SE.esc(home)} <span class="faint">v</span> ${SE.esc(away)}`;
 
 const OUTCOME = { home: '1', draw: 'X', away: '2', over: 'Over', under: 'Under', yes: 'Yes', no: 'No' };
@@ -131,9 +151,9 @@ SE.marketLabel = (m) => ({ '1x2': '1X2', total: 'Total goals', handicap: 'Handic
 // ---------------------------------------------------------------- sources
 SE.BOOK_COLORS = {
   polymarket: '#50e4b2', sportybet: '#ff6b5b', betika: '#c6e83a', betpawa: '#9aa5a1',
-  linebet: '#2f9e5b', fonbet: '#ff3b4f', unibet: '#7d8cff', vinn: '#f5b83d', kalshi: '#28d07f',
+  linebet: '#2f9e5b', fonbet: '#ff3b4f', unibet: '#7d8cff', vinn: '#f5b83d', kalshi: '#28d07f', thunderpick: '#8b5cf6', novibet: '#1e88e5',
 };
-SE.BOOK_NAMES = { polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi' };
+SE.BOOK_NAMES = { polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi', thunderpick: 'Thunderpick', novibet: 'Novibet' };
 SE.bookColor = (b) => SE.BOOK_COLORS[b] || '#8e8e93';
 SE.bookName = (b) => SE.BOOK_NAMES[b] || b;
 SE.logo = (b) => `<img src="/assets/img/${SE.esc(b)}.png" alt="" onerror="this.style.visibility='hidden'">`;
@@ -204,8 +224,10 @@ function srcTip(b) {
     if (b !== 'polymarket' && r.ahead_of_pm_share != null) lines.push(['Ahead of Polymarket', `${SE.fmtPct(r.ahead_of_pm_share)} of ${r.vs_pm_events}`]);
   }
   if (f) lines.push(['Feed delay', `${SE.fmtSpan(f.med)} median`]);
+  if (b === 'kalshi' && r) lines.push(['Polymarket', r.median_vs_pm_ms != null ? SE.fmtRel(r.median_vs_pm_ms) : '']);
+  if (b !== 'kalshi' && r && r.median_vs_kalshi_ms != null) lines.push(['Kalshi', SE.fmtRel(r.median_vs_kalshi_ms)]);
   if (st) {
-    lines.push(['Live events', st.live_events]);
+    lines.push(['Events', st.live_events]);
     lines.push(['Updates', st.paused ? 'Paused' : st.poll_ms ? `every ${SE.fmtSpan(st.poll_ms)}` : 'Live push']);
   }
   return `<h4>${SE.logo(b)}${SE.esc(SE.bookName(b))}</h4>${lines.length ? kv(lines) : '<p>No moves measured yet.</p>'}<hr><p>Last 24 hours, 1X2 moves of ${Math.round(SE.pref('minJump') * 100)}+ points.</p>`;

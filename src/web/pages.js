@@ -76,10 +76,10 @@ P.eventRow = (e, opts = {}) => {
     ])}`;
     return `<span class="pin ${b === PM ? 'pm' : ''}" style="left:${Math.min(100, pct)}%" data-tip="${esc(tipTxt)}">${SE.logo(b)}</span>`;
   }).join('');
-  const lead = e.pm_lead_ms;
-  const pmTxt = e.pm_ms == null
-    ? (e.missed.includes(PM) ? '<span class="faint" data-tip="Polymarket was watched but did not make this move within the window.">PM did not follow</span>' : '<span class="faint">no Polymarket</span>')
-    : `<b class="${lead > 0 ? 'up' : 'down'}" data-tip="${esc(G.lead)}">PM ${SE.fmtRel(lead)}</b>`;
+  const predTxt = (name, ms, lead, short) => (ms == null
+    ? (e.missed.includes(name) ? `<div class="faint" data-tip="${esc(SE.bookName(name))} was watched but did not make this move within the window.">${short} did not follow</div>` : '')
+    : `<div><b class="${lead > 0 ? 'up' : 'down'}" data-tip="${esc(G.lead)}">${short} ${SE.fmtRel(lead)}</b></div>`);
+  const pmTxt = (predTxt(PM, e.pm_ms, e.pm_lead_ms, 'PM') + predTxt('kalshi', e.kalshi_ms, e.kalshi_lead_ms, 'Kalshi')) || '<span class="faint">no prediction market</span>';
   const sel = `${SE.outcomeLong(e.outcome)} ${e.direction > 0 ? ic('north_east', 'up') : ic('south_east', 'down')}`;
   const missed = e.missed.length ? `<div class="match-sub">Missed: ${e.missed.map((m) => esc(SE.bookName(m))).join(', ')}</div>` : '';
   return `<div class="ev" onclick="location.hash='#/match/${e.match_id}'">
@@ -107,21 +107,41 @@ P.race = (sources) => {
 
 P.rangeSince = (h) => Date.now() - h * 3600000;
 
+/** Game picker: every match in scope, with search. value '' = all games. */
+P.gameSelect = (el, onChange, width = '280px') => {
+  const sel = SE.select(el, { options: [['', 'All games']], value: '', search: true, width, onChange });
+  const load = async () => {
+    try {
+      const d = await api('/matches');
+      const cur = sel.value();
+      const opts = d.matches.sort((a, b) => (b.live - a.live) || (a.start_ms || 0) - (b.start_ms || 0))
+        .map((m) => [String(m.id), `${m.home} v ${m.away}`, m.live ? 'live' : SE.fmtKick(m.start_ms)]);
+      sel.set([['', 'All games'], ...opts], opts.some((o) => o[0] === cur) ? cur : '');
+    } catch {}
+  };
+  load();
+  return { ...sel, load };
+};
+/** Baseline picker: Polymarket or Kalshi. */
+P.baselineSeg = (el, onChange) => SE.seg(el, [['polymarket', SE.logo('polymarket') + 'Polymarket', 'Compare bookmakers against Polymarket.'], ['kalshi', SE.logo('kalshi') + 'Kalshi', 'Compare bookmakers against Kalshi.']], SE.pref('baseline'), (v) => { SE.setPref('baseline', v); onChange(v); });
+P.oppOf = (R) => (SE.pref('baseline') === 'kalshi' ? R.opportunity_kalshi : R.opportunity);
+P.baseName = () => SE.bookName(SE.pref('baseline'));
+
 // ================================================================ Overview
 SE.pages.dashboard = {
   title: 'Overview',
   render(el) {
-    el.innerHTML = P.head('Overview', '<div id="oR"></div>') +
+    el.innerHTML = P.head('Overview', '<div id="oB"></div><div id="oR"></div>') +
       P.stats(
-        P.stat('oLead', 'timer', 'Polymarket after first bookmaker', G.lead + ' Median over the selected range.', true),
-        P.stat('oBuy', 'shopping_cart_checkout', 'Buy before Polymarket reacts', G.buy),
-        P.stat('oLeft', 'straighten', 'Polymarket move still to come', G.left),
+        P.stat('oLead', 'timer', '<span class="bn">Polymarket</span> after first bookmaker', G.lead + ' Median over the selected range.', true),
+        P.stat('oBuy', 'shopping_cart_checkout', 'Buy before <span class="bn">Polymarket</span> reacts', G.buy),
+        P.stat('oLeft', 'straighten', '<span class="bn">Polymarket</span> move still to come', G.left),
         P.stat('oFast', 'bolt', 'Fastest source', 'The source with the smallest median time behind the first mover.'),
         P.stat('oLive', 'sports_soccer', 'Live matches', 'Matches at least one source lists as in play right now.'),
       ) +
       `<div class="grid g-main" style="margin-top:40px">
         ${P.sec('leaderboard', 'Who moves first', '<div id="oRace"></div>', '<a class="more" href="#/rankings">Rankings' + ic('chevron_right') + '</a>', G.behind)}
-        ${P.sec('timer', 'When Polymarket reacts', '<div id="oLadder"></div>', '', G.lead)}
+        ${P.sec('timer', 'When <span class="bn">Polymarket</span> reacts', '<div id="oLadder"></div>', '', G.lead)}
       </div>` +
       P.sec('timeline', 'Latest moves', '<div id="oEvents"></div>', '<a class="more" href="#/rankings">All moves' + ic('chevron_right') + '</a>', 'Each row is one move several sources made on the same selection. Logos sit where each source crossed halfway through the move.') +
       `<div class="grid g-main" style="margin-top:40px">
@@ -131,35 +151,38 @@ SE.pages.dashboard = {
 
     let hours = 24;
     SE.seg($('#oR'), [[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d']], hours, (v) => { hours = +v; loadRank(); });
+    P.baselineSeg($('#oB'), () => loadRank());
     const names = new Map();
 
     async function loadRank() {
       const r = await api(`/rankings?since=${P.rangeSince(hours)}&min_jump=${SE.pref('minJump')}&window_s=${SE.pref('windowS')}&limit=8`);
-      const R = r.rankings, o = R.opportunity;
+      const R = r.rankings, o = P.oppOf(R);
+      $$('.bn', el).forEach((x) => (x.textContent = P.baseName()));
       const ge2 = o.lead_at_least.find((x) => x[0] === 2000);
       P.set('oLead', o.median_lead_ms == null ? '<span class="faint">-</span>' : SE.fmtRel(o.median_lead_ms), o.pm_followed ? `median of ${o.pm_followed} moves` : 'Needs moves while Polymarket is live');
       P.set('oBuy', o.events ? SE.fmtPct(ge2?.[2]) : '<span class="faint">-</span>', o.events ? `${ge2?.[1] ?? 0} of ${o.events} bookmaker moves` : '');
       P.set('oLeft', o.median_capturable_pts == null ? '<span class="faint">-</span>' : `${(o.median_capturable_pts * 100).toFixed(1)}<small>pts</small>`, o.median_capturable_pts == null ? '' : 'median, before spread and fees');
+      if (!o.events) P.set('oLead', '<span class="faint">-</span>', `Needs moves while ${P.baseName()} is live`);
       const fast = R.sources.find((s) => s.median_behind_first_ms != null);
       P.set('oFast', fast ? SE.book(fast.source) : '<span class="faint">-</span>', fast ? `first in ${SE.fmtPct(fast.first_share)} of its moves` : '');
       $('#oRace').innerHTML = P.race(R.sources);
       $('#oLadder').innerHTML = o.events
         ? P.ladder([
-            ['Later at all', ...o.lead_at_least[0].slice(1), 'Polymarket crossed after the first bookmaker.'],
+            ['Later at all', ...o.lead_at_least[0].slice(1), `${P.baseName()} crossed after the first bookmaker.`],
             ['1 s or more', ...o.lead_at_least[1].slice(1)],
             ['2 s or more', ...o.lead_at_least[2].slice(1)],
             ['5 s or more', ...o.lead_at_least[3].slice(1)],
             ['10 s or more', ...o.lead_at_least[4].slice(1)],
             ['30 s or more', ...o.lead_at_least[5].slice(1)],
-            ['Did not follow', o.pm_did_not_follow, o.pm_did_not_follow / o.events, 'Polymarket was watched but never made the move within the window.'],
+            ['Did not follow', o.pm_did_not_follow, o.pm_did_not_follow / o.events, `${P.baseName()} was watched but never made the move within the window.`],
           ], o.events)
-        : '<div class="empty">No bookmaker moves while Polymarket was live in this range.</div>';
+        : `<div class="empty">No bookmaker moves while ${P.baseName()} was watched in this range.</div>`;
       $('#oEvents').innerHTML = R.events.length ? R.events.slice().reverse().map((e) => P.eventRow(e)).join('') : '<div class="empty">No shared moves in this range yet.</div>';
     }
 
     const mt = SE.table($('#oMatches'), [
       { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league) },
-      { key: 's', label: 'Score', tip: 'Score and match clock from the sources.', fmt: (r) => `${esc(r.score || '')} <span class="faint">${esc(r.clock || '')}</span>` },
+      { key: 's', label: 'Status', tip: 'Score and clock when live, kick-off time before.', fmt: (r) => SE.status(r) },
       { key: 'b', label: 'Sources', tip: 'Sources listing this match. Hover a logo for that source\'s speed.', fmt: (r) => SE.logos(r.sum.books) },
       { key: 'g', label: 'Gap', cls: 'r', tip: G.gap, fmt: (r) => (r.sum.gap == null ? '<span class="faint">-</span>' : `<span class="${Math.abs(r.sum.gap) >= 0.03 ? (r.sum.gap < 0 ? 'up' : 'down') : 'muted'}">${SE.fmtPts(r.sum.gap)}</span>`) },
     ], { empty: 'No live football right now.', emptyIcon: 'sports_soccer', onClick: (r) => SE.go('#/match/' + r.id), limit: 8 });
@@ -206,27 +229,29 @@ SE.pages.dashboard = {
 SE.pages.rankings = {
   title: 'Rankings',
   render(el) {
-    el.innerHTML = P.head('Rankings', '<div id="kR"></div><div id="kJ"></div><div id="kW"></div><div id="kC"></div>') +
+    el.innerHTML = P.head('Rankings', '<div id="kG"></div><div id="kB"></div><div id="kR"></div><div id="kJ"></div><div id="kW"></div><div id="kC"></div>') +
       P.stats(
         P.stat('kE', 'timeline', 'Moves measured', 'Moves at least two sources made, or a bookmaker made while Polymarket was watched.'),
         P.stat('kM', 'sports_soccer', 'Matches', 'Matches those moves came from.'),
-        P.stat('kL', 'timer', 'Polymarket after first bookmaker', G.lead, true),
-        P.stat('kB', 'shopping_cart_checkout', 'Buy before Polymarket reacts', G.buy),
-        P.stat('kP', 'straighten', 'Polymarket move still to come', G.left),
+        P.stat('kL', 'timer', '<span class="bn">Polymarket</span> after first bookmaker', G.lead, true),
+        P.stat('kBy', 'shopping_cart_checkout', 'Buy before <span class="bn">Polymarket</span> reacts', G.buy),
+        P.stat('kP', 'straighten', '<span class="bn">Polymarket</span> move still to come', G.left),
       ) +
       P.sec('leaderboard', 'Leaderboard', '<div id="kT"></div>', '', 'Sources ordered by how close they are, in the median, to whoever moved first.') +
       `<div class="grid g-2" style="margin-top:40px">
         ${P.sec('speed', 'Behind the first mover', '<div id="kRace"></div>', '', G.behind)}
-        ${P.sec('shopping_cart_checkout', 'Room to buy before Polymarket', '<div id="kOpp"></div>', '', G.buy)}
+        ${P.sec('shopping_cart_checkout', 'Room to buy before <span class="bn">Polymarket</span>', '<div id="kOpp"></div>', '', G.buy)}
       </div>` +
       P.sec('timeline', 'Every move', '<div id="kEv"></div>', '<div id="kEvF"></div>');
 
-    let hours = 24, jump = SE.pref('minJump'), win = SE.pref('windowS'), clock = 'receive', evFilter = 'all', last = null;
+    let hours = 24, jump = SE.pref('minJump'), win = SE.pref('windowS'), clock = 'receive', evFilter = 'all', last = null, game = '';
+    P.gameSelect($('#kG'), (v) => { game = v; load(); });
+    P.baselineSeg($('#kB'), () => load());
     SE.seg($('#kR'), [[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d']], hours, (v) => { hours = +v; load(); });
     SE.seg($('#kJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], jump, (v) => { jump = +v; load(); });
     SE.seg($('#kW'), [[30, '30 s'], [60, '60 s'], [90, '90 s'], [180, '3 min']], win, (v) => { win = +v; load(); });
     SE.seg($('#kC'), [['receive', 'Our clock', 'Times are when Swifteye received each change. This is what you could act on.'], ['source', 'Source clock', 'Uses each source\'s own change stamp where it has one, removing its feed delay.']], clock, (v) => { clock = v; load(); });
-    SE.seg($('#kEvF'), [['all', 'All'], ['pm', 'With Polymarket'], ['buy', 'Buyable gap']], evFilter, (v) => { evFilter = v; drawEvents(); });
+    SE.seg($('#kEvF'), [['all', 'All'], ['pm', 'With a prediction market'], ['buy', 'Buyable gap']], evFilter, (v) => { evFilter = v; drawEvents(); });
 
     const t = SE.table($('#kT'), [
       { key: 'p', label: '#', fmt: (r) => `<b class="${r.pos === 1 ? 'accent' : 'faint'}">${r.pos}</b>` },
@@ -237,33 +262,36 @@ SE.pages.rankings = {
       { key: 'q', label: 'Slow quarter', cls: 'r', tip: 'Three in four of this source\'s moves came within this time of the first mover.', fmt: (r) => `<span class="muted">${SE.fmtSpan(r.p75_behind_first_ms)}</span>` },
       { key: 'v', label: 'Polymarket', cls: 'r', tip: G.vsPm, fmt: (r) => (r.source === PM ? '<span class="faint">baseline</span>' : r.median_vs_pm_ms == null ? '<span class="faint">-</span>' : `<b class="${r.median_vs_pm_ms > 0 ? 'up' : 'down'}">${SE.fmtRel(r.median_vs_pm_ms)}</b>`), sort: (r) => r.median_vs_pm_ms },
       { key: 'h', label: 'Ahead of PM', cls: 'r', tip: 'Share of shared moves where this source moved before Polymarket.', fmt: (r) => (r.ahead_of_pm_share == null ? '' : `${SE.fmtPct(r.ahead_of_pm_share)} <span class="faint">of ${r.vs_pm_events}</span>`), sort: (r) => r.ahead_of_pm_share },
+      { key: 'k', label: 'Kalshi', cls: 'r', tip: 'Median time between this source moving and Kalshi moving the same way.', fmt: (r) => (r.source === 'kalshi' ? '<span class="faint">baseline</span>' : r.median_vs_kalshi_ms == null ? '<span class="faint">-</span>' : `<b class="${r.median_vs_kalshi_ms > 0 ? 'up' : 'down'}">${SE.fmtRel(r.median_vs_kalshi_ms)}</b>`), sort: (r) => r.median_vs_kalshi_ms },
       { key: 'n', label: 'Took part', cls: 'r', tip: G.part, fmt: (r) => `${r.moved} <span class="faint">of ${r.watched}</span>`, sort: (r) => r.moved },
     ], { sort: 'p', dir: 1, empty: 'No shared moves in this range yet.' });
 
     function drawEvents() {
       if (!last) return;
       let ev = last.events.slice().reverse();
-      if (evFilter === 'pm') ev = ev.filter((e) => e.pm_ms != null || e.missed.includes(PM));
-      if (evFilter === 'buy') ev = ev.filter((e) => e.pm_lead_ms != null && e.pm_lead_ms >= 2000);
+      const k = SE.pref('baseline') === 'kalshi';
+      if (evFilter === 'pm') ev = ev.filter((e) => e.pm_ms != null || e.kalshi_ms != null || e.missed.includes(PM) || e.missed.includes('kalshi'));
+      if (evFilter === 'buy') ev = ev.filter((e) => { const l = k ? e.kalshi_lead_ms : e.pm_lead_ms; return l != null && l >= 2000; });
       $('#kEv').innerHTML = ev.length ? ev.slice(0, 150).map((e) => P.eventRow(e)).join('') : '<div class="empty">No moves match this filter.</div>';
     }
     async function load() {
-      const r = await api(`/rankings?since=${P.rangeSince(hours)}&min_jump=${jump}&window_s=${win}&clock=${clock}&limit=400`);
-      const R = (last = r.rankings), o = R.opportunity;
+      const r = await api(`/rankings?since=${P.rangeSince(hours)}&min_jump=${jump}&window_s=${win}&clock=${clock}&limit=400${game ? '&match=' + game : ''}`);
+      const R = (last = r.rankings), o = P.oppOf(R);
+      $$('.bn', el).forEach((x) => (x.textContent = P.baseName()));
       P.set('kE', SE.fmtInt(r.event_count));
       P.set('kM', R.matches);
       P.set('kL', o.median_lead_ms == null ? '<span class="faint">-</span>' : SE.fmtRel(o.median_lead_ms), o.pm_followed ? `median of ${o.pm_followed}` : '');
       const ge2 = o.lead_at_least.find((x) => x[0] === 2000);
-      P.set('kB', o.events ? SE.fmtPct(ge2?.[2]) : '<span class="faint">-</span>', o.events ? `${ge2?.[1]} of ${o.events} moves` : '');
+      P.set('kBy', o.events ? SE.fmtPct(ge2?.[2]) : '<span class="faint">-</span>', o.events ? `${ge2?.[1]} of ${o.events} moves` : '');
       P.set('kP', o.median_capturable_pts == null ? '<span class="faint">-</span>' : `${(o.median_capturable_pts * 100).toFixed(1)}<small>pts</small>`, 'median');
       t.set(R.sources.map((s, i) => ({ ...s, pos: i + 1 })));
       $('#kRace').innerHTML = P.race(R.sources);
       $('#kOpp').innerHTML = o.events
-        ? `<div class="note" style="margin-bottom:8px">Polymarket still behind when the first bookmaker had moved</div>` +
+        ? `<div class="note" style="margin-bottom:8px">${P.baseName()} still behind when the first bookmaker had moved</div>` +
           P.ladder(o.lead_at_least.map(([ms, n, s]) => [ms === 0 ? 'Any gap' : SE.fmtSpan(ms) + ' or more', n, s]), o.events) +
-          `<div class="note" style="margin:22px 0 8px">Polymarket move still to come at that moment</div>` +
+          `<div class="note" style="margin:22px 0 8px">${P.baseName()} move still to come at that moment</div>` +
           P.ladder(o.capturable_at_least.map(([pts, n, s]) => [`${Math.round(pts * 100)} pts or more`, n, s, G.left]), o.events)
-        : '<div class="empty">No bookmaker moves while Polymarket was live in this range.</div>';
+        : `<div class="empty">No bookmaker moves while ${P.baseName()} was watched in this range.</div>`;
       drawEvents();
     }
     load();
@@ -275,7 +303,7 @@ SE.pages.rankings = {
 SE.pages.latency = {
   title: 'Latency',
   render(el) {
-    el.innerHTML = P.head('Latency', '<div id="yR"></div><div id="yJ"></div><div id="yW"></div><div id="yC"></div>') +
+    el.innerHTML = P.head('Latency', '<div id="yG"></div><div id="yR"></div><div id="yJ"></div><div id="yW"></div><div id="yC"></div>') +
       P.stats(
         P.stat('yK1', 'timer', 'Polymarket vs fastest bookmaker', 'Median time between the fastest bookmaker and Polymarket on moves Polymarket made first or alone.', true),
         P.stat('yK2', 'rss_feed', 'Fastest feed', G.feed),
@@ -289,7 +317,8 @@ SE.pages.latency = {
       P.sec('grid_view', 'Bookmaker against bookmaker', '<div id="yHeat" class="scroll"></div>', '', 'Each cell: median time the column source moved after the row source moved first. Green means the column source was earlier.') +
       P.sec('format_list_numbered', 'Jumps', '<div id="yEv"></div>', '<div id="yEvT"></div>');
 
-    let range = 24, jump = SE.pref('minJump'), win = SE.pref('windowS'), clock = 'receive', evTrig = 'all', events = [];
+    let range = 24, jump = SE.pref('minJump'), win = SE.pref('windowS'), clock = 'receive', evTrig = 'all', events = [], game = '';
+    P.gameSelect($('#yG'), (v) => { game = v; load(); });
     SE.seg($('#yR'), [[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d']], range, (v) => { range = +v; load(); });
     SE.seg($('#yJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], jump, (v) => { jump = +v; load(); });
     SE.seg($('#yW'), [[30, '30 s'], [60, '60 s'], [90, '90 s'], [180, '3 min']], win, (v) => { win = +v; load(); });
@@ -319,10 +348,10 @@ SE.pages.latency = {
 
     async function load() {
       const since = P.rangeSince(range);
-      const p = `since=${since}&min_jump=${jump}&window_s=${win}&clock=${clock}`;
+      const p = `since=${since}&min_jump=${jump}&window_s=${win}&clock=${clock}${game ? '&match=' + game : ''}`;
       const [sum, ev, bb, feed] = await Promise.all([
         api('/lag?' + p), api('/lag/events?limit=3000&' + p), api('/lag/books?' + p).catch(() => ({ summary: [] })),
-        SE.sql(`SELECT book, ts_ms - book_ts_ms AS d FROM changes WHERE book_ts_ms IS NOT NULL AND kind = 'move' AND ts_ms >= ${since} ORDER BY id DESC LIMIT 60000`, 60000),
+        SE.sql(`SELECT book, ts_ms - book_ts_ms AS d FROM changes WHERE book_ts_ms IS NOT NULL AND kind = 'move' AND ts_ms >= ${since}${game ? ' AND match_id = ' + (+game) : ''} ORDER BY id DESC LIMIT 60000`, 60000),
       ]);
       const f = sum.summary.find((s) => s.trigger === 'polymarket' && s.book === 'first book');
       P.set('yK1', f?.median_delay_ms != null ? SE.fmtRel(f.median_delay_ms) : '<span class="faint">-</span>', f ? `${f.followed} of ${f.jumps} Polymarket moves` : '');

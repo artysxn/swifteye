@@ -10,6 +10,8 @@ use std::collections::HashMap;
 
 pub struct Fonbet {
     pub host: String,
+    /// Look-ahead for pre-match games (the line feed already includes them).
+    pub pre_hours: f64,
     version: u64,
     last_full_ms: Ms,
     /// segment id -> (parent sport id, name)
@@ -22,9 +24,10 @@ pub struct Fonbet {
 }
 
 impl Fonbet {
-    pub fn new(host: String) -> Self {
+    pub fn new(host: String, pre_hours: f64) -> Self {
         Fonbet {
             host,
+            pre_hours,
             version: 0,
             last_full_ms: 0,
             segments: HashMap::new(),
@@ -113,8 +116,19 @@ impl Book for Fonbet {
 
         let mut out = Vec::new();
         for (&id, e) in &self.events {
-            if e["place"].as_str() != Some("live") || e["level"].as_i64() != Some(1) {
+            // In-play games, plus pre-match games kicking off inside the look-ahead window.
+            let live = e["place"].as_str() == Some("live");
+            if e["level"].as_i64() != Some(1) {
                 continue;
+            }
+            if !live {
+                let start = e["startTime"].as_i64().map(|t| t * 1000);
+                let ok = e["place"].as_str() == Some("line")
+                    && self.pre_hours > 0.0
+                    && start.is_some_and(|t| t >= now_ms() - 15 * 60_000 && t <= now_ms() + (self.pre_hours * 3_600_000.0) as i64);
+                if !ok {
+                    continue;
+                }
             }
             let seg = e["sportId"].as_i64().unwrap_or(0);
             if self.root_sport(seg) != 1 {
@@ -137,6 +151,7 @@ impl Book for Fonbet {
                 clock,
                 quotes: Vec::new(),
                 sr_weak: false,
+                live,
             };
             if let Some(fs) = self.factors.get(&id) {
                 let price = |fid: i64| if blocked { None } else { fs.get(&fid).map(|x| x.0) };

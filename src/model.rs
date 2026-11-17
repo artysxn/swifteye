@@ -126,6 +126,8 @@ pub struct EventIn {
     /// The id is probably Sportradar but not guaranteed (Polymarket gameId): use it
     /// for an exact link when it hits, but never let it block a name match.
     pub sr_weak: bool,
+    /// In play (true) or not started yet (false).
+    pub live: bool,
     pub score: Option<String>,
     pub clock: Option<String>,
     pub quotes: Vec<QuoteIn>,

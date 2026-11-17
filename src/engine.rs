@@ -4,7 +4,7 @@
 use crate::matcher::{MatchInfo, Matcher};
 use crate::model::*;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub type QKey = (Market, i32, Outcome);
 
@@ -28,6 +28,7 @@ pub struct EventMeta {
     pub sr_id: Option<String>,
     pub score: Option<String>,
     pub clock: Option<String>,
+    pub live: bool,
 }
 
 pub struct EventState {
@@ -38,6 +39,32 @@ pub struct EventState {
     pub last_seen_ms: Ms,
     pub last_written_ms: Ms,
     pub missing_polls: u32,
+    /// The book lists the teams the other way round from the match (e-sports have no real
+    /// home side). Quotes are stored in the match's orientation: home/away and the
+    /// handicap line are flipped on the way in.
+    pub swap: bool,
+}
+
+/// A stored quote key seen from the other team's side.
+fn flip_key(k: QKey) -> QKey {
+    let outcome = match k.2 {
+        Outcome::Home => Outcome::Away,
+        Outcome::Away => Outcome::Home,
+        o => o,
+    };
+    let line = if k.0 == Market::Handicap { line_from_key(k.1).map(|l| -l) } else { line_from_key(k.1) };
+    (k.0, line_key(line), outcome)
+}
+
+/// The same quote seen from the other team's side.
+fn flip(q: &QuoteIn) -> (Option<f64>, Outcome) {
+    let outcome = match q.outcome {
+        Outcome::Home => Outcome::Away,
+        Outcome::Away => Outcome::Home,
+        o => o,
+    };
+    let line = if q.market == Market::Handicap { q.line.map(|l| -l) } else { q.line };
+    (line, outcome)
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -90,7 +117,14 @@ pub struct Engine {
     pub books: HashMap<&'static str, BookState>,
     /// (book, book event id) -> match id, restored from the DB so a restart keeps ids.
     pub known: HashMap<(String, String), i64>,
+    /// Only record and show matches a prediction market and a bookmaker both list.
+    pub prediction_only: bool,
+    /// Matches that currently qualify under `prediction_only`.
+    pub qualified: HashSet<i64>,
 }
+
+/// Prediction markets: the baselines everything is compared with.
+pub const PREDICTION: &[&str] = &["polymarket", "kalshi"];
 
 /// Events missing this many polls in a row (and for this long) are treated as finished.
 const MISSING_POLLS: u32 = 3;
@@ -132,10 +166,79 @@ impl Engine {
         }
     }
 
+    /// A match qualifies when a prediction market and at least one bookmaker list it.
+    pub fn is_qualified(&self, match_id: i64) -> bool {
+        self.matcher.matches.get(&match_id).is_some_and(|m| {
+            m.books.iter().any(|b| PREDICTION.contains(b)) && m.books.iter().any(|b| !PREDICTION.contains(b))
+        })
+    }
+
+    /// Whether a match is recorded and shown under the current scope.
+    pub fn visible(&self, match_id: i64) -> bool {
+        !self.prediction_only || self.qualified.contains(&match_id)
+    }
+
+    /// Diff a snapshot, then apply the scope: changes for matches that do not qualify are
+    /// dropped, and a match that just qualified gets its current prices written as `open`.
     pub fn apply(&mut self, book: &'static str, snap: Snapshot, request_ms: i64) -> Vec<Write> {
         let now = snap.recv_ms;
+        let writes = self.apply_diff(book, snap, request_ms);
+        if !self.prediction_only {
+            return writes;
+        }
+        let mut touched: HashSet<i64> = self.books.get(book).map(|b| b.events.values().map(|e| e.match_id).collect()).unwrap_or_default();
+        for w in &writes {
+            if let Write::Change(c) = w {
+                touched.insert(c.match_id);
+            }
+        }
+        let mut newly = Vec::new();
+        for mid in touched {
+            if self.is_qualified(mid) {
+                if self.qualified.insert(mid) {
+                    newly.push(mid);
+                }
+            } else {
+                self.qualified.remove(&mid);
+            }
+        }
+        let mut out: Vec<Write> = writes
+            .into_iter()
+            .filter(|w| match w {
+                Write::Change(c) => self.qualified.contains(&c.match_id) && !newly.contains(&c.match_id),
+                _ => true,
+            })
+            .collect();
+        for mid in newly {
+            for (b, bs) in &self.books {
+                for es in bs.events.values().filter(|e| e.match_id == mid) {
+                    for (k, q) in &es.quotes {
+                        if q.price.is_some() {
+                            out.push(Write::Change(Change {
+                                ts_ms: now,
+                                book: b,
+                                book_event_id: es.meta.id.clone(),
+                                match_id: mid,
+                                market: k.0,
+                                line: line_from_key(k.1),
+                                outcome: k.2,
+                                kind: ChangeKind::Open,
+                                old_price: None,
+                                new_price: q.price,
+                                book_ts_ms: q.book_ts,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn apply_diff(&mut self, book: &'static str, snap: Snapshot, request_ms: i64) -> Vec<Write> {
+        let now = snap.recv_ms;
         let mut out = Vec::new();
-        let Engine { matcher, books, known } = self;
+        let Engine { matcher, books, known, .. } = self;
         let bs = books.entry(book).or_default();
         bs.status.polls += 1;
         bs.status.last_ok_ms = Some(now);
@@ -157,6 +260,7 @@ impl Engine {
                 sr_id: ev.sr_id.clone(),
                 score: ev.score.clone(),
                 clock: ev.clock.clone(),
+                live: ev.live,
             };
 
             let es = match bs.events.get_mut(&ev.id) {
@@ -176,6 +280,7 @@ impl Engine {
                         }
                     };
                     known.insert((book.to_string(), ev.id.clone()), match_id);
+                    let swap = matcher.is_swapped(match_id, &ev);
                     out.push(Write::Event {
                         book,
                         meta: meta.clone(),
@@ -193,6 +298,7 @@ impl Engine {
                             last_seen_ms: now,
                             last_written_ms: now,
                             missing_polls: 0,
+                            swap,
                         },
                     );
                     bs.events.get_mut(&ev.id).unwrap()
@@ -216,7 +322,12 @@ impl Engine {
             // Diff quotes. Duplicate keys in one snapshot: last one wins.
             let mut incoming: BTreeMap<QKey, &QuoteIn> = BTreeMap::new();
             for q in &ev.quotes {
-                incoming.insert((q.market, line_key(q.line), q.outcome), q);
+                if es.swap {
+                    let (line, outcome) = flip(q);
+                    incoming.insert((q.market, line_key(line), outcome), q);
+                } else {
+                    incoming.insert((q.market, line_key(q.line), q.outcome), q);
+                }
             }
             for (k, q) in &incoming {
                 let prev = es.quotes.get(k);
@@ -342,6 +453,12 @@ impl Engine {
             for es in bs.events.values_mut() {
                 if es.match_id == from {
                     es.match_id = into;
+                    let ev = EventIn { home: es.meta.home.clone(), away: es.meta.away.clone(), sport: es.meta.sport.clone(), ..Default::default() };
+                    let swap = self.matcher.is_swapped(into, &ev);
+                    if swap != es.swap {
+                        es.swap = swap;
+                        es.quotes = std::mem::take(&mut es.quotes).into_iter().map(|(k, v)| (flip_key(k), v)).collect();
+                    }
                     self.known.insert((book.to_string(), es.meta.id.clone()), into);
                     self.matcher.detach(from, book);
                     self.matcher.attach(into, book, now);
@@ -382,6 +499,10 @@ impl Engine {
         let mut info = Matcher::new_match_info(id, &ev, now);
         info.books.insert(bname);
         self.matcher.restore(info);
+        if es.swap {
+            es.swap = false;
+            es.quotes = std::mem::take(&mut es.quotes).into_iter().map(|(k, v)| (flip_key(k), v)).collect();
+        }
         es.match_id = id;
         self.known.insert((book.to_string(), event_id.to_string()), id);
         let out = vec![

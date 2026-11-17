@@ -8,9 +8,10 @@ const PM = P.PM, G = P.G;
 SE.pages.movers = {
   title: 'Movers',
   render(el) {
-    el.innerHTML = P.head('Movers', '<div id="vR"></div><div id="vM"></div><div id="vB"></div>') +
+    el.innerHTML = P.head('Movers', '<div id="vG"></div><div id="vR"></div><div id="vM"></div><div id="vB"></div>') +
       `<div class="grid g-main">${P.sec('swap_vert', 'Biggest swings', '<div id="vT"></div>', '', 'Change in implied probability from the first to the last price in the window, per source and selection.')}${P.sec('local_fire_department', 'Busiest matches', '<div id="vA"></div>', '', 'Matches with the most price moves in the window.')}</div>`;
-    let mins = 15, mk = '1x2', bk = '';
+    let mins = 15, mk = '1x2', bk = '', game = '';
+    P.gameSelect($('#vG'), (v) => { game = v; load(); }, '240px');
     SE.seg($('#vR'), [[5, '5 min'], [15, '15 min'], [60, '1h'], [360, '6h'], [1440, '24h']], mins, (v) => { mins = +v; load(); });
     SE.select($('#vM'), { options: [['1x2', '1X2'], ['total', 'Total goals'], ['handicap', 'Handicap'], ['btts', 'Both score']], value: mk, onChange: (v) => { mk = v; load(); } });
     SE.select($('#vB'), { options: [['', 'All sources'], ...Object.keys(SE.BOOK_NAMES).filter((b) => b !== 'kalshi').map((b) => [b, SE.bookName(b)])], value: '', onChange: (v) => { bk = v; load(); } });
@@ -30,7 +31,7 @@ SE.pages.movers = {
     ], { sort: 'n', limit: 30, empty: 'Quiet.', onClick: (r) => SE.go('#/match/' + r.match_id) });
     async function load() {
       const since = Date.now() - mins * 60000;
-      const where = (p) => `${p}ts_ms >= ${since} AND ${p}market = '${mk}'${bk ? ` AND ${p}book = '${bk}'` : ''}`;
+      const where = (p) => `${p}ts_ms >= ${since} AND ${p}market = '${mk}'${bk ? ` AND ${p}book = '${bk}'` : ''}${game ? ` AND ${p}match_id = ${+game}` : ''}`;
       const [rows, act] = await Promise.all([
         SE.sql(`WITH f AS (SELECT match_id, book, line, outcome, COUNT(*) n,
               MIN(CASE WHEN old_price IS NOT NULL THEN id END) fid, MAX(CASE WHEN new_price IS NOT NULL THEN id END) lid
@@ -51,14 +52,15 @@ SE.pages.movers = {
 SE.pages.edges = {
   title: 'Edges',
   render(el) {
-    el.innerHTML = P.head('Edges', '<div id="eMin"></div>') +
+    el.innerHTML = P.head('Edges', '<div id="eG"></div><div id="eMin"></div>') +
       P.stats(
         P.stat('eK1', 'balance', 'Matches compared', 'Live matches with Polymarket and at least one bookmaker pricing 1X2.'),
         P.stat('eK2', 'trending_down', 'Cheaper on Polymarket', 'Selections Polymarket prices at least 2 points below bookmaker consensus.', true),
         P.stat('eK3', 'trending_up', 'Dearer on Polymarket', 'Selections Polymarket prices at least 2 points above bookmaker consensus.'),
       ) +
       P.sec('balance', 'Polymarket against bookmaker consensus', '<div id="eT"></div>', '', G.consensus);
-    let min = 0;
+    let min = 0, game = '';
+    P.gameSelect($('#eG'), (v) => { game = v; load(); }, '240px');
     SE.seg($('#eMin'), [[0, 'All'], [0.02, '2+ pts'], [0.04, '4+ pts'], [0.08, '8+ pts']], min, (v) => { min = +v; load(); });
     const t = SE.table($('#eT'), [
       { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league) },
@@ -76,6 +78,7 @@ SE.pages.edges = {
       const rows = [];
       let matches = 0;
       for (const r of b.rows) {
+        if (game && String(r.id) !== game) continue;
         const s = P.summarise(r);
         if (!s.pmFair || !s.cons) continue;
         matches++;
@@ -218,7 +221,8 @@ SE.pages.control = {
         P.stat('cK2', 'error', 'Errors since start', 'Failed requests across all sources since the service started.'),
         P.stat('cK3', 'schedule', 'Uptime', 'Time since the service started.'),
         P.stat('cK4', 'storage', 'Database', 'Size of the database file including its write-ahead log.'),
-      ) + P.sec('tune', 'Sources', '<div id="cT"></div>', '', 'Pause a source or change how often it is asked for prices. Changes apply immediately.');
+      ) + P.sec('filter_alt', 'Scope', `<label class="toggle" style="padding:0"><span class="switch"><input type="checkbox" id="cScope"><span></span></span>Only matches on Polymarket or Kalshi plus at least one bookmaker</label><p class="note" id="cScopeN" style="margin-top:8px"></p>`) +
+      P.sec('tune', 'Sources', '<div id="cT"></div>', '', 'Pause a source or change how often it is asked for prices. Changes apply immediately.');
     const INTERVALS = [['500', '0.5 s'], ['1000', '1 s'], ['2000', '2 s'], ['5000', '5 s'], ['10000', '10 s'], ['30000', '30 s']];
     async function setCtl(name, body) { try { await api('/control/books/' + name, { body }); load(); } catch (e) { SE.toast(e.message); } }
     let busy = false;
@@ -230,6 +234,8 @@ SE.pages.control = {
       P.set('cK2', SE.fmtInt(b.books.reduce((a, s) => a + s.errors, 0)));
       P.set('cK3', SE.fmtDur(now - b.started_ms));
       P.set('cK4', SE.fmtBytes(info.db_bytes));
+      $('#cScope').checked = !!info.prediction_only;
+      $('#cScopeN').textContent = `Every source is still watched so games can be linked; only qualifying matches are recorded and shown. Games are followed from ${info.prematch_hours} hours before kick-off.`;
       $('#cT').innerHTML = `<div class="scroll"><table class="tbl"><thead><tr><th>Source</th><th>State</th><th class="c">On</th><th data-tip="How often the source is asked for prices. Polymarket pushes, so it has no interval.">Poll every</th><th class="r" data-tip="Time for the last request, send to full response.">Request</th><th class="r">Events</th><th class="r">Prices</th><th class="r">Changes</th><th class="r">Errors</th><th>Last success</th><th>Last error</th></tr></thead><tbody>${b.books.map((s) => {
         const ok = s.last_ok_ms && now - s.last_ok_ms < Math.max(15000, s.poll_ms * 5);
         const state = s.paused ? '<span class="chip">Paused</span>' : ok ? '<span class="chip ok">Healthy</span>' : s.last_error ? '<span class="chip bad">Failing</span>' : '<span class="chip">Starting</span>';
@@ -247,6 +253,7 @@ SE.pages.control = {
       });
     }
     const all = async (paused) => { busy = true; const b = await api('/books'); await Promise.all(b.books.map((s) => api('/control/books/' + s.name, { body: { paused } }))); busy = false; load(); };
+    $('#cScope').addEventListener('change', async (e) => { await api('/control/scope', { body: { prediction_only: e.target.checked } }); SE.toast(e.target.checked ? 'Only prediction-market matches' : 'All matches'); load(); });
     $('#cPause').addEventListener('click', () => all(true));
     $('#cResume').addEventListener('click', () => all(false));
     load();
@@ -394,6 +401,11 @@ SE.pages.settings = {
           <div class="field"><label for="fP">Passphrase</label><input class="input mono" id="fP" type="password" autocomplete="new-password"></div>
           <div style="display:flex;gap:8px;margin-top:16px;align-items:center"><button class="btn primary" id="fSave">${ic('save')}Save</button><button class="btn" id="fTest">${ic('sync')}Test connection</button><span class="muted" id="fMsg"></span></div>
           <p class="note" style="margin-top:16px">Stored on this machine in polymarket.json next to the database. Saved secrets show masked; leave a masked field as it is to keep it. Swifteye only reads your account and never places or cancels orders.</p>`)}
+        ${P.sec('account_balance', 'Kalshi', `
+          <div class="field"><label for="kK" data-tip="From Kalshi: Account, API keys. Read-only access is enough.">API key ID</label><input class="input mono" id="kK" autocomplete="off"></div>
+          <div class="field" style="align-items:start"><label for="kP" data-tip="The private key file Kalshi gave you when creating the key (PEM). Paste its whole text.">Private key</label><textarea class="input mono" id="kP" style="height:90px;padding-top:8px;resize:vertical" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></div>
+          <div style="display:flex;gap:8px;margin-top:16px;align-items:center"><button class="btn primary" id="kSave">${ic('save')}Save</button><button class="btn" id="kTest">${ic('sync')}Test connection</button><span class="muted" id="kMsg"></span></div>
+          <p class="note" style="margin-top:16px">Stored on this machine in kalshi.json next to the database. The private key is never shown again; leave the masked text to keep it. Swifteye only reads your Kalshi account.</p>`)}
         ${P.sec('palette', 'Display', `
           <div class="field"><label>Theme</label><div id="sTheme"></div></div>
           <div class="field"><label>Odds</label><div id="sOdds"></div></div>
@@ -409,7 +421,7 @@ SE.pages.settings = {
     SE.seg($('#sJump'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], SE.pref('minJump'), (v) => { SE.setPref('minJump', +v); SE.loadCtx(); });
     SE.seg($('#sWin'), [[30, '30 s'], [60, '60 s'], [90, '90 s'], [180, '3 min']], SE.pref('windowS'), (v) => { SE.setPref('windowS', +v); SE.loadCtx(); });
     const fields = { wallet: '#fW', signer: '#fS', api_key: '#fK', api_secret: '#fX', passphrase: '#fP' };
-    const fill = (s) => { for (const [k, sel] of Object.entries(fields)) $(sel).value = s[k] || ''; };
+    const fill = (s) => { if (!$('#fW')) return; for (const [k, sel] of Object.entries(fields)) $(sel).value = s[k] || ''; };
     api('/pm/settings').then(fill);
     $('#fSave').addEventListener('click', async () => {
       try { fill(await api('/pm/settings', { body: Object.fromEntries(Object.entries(fields).map(([k, sel]) => [k, $(sel).value])) })); $('#fMsg').textContent = 'Saved'; SE.refreshMe?.(); }
@@ -426,11 +438,83 @@ SE.pages.settings = {
         $('#fMsg').textContent = parts.length ? parts.join(', ') : 'Nothing configured yet';
       } catch (e) { $('#fMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     });
+    const kfill = (s) => { if (!$('#kK')) return; $('#kK').value = s.key_id || ''; $('#kP').value = s.private_key || ''; };
+    api('/kalshi/settings').then(kfill);
+    $('#kSave').addEventListener('click', async () => {
+      try { const s = await api('/kalshi/settings', { body: { key_id: $('#kK').value, private_key: $('#kP').value } }); kfill(s); $('#kMsg').textContent = s.private_key && !s.key_valid ? 'Saved, but the key is not a valid RSA PEM' : 'Saved'; }
+      catch (e) { $('#kMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    });
+    $('#kTest').addEventListener('click', async () => {
+      $('#kMsg').textContent = 'Checking';
+      try { const a = await api('/kalshi/account'); $('#kMsg').textContent = !a.has_key ? 'Nothing saved yet' : a.balance?.error ? 'Failed: ' + a.balance.error : `Connected. Balance $${((a.balance?.balance ?? 0) / 100).toFixed(2)}`; }
+      catch (e) { $('#kMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    });
     api('/info').then((i) => {
       const row = (k, v) => `<div class="field" style="grid-template-columns:130px minmax(0,1fr)"><label>${k}</label><span class="muted" style="word-break:break-all">${v}</span></div>`;
+      if (!$('#sInfo')) return;
       $('#sInfo').innerHTML = row('Version', esc(i.version)) + row('Listening on', `<span class="mono">${esc(i.bind)}</span>`) + row('Database', `<span class="mono">${esc(i.db_path)}</span>`) + row('Size', SE.fmtBytes(i.db_bytes)) +
         row('Clock offset', `<span data-tip="This PC's clock compared with internet time. Every timestamp Swifteye records is corrected by this amount.">${SE.fmtDelay(i.clock.offset_ms)}</span>`) + row('Simulated football', i.include_esoccer ? 'Included' : 'Filtered out') + row('Running since', SE.fmtDateTime(i.started_ms));
     });
+  },
+};
+
+// ================================================================ Kalshi
+SE.pages.kalshi = {
+  title: 'Kalshi',
+  render(el) {
+    el.innerHTML = P.head('Kalshi', `<span class="muted" id="qSynced"></span><button class="btn" id="qSync">${ic('sync')}Sync now</button>`) + '<div id="qBody"></div>';
+    const body = $('#qBody');
+    const usd = (c) => (c == null ? '-' : '$' + (+c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    async function load() {
+      const [s, games] = await Promise.all([api('/kalshi/settings'), api('/quotes')]);
+      const rows = games.rows.map((a) => Object.fromEntries(games.columns.map((c, i) => [c, a[i]]))).filter((r) => r.book === 'kalshi');
+      const byMatch = new Map();
+      for (const r of rows) { if (!byMatch.has(r.match_id)) byMatch.set(r.match_id, { ...r, p: {} }); byMatch.get(r.match_id).p[r.outcome] = r; }
+      let a = null;
+      if (s.has_key) a = await api('/kalshi/account').catch((e) => ({ error: e.message }));
+      $('#qSynced').textContent = a?.synced_ms ? 'Synced ' + SE.fmtTime(a.synced_ms) : '';
+      const pos = a?.positions?.market_positions || [], ord = a?.orders?.orders || [], fills = a?.fills?.fills || [];
+      body.innerHTML = (!s.has_key
+        ? `<div class="empty">${ic('account_balance')}Add your Kalshi API key ID and private key in Settings to see balance, positions, orders and fills here.<div style="margin-top:16px"><a class="btn primary" href="#/settings">${ic('key')}Open settings</a></div></div>`
+        : P.stats(P.stat('qBal', 'account_balance', 'Cash balance', 'Available balance on Kalshi.', true), P.stat('qPos', 'inventory_2', 'Open positions'), P.stat('qOrd', 'receipt_long', 'Resting orders'), P.stat('qFil', 'history', 'Recent fills')) +
+          (a?.balance?.error ? `<div class="empty err">${ic('error')}${esc(a.balance.error)}</div>` : '') +
+          `<div class="grid g-2" style="margin-top:40px">${P.sec('inventory_2', 'Positions', '<div id="qP"></div>')}${P.sec('receipt_long', 'Resting orders', '<div id="qO"></div>')}</div>` +
+          P.sec('history', 'Recent fills', '<div id="qF"></div>')) +
+        P.sec('sports_soccer', 'Games tracked', '<div id="qG"></div>', '', 'Kalshi football games Swifteye is pricing every second, live and up to 8 hours before kick-off.');
+      if (s.has_key) {
+        P.set('qBal', usd(a?.balance?.balance));
+        P.set('qPos', pos.length);
+        P.set('qOrd', ord.length);
+        P.set('qFil', fills.length);
+        SE.table($('#qP'), [
+          { key: 't', label: 'Market', fmt: (p) => `<span class="mono">${esc(p.ticker)}</span>` },
+          { key: 'p', label: 'Contracts', cls: 'r', fmt: (p) => p.position ?? p.position_fp ?? '', sort: (p) => +(p.position ?? 0) },
+          { key: 'e', label: 'Exposure', cls: 'r', fmt: (p) => usd(p.market_exposure), sort: (p) => +(p.market_exposure ?? 0) },
+          { key: 'r', label: 'Realised', cls: 'r', fmt: (p) => usd(p.realized_pnl) },
+        ], { empty: 'No open positions.' }).set(pos);
+        SE.table($('#qO'), [
+          { key: 't', label: 'Market', fmt: (o) => `<span class="mono">${esc(o.ticker)}</span>` },
+          { key: 's', label: 'Side', fmt: (o) => `<span class="chip ${o.action === 'buy' ? 'ok' : 'bad'}">${esc(o.action || '')} ${esc(o.side || '')}</span>` },
+          { key: 'p', label: 'Price', cls: 'r', fmt: (o) => (o.yes_price != null ? o.yes_price + 'c' : esc(o.yes_price_dollars || '')) },
+          { key: 'n', label: 'Left', cls: 'r', fmt: (o) => o.remaining_count ?? '' },
+        ], { empty: 'No resting orders.' }).set(ord);
+        SE.table($('#qF'), [
+          { key: 'w', label: 'When', fmt: (f) => `<span class="muted">${SE.fmtAgo(Date.parse(f.created_time))}</span>` },
+          { key: 't', label: 'Market', fmt: (f) => `<span class="mono">${esc(f.ticker)}</span>` },
+          { key: 's', label: 'Side', fmt: (f) => `${esc(f.action || '')} ${esc(f.side || '')}` },
+          { key: 'c', label: 'Contracts', cls: 'r', fmt: (f) => f.count ?? '' },
+          { key: 'p', label: 'Price', cls: 'r', fmt: (f) => (f.yes_price != null ? f.yes_price + 'c' : '') },
+        ], { empty: 'No recent fills.' }).set(fills);
+      }
+      SE.table($('#qG'), [
+        { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league), sort: (r) => r.home },
+        { key: 's', label: 'Status', fmt: (r) => SE.status(r), sort: (r) => r.start_ms },
+        ...['home', 'draw', 'away'].map((o) => ({ key: o, label: SE.outcomeLabel(o), cls: 'r', fmt: (r) => (r.p[o]?.price ? `<span ${SE.qattr({ b: 'kalshi', h: r.home, a: r.away, m: '1x2', o, p: r.p[o].price, pv: r.p[o].prev, u: r.p[o].updated_ms })}>${SE.fmtOdds(r.p[o].price)} <span class="faint">${SE.fmtProb(1 / r.p[o].price, 0)}</span></span>` : '<span class="faint">off</span>') })),
+      ], { empty: 'No Kalshi football game in scope right now. Kalshi mostly lists the big leagues; games appear here once a bookmaker lists the same match.', emptyIcon: 'sports_soccer', onClick: (r) => SE.go('#/match/' + r.match_id) }).set([...byMatch.values()]);
+    }
+    $('#qSync').addEventListener('click', () => load().then(() => SE.toast('Kalshi synced')).catch((e) => SE.toast(e.message)));
+    load().catch((e) => (body.innerHTML = `<div class="empty err">${ic('error')}${esc(e.message)}</div>`));
+    SE.every(30000, () => load().catch(() => {}));
   },
 };
 })();

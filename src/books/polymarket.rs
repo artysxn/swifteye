@@ -1,4 +1,5 @@
-//! Polymarket: football moneyline markets (home / draw / away, each a Yes/No token).
+//! Polymarket: football moneyline markets (home / draw / away, each a Yes/No token) and
+//! e-sports match winners (one market, one token per team).
 //!
 //! * Discovery: Gamma API every 60 s, games kicking off between 3 h ago and 30 min ahead.
 //! * Prices: the public CLOB market WebSocket (push, server timestamps in ms).
@@ -20,12 +21,16 @@ const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const GAMMA: &str = "https://gamma-api.polymarket.com";
 /// Gamma tag shared by every Polymarket soccer league.
 const SOCCER_TAG: &str = "100350";
+/// Gamma tag shared by every Polymarket e-sports title (FIFA/eFootball included, filtered out).
+const ESPORTS_TAG: &str = "64";
 /// Above this spread the mid says little (empty / one-sided book): store as suspended.
 const MAX_SPREAD: f64 = 0.25;
 
 #[derive(Clone, Debug)]
 struct PmEvent {
     id: String,
+    /// "football" or an e-sports key (see `esport_key`).
+    sport: String,
     home: String,
     away: String,
     league: String,
@@ -33,6 +38,8 @@ struct PmEvent {
     game_id: Option<String>,
     /// (outcome, yes-token id)
     tokens: Vec<(Outcome, String)>,
+    /// Used to pick one event when Polymarket lists the same game twice.
+    liquidity: f64,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -67,14 +74,14 @@ pub async fn run(app: Arc<App>, prematch_min: i64) {
         let app = app.clone();
         tokio::spawn(async move {
             loop {
-                match discover(&http, prematch_min).await {
+                match discover(&http, prematch_min, app.cfg.esports).await {
                     Ok(evs) => {
                         let changed = {
                             let cur = tx.borrow();
                             cur.len() != evs.len() || cur.iter().zip(evs.iter()).any(|(a, b)| a.id != b.id || a.tokens != b.tokens)
                         };
                         if changed {
-                            tracing::info!("polymarket: {} live/upcoming football games", evs.len());
+                            tracing::info!("polymarket: {} live/upcoming games ({} e-sports)", evs.len(), evs.iter().filter(|e| e.sport != "football").count());
                             let _ = tx.send(Arc::new(evs));
                         }
                     }
@@ -238,22 +245,24 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
         }
         evs.push(EventIn {
             id: e.id.clone(),
-            sport: "football".into(),
+            sport: e.sport.clone(),
             league: e.league.clone(),
             home: e.home.clone(),
             away: e.away.clone(),
             start_ms: e.start_ms,
-            sr_id: e.game_id.clone(),
+            // Polymarket's e-sports gameId is its own counter, not Sportradar's.
+            sr_id: if e.sport == "football" { e.game_id.clone() } else { None },
             sr_weak: true,
+            live: e.start_ms.is_some_and(|s| s <= now_ms()),
             score: None,
             clock: None,
             quotes,
         });
     }
-    let (mut writes, match_of): (Vec<Write>, HashMap<String, i64>) = {
+    let (mut writes, match_of): (Vec<Write>, HashMap<String, (i64, bool)>) = {
         let mut eng = app.engine.lock();
         let w = eng.apply(NAME, Snapshot { events: evs, recv_ms: recv }, 0);
-        let m = eng.books.get(NAME).map(|b| b.events.iter().map(|(k, v)| (k.clone(), v.match_id)).collect()).unwrap_or_default();
+        let m = eng.books.get(NAME).map(|b| b.events.iter().map(|(k, v)| (k.clone(), (v.match_id, v.swap))).collect()).unwrap_or_default();
         (w, m)
     };
     // Raw top of book for the tokens that moved.
@@ -261,12 +270,19 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
         events.iter().flat_map(|e| e.tokens.iter().map(move |(o, t)| (t.as_str(), (e, *o)))).collect();
     for tid in changed {
         if let (Some(t), Some((e, o))) = (toks.get(tid), tok_index.get(tid.as_str())) {
+            let (match_id, swap) = match_of.get(&e.id).copied().unwrap_or((0, false));
+            // Stored against the match's orientation, like every other quote.
+            let outcome = match (swap, *o) {
+                (true, Outcome::Home) => Outcome::Away,
+                (true, Outcome::Away) => Outcome::Home,
+                (_, o) => o,
+            };
             writes.push(Write::PmQuote {
                 ts_ms: recv,
                 server_ts_ms: t.server_ts,
-                match_id: match_of.get(&e.id).copied().unwrap_or(0),
+                match_id,
                 event_id: e.id.clone(),
-                outcome: *o,
+                outcome,
                 bid: t.bid,
                 ask: t.ask,
                 last: t.last,
@@ -276,34 +292,112 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
     app.emit(writes).await;
 }
 
-async fn discover(http: &reqwest::Client, prematch_min: i64) -> Result<Vec<PmEvent>> {
+async fn discover(http: &reqwest::Client, prematch_min: i64, esports: bool) -> Result<Vec<PmEvent>> {
     let now = now_ms();
     let fmt = |ms: Ms| {
         time::OffsetDateTime::from_unix_timestamp(ms / 1000)
             .map(|t| t.format(&time::format_description::well_known::Rfc3339).unwrap_or_default())
             .unwrap_or_default()
     };
-    let from = fmt(now - 3 * 3600 * 1000);
     let to = fmt(now + prematch_min * 60 * 1000);
     let mut out = Vec::new();
-    for page in 0..10 {
-        let url = format!(
-            "{GAMMA}/events?tag_id={SOCCER_TAG}&closed=false&limit=100&offset={}&start_time_min={from}&start_time_max={to}",
-            page * 100
-        );
-        let (v, _) = fetch_json(http.get(url)).await?;
-        let list = v.as_array().cloned().unwrap_or_default();
-        for e in &list {
-            if let Some(pe) = parse_event(e) {
-                out.push(pe);
+    // (tag, how far back to look): a football game is over within 3 h, a BO5 can run longer.
+    let mut tags = vec![(SOCCER_TAG, 3i64)];
+    if esports {
+        tags.push((ESPORTS_TAG, 6));
+    }
+    for (tag, back_h) in tags {
+        let from = fmt(now - back_h * 3600 * 1000);
+        for page in 0..10 {
+            let url = format!(
+                "{GAMMA}/events?tag_id={tag}&closed=false&limit=100&offset={}&start_time_min={from}&start_time_max={to}",
+                page * 100
+            );
+            let (v, _) = match fetch_json(http.get(url)).await {
+                Ok(x) => x,
+                // A failing e-sports page must not take the football games down with it.
+                Err(e) if tag == ESPORTS_TAG => {
+                    tracing::warn!("polymarket e-sports discovery: {e:#}");
+                    break;
+                }
+                Err(e) => return Err(e),
+            };
+            let list = v.as_array().cloned().unwrap_or_default();
+            for e in &list {
+                let pe = if tag == ESPORTS_TAG { parse_esports_event(e) } else { parse_event(e) };
+                if let Some(pe) = pe {
+                    out.push(pe);
+                }
+            }
+            if list.len() < 100 {
+                break;
             }
         }
-        if list.len() < 100 {
-            break;
-        }
     }
+    // Polymarket sometimes lists one game as two events; keep the more liquid one so
+    // the bookmakers do not get split between two matches.
+    out.sort_by(|a, b| b.liquidity.partial_cmp(&a.liquidity).unwrap_or(std::cmp::Ordering::Equal));
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|e| seen.insert((e.sport.clone(), e.home.to_lowercase(), e.away.to_lowercase(), e.start_ms.map(|s| s / 3_600_000))));
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
+}
+
+/// E-sports: one "Match Winner" moneyline market with two tokens (one per team), no draw.
+/// Title: "Counter-Strike: A vs B (BO3) - Tournament".
+fn parse_esports_event(e: &Value) -> Option<PmEvent> {
+    if e["closed"].as_bool() == Some(true) {
+        return None;
+    }
+    let title = text(&e["title"]);
+    let slug = text(&e["seriesSlug"]);
+    let game = title.split_once(": ").map(|(g, _)| g.to_string()).unwrap_or_default();
+    let sport = esport_key(&slug).or_else(|| esport_key(&game))?;
+    let rest = title.split_once(": ").map(|(_, r)| r).unwrap_or(&title);
+    let (teams, tournament) = match rest.split_once(" - ") {
+        Some((t, l)) => (t, l.trim().to_string()),
+        None => (rest, String::new()),
+    };
+    // Drop the "(BO3)" suffix.
+    let teams = teams.rsplit_once(" (BO").map(|(t, _)| t).unwrap_or(teams);
+    let (home, away) = teams.split_once(" vs. ").or_else(|| teams.split_once(" vs "))?;
+    let (home, away) = (home.trim().to_string(), away.trim().to_string());
+    let (hn, an) = (Names::new(&home), Names::new(&away));
+    let mut tokens = Vec::new();
+    for m in e["markets"].as_array().into_iter().flatten() {
+        if m["sportsMarketType"].as_str() != Some("moneyline") || m["closed"].as_bool() == Some(true) {
+            continue;
+        }
+        let outs: Vec<String> = m["outcomes"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+        let ids: Vec<String> = m["clobTokenIds"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+        for (name, id) in outs.iter().zip(ids.iter()) {
+            let n = Names::new(name);
+            let (sh, sa) = (hn.sim(&n), an.sim(&n));
+            if sh.max(sa) < 0.5 {
+                continue;
+            }
+            let outcome = if sh >= sa { Outcome::Home } else { Outcome::Away };
+            if !tokens.iter().any(|(o, _)| *o == outcome) {
+                tokens.push((outcome, id.clone()));
+            }
+        }
+        break;
+    }
+    if tokens.len() != 2 {
+        return None;
+    }
+    tokens.sort_by_key(|t| t.0);
+    Some(PmEvent {
+        id: text(&e["id"]),
+        sport: sport.into(),
+        home,
+        away,
+        league: if tournament.is_empty() { slug } else { tournament },
+        start_ms: e["startTime"].as_str().and_then(rfc3339_ms),
+        game_id: None,
+        liquidity: num(&e["liquidity"]).unwrap_or(0.0),
+        tokens,
+    })
 }
 
 fn parse_event(e: &Value) -> Option<PmEvent> {
@@ -350,11 +444,13 @@ fn parse_event(e: &Value) -> Option<PmEvent> {
     tokens.sort_by_key(|t| t.0);
     Some(PmEvent {
         id: text(&e["id"]),
+        sport: "football".into(),
         home,
         away,
         league: text(&e["seriesSlug"]),
         start_ms: e["startTime"].as_str().and_then(rfc3339_ms),
         game_id: int(&e["gameId"]).filter(|g| *g > 0).map(|g| g.to_string()),
+        liquidity: num(&e["liquidity"]).unwrap_or(0.0),
         tokens,
     })
 }

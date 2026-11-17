@@ -28,6 +28,32 @@ pub struct MatchInfo {
     away_tok: Names,
 }
 
+/// Same sport, with the generic "esports" (a source that does not say which title) pairing
+/// with any specific e-sports title. Real titles never mix: a "Team Liquid" exists in several.
+fn same_sport(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    let generic = |x: &str| x == "esports";
+    let esport = |x: &str| x == "esports" || crate::books::ESPORTS.contains(&x);
+    esport(a) && esport(b) && (generic(a) || generic(b))
+}
+
+impl MatchInfo {
+    /// (home similarity, away similarity, swapped) for an event with these team names.
+    /// With `can_swap` the better of the two orientations wins.
+    fn orient(&self, h: &Names, a: &Names, can_swap: bool) -> (f64, f64, bool) {
+        let (sh, sa) = (self.home_tok.sim(h), self.away_tok.sim(a));
+        if can_swap {
+            let (xh, xa) = (self.home_tok.sim(a), self.away_tok.sim(h));
+            if xh + xa > sh + sa {
+                return (xh, xa, true);
+            }
+        }
+        (sh, sa, false)
+    }
+}
+
 #[derive(Default)]
 pub struct Matcher {
     pub matches: HashMap<i64, MatchInfo>,
@@ -94,7 +120,7 @@ impl Matcher {
         let a = Names::new(&ev.away);
         let mut best: Option<(f64, i64)> = None;
         for m in self.matches.values() {
-            if m.sport != ev.sport || m.books.contains(book) {
+            if !same_sport(&m.sport, &ev.sport) || m.books.contains(book) {
                 continue;
             }
             // Two different Sportradar ids are two different matches (unless ours is only a guess).
@@ -113,8 +139,7 @@ impl Matcher {
             if dt > WIDE_WINDOW_MS {
                 continue;
             }
-            let sh = m.home_tok.sim(&h);
-            let sa = m.away_tok.sim(&a);
+            let (sh, sa, _) = m.orient(&h, &a, ev.sport != "football");
             let lo = sh.min(sa);
             let avg = (sh + sa) / 2.0;
             let ok = if dt <= WINDOW_MS {
@@ -128,6 +153,10 @@ impl Matcher {
         }
         if let Some((_, id)) = best {
             let m = self.matches.get_mut(&id).unwrap();
+            // A generic "esports" match learns its title from the first source that knows it.
+            if m.sport == "esports" && ev.sport != "esports" {
+                m.sport = ev.sport.clone();
+            }
             m.books.insert(book);
             m.last_seen_ms = now;
             if m.sr_id.is_none() && !ev.sr_weak {
@@ -153,6 +182,16 @@ impl Matcher {
         }
         self.matches.insert(id, m);
         (id, true)
+    }
+
+    /// Is this event listed with the teams the other way round from the match?
+    /// Only meaningful for sports without a real home side (e-sports); football never swaps.
+    pub fn is_swapped(&self, id: i64, ev: &EventIn) -> bool {
+        if ev.sport == "football" {
+            return false;
+        }
+        let Some(m) = self.matches.get(&id) else { return false };
+        m.orient(&Names::new(&ev.home), &Names::new(&ev.away), true).2
     }
 
     pub fn touch(&mut self, id: i64, now: Ms) {
@@ -204,6 +243,8 @@ const STOP: &[&str] = &[
     "fc", "cf", "sc", "ac", "afc", "cd", "ud", "sd", "club", "de", "the", "fk", "sk", "if", "bk", "ff", "ik",
     "cs", "as", "sv", "ca", "cr", "ec", "se", "sa", "fbc", "jk", "nk", "hk", "ks", "kv", "rc", "rcd", "us",
     "calcio", "football", "futbol", "clube", "team",
+    // e-sports org suffixes ("G2 Esports", "FaZe Clan", "Gen.G Gaming")
+    "esports", "esport", "gaming", "clan", "org",
 ];
 
 impl Names {
@@ -219,6 +260,8 @@ impl Names {
             let tag = match t {
                 "w" | "women" | "womens" | "ladies" | "fem" | "feminino" | "femenino" | "frauen" | "dames" | "zeny" => Some("women"),
                 "res" | "reserves" | "reserve" | "ii" | "b" => Some("reserves"),
+                // Academy / junior rosters of an e-sports org must not match the main roster.
+                "academy" | "junior" | "juniors" | "jr" | "youth" | "challengers" => Some("academy"),
                 "u17" | "u18" | "u19" | "u20" | "u21" | "u22" | "u23" => Some(match t {
                     "u17" => "u17",
                     "u18" => "u18",

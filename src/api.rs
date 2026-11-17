@@ -39,6 +39,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/control/books/{name}", post(control_book))
         .route("/pm/settings", get(pm_settings_get).post(pm_settings_post))
         .route("/pm/account", get(pm_account))
+        .route("/kalshi/settings", get(kalshi_settings_get).post(kalshi_settings_post))
+        .route("/kalshi/account", get(kalshi_account))
+        .route("/control/scope", post(control_scope))
         .route("/books", get(books))
         .route("/matches", get(matches))
         .route("/matches/{id}", get(match_detail))
@@ -179,6 +182,9 @@ async fn matches(State(app): S, Query(p): Query<MatchesQ>) -> Json<Value> {
     };
     for id in ids {
         let Some(m) = eng.matcher.matches.get(&id) else { continue };
+        if !eng.visible(id) && p.all != Some(1) {
+            continue;
+        }
         let evs = by_match.get(&id).cloned().unwrap_or_default();
         if let Some(b) = &p.book {
             if !evs.iter().any(|(bk, _)| bk == b) {
@@ -216,6 +222,7 @@ async fn matches(State(app): S, Query(p): Query<MatchesQ>) -> Json<Value> {
         rows.push(json!({
             "id": m.id, "sport": m.sport, "home": m.home, "away": m.away, "league": m.league,
             "start_ms": m.start_ms, "sr_id": m.sr_id, "score": score, "clock": clock,
+            "live": evs.iter().any(|(_, e)| e.meta.live),
             "books": evs.iter().map(|(b, e)| json!({"book": b, "event_id": e.meta.id, "home": e.meta.home, "away": e.meta.away, "league": e.meta.league})).collect::<Vec<_>>(),
             "best_1x2": best_json,
             "best_1x2_book_sum": overround,
@@ -350,6 +357,9 @@ async fn board(State(app): S, Query(p): Query<BoardQ>) -> Response {
         if evs.len() < p.min_books.unwrap_or(1) {
             continue;
         }
+        if !eng.visible(id) {
+            continue;
+        }
         evs.sort_by_key(|x| x.0);
         let Some(m) = eng.matcher.matches.get(&id) else { continue };
         let mut per_book = serde_json::Map::new();
@@ -380,6 +390,7 @@ async fn board(State(app): S, Query(p): Query<BoardQ>) -> Response {
             "score": evs.iter().find_map(|(_, e)| e.meta.score.clone()),
             "clock": evs.iter().find_map(|(_, e)| e.meta.clock.clone()),
             "last_change_ms": last_change,
+            "live": evs.iter().any(|(_, e)| e.meta.live),
             "books": per_book,
         }));
     }
@@ -637,6 +648,9 @@ async fn quotes(State(app): S) -> Json<Value> {
     let mut rows = Vec::new();
     for (book, bs) in &eng.books {
         for es in bs.events.values() {
+            if !eng.visible(es.match_id) {
+                continue;
+            }
             let m = eng.matcher.matches.get(&es.match_id);
             for (k, q) in &es.quotes {
                 rows.push(json!([
@@ -654,13 +668,15 @@ async fn quotes(State(app): S) -> Json<Value> {
                     q.prev,
                     q.updated_ms,
                     q.book_ts,
+                    es.meta.live,
+                    m.and_then(|m| m.start_ms).or(es.meta.start_ms),
                 ]));
             }
         }
     }
     Json(json!({
         "now_ms": now_ms(),
-        "columns": ["match_id","home","away","league","score","clock","book","market","line","outcome","price","prev","updated_ms","book_ts_ms"],
+        "columns": ["match_id","home","away","league","score","clock","book","market","line","outcome","price","prev","updated_ms","book_ts_ms","live","start_ms"],
         "rows": rows,
     }))
 }
@@ -681,6 +697,8 @@ async fn info(State(app): S) -> Json<Value> {
         "db_bytes": size,
         "bind": app.cfg.bind,
         "include_esoccer": app.cfg.include_esoccer,
+        "prediction_only": app.engine.lock().prediction_only,
+        "prematch_hours": app.cfg.prematch_hours,
         "clock": crate::clock::status(),
     }))
 }
@@ -714,6 +732,37 @@ async fn pm_account(State(app): S) -> Json<Value> {
     let c = crate::pmacct::load(&app.db_path);
     let http = crate::books::http_client();
     Json(crate::pmacct::snapshot(&http, &c).await)
+}
+
+#[derive(Deserialize)]
+struct ScopeQ {
+    prediction_only: bool,
+}
+
+/// Switch between "only matches on Polymarket/Kalshi plus a bookmaker" and "everything".
+async fn control_scope(State(app): S, Json(b): Json<ScopeQ>) -> Json<Value> {
+    let mut eng = app.engine.lock();
+    eng.prediction_only = b.prediction_only;
+    eng.qualified.clear();
+    Json(json!({"ok": true, "prediction_only": eng.prediction_only}))
+}
+
+async fn kalshi_settings_get(State(app): S) -> Json<Value> {
+    Json(crate::kalacct::public_view(&crate::kalacct::load(&app.db_path)))
+}
+
+async fn kalshi_settings_post(State(app): S, Json(edit): Json<Value>) -> Response {
+    let c = crate::kalacct::merge(crate::kalacct::load(&app.db_path), &edit);
+    match crate::kalacct::save(&app.db_path, &c) {
+        Ok(()) => Json(crate::kalacct::public_view(&c)).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
+}
+
+async fn kalshi_account(State(app): S) -> Json<Value> {
+    let c = crate::kalacct::load(&app.db_path);
+    let http = crate::books::http_client();
+    Json(crate::kalacct::snapshot(&http, &c).await)
 }
 
 /// Logo and source icons, compiled in.

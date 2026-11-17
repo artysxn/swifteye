@@ -7,6 +7,7 @@ pub struct BetPawa {
     pub host: String,
     /// Brand header value, e.g. "betpawa-nigeria".
     pub brand: String,
+    pub pre: Pre,
 }
 
 const TAKE: usize = 100;
@@ -19,34 +20,56 @@ impl Book for BetPawa {
         format!("{}/api/sportsbook/v4/events/lists/by-queries (LIVE, football, 1X2)", self.host)
     }
     async fn fetch(&mut self, http: &reqwest::Client) -> Result<Snapshot> {
-        let mut events = Vec::new();
-        let mut recv_ms = 0;
-        for page in 0..10 {
-            let q = serde_json::json!({"queries":[{
-                "query":{"eventType":"LIVE","categories":["2"],"zones":{}},
-                "view":{"marketTypes":["3743"]},
-                "skip": page * TAKE, "take": TAKE,
-                "sort":{"competitionPriority":"DESC"}
-            }]});
-            let url = format!("https://{}/api/sportsbook/v4/events/lists/by-queries", self.host);
-            let req = http
-                .get(url)
-                .query(&[("q", q.to_string())])
-                .header("x-pawa-brand", &self.brand)
-                .header("x-pawa-language", "en");
-            let (v, t) = fetch_json(req).await?;
-            recv_ms = recv_ms.max(t);
-            let list = v["responses"][0]["responses"].as_array().cloned().unwrap_or_default();
-            let n = list.len();
-            for e in &list {
-                events.push(parse(e));
-            }
-            if n < TAKE {
-                break;
-            }
-        }
+        let (host, brand, hours) = (self.host.clone(), self.brand.clone(), self.pre.hours);
+        refresh_pre(&mut self.pre, "betpawa", || async move {
+            let until = now_ms() + (hours * 3_600_000.0) as i64;
+            Ok(list(http, &host, &brand, "UPCOMING", Some(until)).await?.0)
+        })
+        .await;
+        let (mut events, recv_ms) = list(http, &self.host, &self.brand, "LIVE", None).await?;
+        self.pre.merge(&mut events);
         Ok(Snapshot { events, recv_ms })
     }
+}
+
+/// One betPawa list, paged. UPCOMING is sorted by kick-off and stops past `until`.
+async fn list(http: &reqwest::Client, host: &str, brand: &str, kind: &str, until: Option<Ms>) -> Result<(Vec<EventIn>, Ms)> {
+    let mut events = Vec::new();
+    let mut recv_ms = 0;
+    let sort = if kind == "LIVE" { serde_json::json!({"competitionPriority":"DESC"}) } else { serde_json::json!({"startTime":"ASC"}) };
+    for page in 0..10 {
+        let q = serde_json::json!({"queries":[{
+            "query":{"eventType": kind,"categories":["2"],"zones":{}},
+            "view":{"marketTypes":["3743"]},
+            "skip": page * TAKE, "take": TAKE,
+            "sort": sort
+        }]});
+        let req = http
+            .get(format!("https://{host}/api/sportsbook/v4/events/lists/by-queries"))
+            .query(&[("q", q.to_string())])
+            .header("x-pawa-brand", brand)
+            .header("x-pawa-language", "en");
+        let (v, t) = fetch_json(req).await?;
+        recv_ms = recv_ms.max(t);
+        let list = v["responses"][0]["responses"].as_array().cloned().unwrap_or_default();
+        let n = list.len();
+        let mut past = false;
+        for e in &list {
+            let mut ev = parse(e);
+            ev.live = kind == "LIVE";
+            if let (Some(u), Some(st)) = (until, ev.start_ms) {
+                if st > u {
+                    past = true;
+                    continue;
+                }
+            }
+            events.push(ev);
+        }
+        if n < TAKE || past {
+            break;
+        }
+    }
+    Ok((events, recv_ms))
 }
 
 fn parse(e: &Value) -> EventIn {
@@ -88,6 +111,7 @@ fn parse(e: &Value) -> EventIn {
         clock: display["minute"].as_str().filter(|s| !s.is_empty()).map(|s| format!("{s}'")),
         quotes: Vec::new(),
         sr_weak: false,
+                live: true,
     };
     for m in e["markets"].as_array().into_iter().flatten() {
         if text(&m["marketType"]["id"]) != "3743" {

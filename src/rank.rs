@@ -9,6 +9,8 @@
 //!     Polymarket had not yet reacted, and how much of its move was still to come.
 
 use crate::lag::{follow, jumps, value_at, Params, Series, PM};
+
+pub const KALSHI: &str = "kalshi";
 use crate::model::Ms;
 use anyhow::Result;
 use rusqlite::params;
@@ -38,6 +40,10 @@ pub struct RankEvent {
     pub pm_lead_ms: Option<i64>,
     /// Probability points Polymarket still had to move when the first bookmaker crossed.
     pub capturable: Option<f64>,
+    /// The same three for Kalshi.
+    pub kalshi_ms: Option<Ms>,
+    pub kalshi_lead_ms: Option<i64>,
+    pub kalshi_capturable: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -54,6 +60,10 @@ pub struct SourceRank {
     pub median_vs_pm_ms: Option<i64>,
     pub ahead_of_pm_share: Option<f64>,
     pub vs_pm_events: usize,
+    /// Median of (Kalshi time - this source's time).
+    pub median_vs_kalshi_ms: Option<i64>,
+    pub ahead_of_kalshi_share: Option<f64>,
+    pub vs_kalshi_events: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,6 +84,8 @@ pub struct Opportunity {
 pub struct Rankings {
     pub sources: Vec<SourceRank>,
     pub opportunity: Opportunity,
+    /// The same opportunity numbers with Kalshi as the market to beat.
+    pub opportunity_kalshi: Opportunity,
     pub events: Vec<RankEvent>,
     pub matches: usize,
 }
@@ -131,7 +143,6 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
             if srcs.len() < 2 {
                 continue;
             }
-            let pm_series = series.get(&(PM.to_string(), outcome.to_string()));
 
             let mut anchors: Vec<(Ms, f64, f64, &String)> = Vec::new();
             for (b, s) in &srcs {
@@ -153,7 +164,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                 }
                 let mut order: Vec<(String, Ms)> = Vec::new();
                 let mut missed: Vec<String> = Vec::new();
-                let mut pm_to: Option<f64> = None;
+                let mut end_of: BTreeMap<String, f64> = BTreeMap::new();
                 for (b, s) in &srcs {
                     // Only sources already being recorded can be said to have missed it.
                     if s.first().map_or(true, |f| f.0 > t - p.settle_ms) {
@@ -162,8 +173,8 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                     let (tc, _ff, ft, ok) = if *b == anchor_src { (Some(t), Some(from), Some(to), true) } else { follow(s, t, from, to, p.window_ms) };
                     match (ok, tc) {
                         (true, Some(tc)) => {
-                            if b.as_str() == PM {
-                                pm_to = ft;
+                            if let Some(ft) = ft {
+                                end_of.insert((*b).clone(), ft);
                             }
                             order.push(((*b).clone(), tc));
                         }
@@ -178,20 +189,32 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                 let end = order.iter().map(|x| x.1).max().unwrap_or(t).max(t);
                 covered.push((start, end, dir));
 
-                let first_book = order.iter().find(|x| x.0 != PM).cloned();
-                let pm_ms = order.iter().find(|x| x.0 == PM).map(|x| x.1);
-                let pm_watched = pm_ms.is_some() || missed.iter().any(|m| m == PM);
-                if order.len() < 2 && !(pm_watched && first_book.is_some()) {
+                // First bookmaker = first source that is not a prediction market.
+                let first_book = order.iter().find(|x| x.0 != PM && x.0 != KALSHI).cloned();
+                // (time, watched, level when the first bookmaker crossed, still to move, lead) per prediction market.
+                let pred = |name: &str| {
+                    let ms = order.iter().find(|x| x.0 == name).map(|x| x.1);
+                    let watched = ms.is_some() || missed.iter().any(|m| m == name);
+                    let at = match (&first_book, series.get(&(name.to_string(), outcome.to_string()))) {
+                        (Some((_, fb)), Some(s)) if watched => value_at(s, *fb),
+                        _ => None,
+                    };
+                    let cap = match (at, end_of.get(name)) {
+                        (Some(a), Some(b)) if ms.is_some() => Some(((b - a) * dir as f64).max(0.0)),
+                        _ => None,
+                    };
+                    let lead = match (ms, &first_book) {
+                        (Some(t), Some((_, fb))) => Some(t - fb),
+                        _ => None,
+                    };
+                    (ms, watched, at, cap, lead)
+                };
+                let (pm_ms, pm_watched, pm_at, capturable, pm_lead) = pred(PM);
+                let (k_ms, k_watched, _k_at, k_cap, k_lead) = pred(KALSHI);
+                if order.len() < 2 && !((pm_watched || k_watched) && first_book.is_some()) {
                     continue; // a lone move with nobody else watched to compare against
                 }
-                let pm_at = match (&first_book, pm_series) {
-                    (Some((_, fb)), Some(s)) if pm_watched => value_at(s, *fb),
-                    _ => None,
-                };
-                let capturable = match (pm_at, pm_to) {
-                    (Some(a), Some(b)) => Some(((b - a) * dir as f64).max(0.0)),
-                    _ => None,
-                };
+                let pm_to = end_of.get(PM).copied();
                 events.push(RankEvent {
                     match_id: *mid,
                     home: home.clone(),
@@ -204,11 +227,11 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                     pm_ms,
                     pm_at_first_book: pm_at,
                     pm_to,
-                    pm_lead_ms: match (pm_ms, &first_book) {
-                        (Some(pm), Some((_, fb))) => Some(pm - fb),
-                        _ => None,
-                    },
+                    pm_lead_ms: pm_lead,
                     capturable,
+                    kalshi_ms: k_ms,
+                    kalshi_lead_ms: k_lead,
+                    kalshi_capturable: k_cap,
                     order,
                 });
             }
@@ -226,6 +249,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
         let mut ranks: Vec<f64> = Vec::new();
         let mut behind: Vec<i64> = Vec::new();
         let mut vs_pm: Vec<i64> = Vec::new();
+        let mut vs_k: Vec<i64> = Vec::new();
         for e in &events {
             let pos = e.order.iter().position(|x| &x.0 == n);
             if pos.is_none() && !e.missed.contains(n) {
@@ -248,6 +272,11 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                     vs_pm.push(pm - t);
                 }
             }
+            if n != KALSHI {
+                if let Some(k) = e.kalshi_ms {
+                    vs_k.push(k - t);
+                }
+            }
         }
         sources.push(SourceRank {
             source: n.clone(),
@@ -261,21 +290,34 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
             median_vs_pm_ms: quant(&vs_pm, 0.5),
             ahead_of_pm_share: (!vs_pm.is_empty()).then(|| vs_pm.iter().filter(|x| **x > 0).count() as f64 / vs_pm.len() as f64),
             vs_pm_events: vs_pm.len(),
+            median_vs_kalshi_ms: quant(&vs_k, 0.5),
+            ahead_of_kalshi_share: (!vs_k.is_empty()).then(|| vs_k.iter().filter(|x| **x > 0).count() as f64 / vs_k.len() as f64),
+            vs_kalshi_events: vs_k.len(),
         });
     }
     sources.sort_by(|a, b| {
         a.median_behind_first_ms.unwrap_or(i64::MAX).cmp(&b.median_behind_first_ms.unwrap_or(i64::MAX)).then(b.moved.cmp(&a.moved))
     });
 
-    // ---- opportunity: bookmaker moves while Polymarket was watched
-    let opp: Vec<&RankEvent> = events.iter().filter(|e| e.first_book.is_some() && (e.pm_ms.is_some() || e.missed.iter().any(|m| m == PM))).collect();
+    // ---- opportunity: bookmaker moves while a prediction market was watched
+    let opportunity = opportunity_for(&events, PM, |e| (e.pm_ms, e.pm_lead_ms, e.capturable));
+    let opportunity_kalshi = opportunity_for(&events, KALSHI, |e| (e.kalshi_ms, e.kalshi_lead_ms, e.kalshi_capturable));
+    let mut ms: Vec<i64> = events.iter().map(|e| e.match_id).collect();
+    ms.sort();
+    ms.dedup();
+    Ok(Rankings { sources, opportunity, opportunity_kalshi, events, matches: ms.len() })
+}
+
+/// How often `market` was still behind when the first bookmaker moved, and how far it still had to go.
+fn opportunity_for(events: &[RankEvent], market: &str, get: impl Fn(&RankEvent) -> (Option<Ms>, Option<i64>, Option<f64>)) -> Opportunity {
+    let opp: Vec<&RankEvent> = events.iter().filter(|e| e.first_book.is_some() && (get(e).0.is_some() || e.missed.iter().any(|m| m == market))).collect();
     let total = opp.len();
     let share = |n: usize| if total > 0 { n as f64 / total as f64 } else { 0.0 };
-    let leads: Vec<i64> = opp.iter().filter_map(|e| e.pm_lead_ms).collect();
-    let followed = opp.iter().filter(|e| e.pm_ms.is_some()).count();
-    let mut caps: Vec<f64> = opp.iter().filter_map(|e| e.capturable).collect();
+    let leads: Vec<i64> = opp.iter().filter_map(|e| get(e).1).collect();
+    let followed = opp.iter().filter(|e| get(e).0.is_some()).count();
+    let mut caps: Vec<f64> = opp.iter().filter_map(|e| get(e).2).collect();
     caps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let opportunity = Opportunity {
+    Opportunity {
         events: total,
         pm_followed: followed,
         pm_did_not_follow: total - followed,
@@ -295,11 +337,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                 (th, n, share(n))
             })
             .collect(),
-    };
-    let mut ms: Vec<i64> = events.iter().map(|e| e.match_id).collect();
-    ms.sort();
-    ms.dedup();
-    Ok(Rankings { sources, opportunity, events, matches: ms.len() })
+    }
 }
 
 #[cfg(test)]

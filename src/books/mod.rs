@@ -5,10 +5,13 @@ pub mod altenar;
 pub mod betika;
 pub mod betpawa;
 pub mod fonbet;
+pub mod kalshi;
 pub mod kambi;
 pub mod linebet;
+pub mod novibet;
 pub mod polymarket;
 pub mod sportybet;
+pub mod thunderpick;
 
 use crate::model::*;
 use crate::App;
@@ -19,6 +22,63 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/// Pre-match games: fetched less often than the live list, kept between refreshes,
+/// and merged into every snapshot so a game moves smoothly from pre-match to live.
+pub struct Pre {
+    /// How far ahead to look (0 = pre-match off).
+    pub hours: f64,
+    pub every_ms: i64,
+    last: Ms,
+    events: Vec<EventIn>,
+}
+
+impl Pre {
+    pub fn new(hours: f64, every_ms: i64) -> Self {
+        Pre { hours, every_ms, last: 0, events: Vec::new() }
+    }
+    pub fn due(&self) -> bool {
+        self.hours > 0.0 && now_ms() - self.last >= self.every_ms
+    }
+    /// Keep games kicking off in the window (and ones a few minutes past kick-off
+    /// that the live list has not picked up yet).
+    pub fn store(&mut self, mut evs: Vec<EventIn>) {
+        let now = now_ms();
+        let until = now + (self.hours * 3_600_000.0) as i64;
+        evs.retain(|e| e.start_ms.is_some_and(|s| s >= now - 15 * 60_000 && s <= until));
+        for e in &mut evs {
+            e.live = false;
+        }
+        self.events = evs;
+        self.last = now;
+    }
+    /// Retry soon after a failure instead of waiting a full interval.
+    pub fn failed(&mut self) {
+        self.last = now_ms() - self.every_ms + 5_000;
+    }
+    pub fn merge(&self, live: &mut Vec<EventIn>) {
+        let ids: std::collections::HashSet<String> = live.iter().map(|e| e.id.clone()).collect();
+        live.extend(self.events.iter().filter(|e| !ids.contains(&e.id)).cloned());
+    }
+}
+
+/// Run the pre-match refresh if it is due; failures only log.
+pub async fn refresh_pre<F, Fut>(pre: &mut Pre, name: &str, f: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Vec<EventIn>>>,
+{
+    if !pre.due() {
+        return;
+    }
+    match f().await {
+        Ok(evs) => pre.store(evs),
+        Err(e) => {
+            tracing::warn!("{name} pre-match: {e:#}");
+            pre.failed();
+        }
+    }
+}
 
 pub trait Book: Send + 'static {
     fn name(&self) -> &'static str;
@@ -83,8 +143,13 @@ pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
         match res {
             Ok(mut snap) => {
                 let req_ms = t0.elapsed().as_millis() as i64;
+                // The simulated-football filter only applies to football; real e-sports
+                // titles (CS2, LoL, ...) legitimately have "esports" in league/team names.
                 if !app.cfg.include_esoccer {
-                    snap.events.retain(|e| !is_esoccer(e));
+                    snap.events.retain(|e| e.sport != "football" || !is_esoccer(e));
+                }
+                if !app.cfg.esports {
+                    snap.events.retain(|e| !is_esports_sport(&e.sport));
                 }
                 let writes = app.engine.lock().apply(name, snap, req_ms);
                 app.emit(writes).await;
@@ -101,6 +166,52 @@ pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
             }
         }
     }
+}
+
+/// Sport keys used for competitive video games. Every adapter maps its own naming
+/// onto these, so the matcher never mixes titles (a "Team Liquid" exists in several).
+pub const ESPORTS: &[&str] = &["cs2", "lol", "dota2", "valorant", "ow", "rl", "r6", "cod", "sc2", "mlbb", "hok", "pubg"];
+
+pub fn is_esports_sport(sport: &str) -> bool {
+    sport == "esports" || ESPORTS.contains(&sport)
+}
+
+/// Map any source's game name (a Polymarket series slug, a Kalshi competition, a bookmaker
+/// category, a tournament name) to a sport key. `None` = not an e-sport we follow
+/// (including FIFA/eFootball, which is simulated football).
+pub fn esport_key(raw: &str) -> Option<&'static str> {
+    let s = raw.to_lowercase();
+    let has = |x: &str| s.contains(x);
+    if has("fifa") || has("efootball") || has("e-football") || has("esoccer") || has("ebasketball") || has("nba 2k") || has("ea sports") || has("fc 2") || has("wild rift") || has("wild-rift") {
+        return None;
+    }
+    Some(if has("counter-strike") || has("counter strike") || has("cs2") || has("cs:go") || has("csgo") || has("cs 2") {
+        "cs2"
+    } else if has("league of legends") || s == "lol" || has("lol ") || has(" lol") || has("lol:") || has("lol-") || has("lck") || has("lpl ") || has("lec ") || has("lcs") {
+        "lol"
+    } else if has("dota") {
+        "dota2"
+    } else if has("valorant") || has("vct") {
+        "valorant"
+    } else if has("overwatch") || s == "ow" {
+        "ow"
+    } else if has("rocket league") || s == "rl" {
+        "rl"
+    } else if has("rainbow six") || has("r6") {
+        "r6"
+    } else if has("call of duty") || s == "cod" || s == "codmw" {
+        "cod"
+    } else if has("starcraft") || s == "sc2" || s == "sc1" || s == "sc" {
+        "sc2"
+    } else if has("mobile legends") || s == "mlbb" {
+        "mlbb"
+    } else if has("honor of kings") || s == "hok" {
+        "hok"
+    } else if has("pubg") {
+        "pubg"
+    } else {
+        return None;
+    })
 }
 
 /// Simulated / e-sports football (FIFA "2x4 min" leagues, Volta, cyber) — not real matches.
