@@ -1,0 +1,32 @@
+# Copy to oddsfeed.toml (next to where you run the exe) to override defaults.
+# Every key is optional.
+
+bind = "127.0.0.1:8787"     # keep on localhost; there is no auth
+db = "oddsfeed.db"          # SQLite file with the full change log
+include_esoccer = false     # FIFA / 2x4-min / 4x4 / MLS+ style simulated football
+
+# Per book: enabled, poll_ms (min 250), param (adapter-specific override)
+[books.unibet]
+poll_ms = 1000
+param = "ubse"              # Kambi offering code
+
+[books.sportybet]
+param = "ng"                # country site
+
+[books.betpawa]
+poll_ms = 1500
+param = "www.betpawa.ng"
+
+[books.betika]
+
+[books.linebet]
+param = "linebet.com"
+
+[books.fonbet]
+param = "line52w.bk6bba-resources.com"   # Fonbet line CDN host
+
+[books.vinn]
+param = "vinn"              # Altenar integration name
+
+[books.polymarket]          # WebSocket, poll_ms not used
+param = "30"                # start watching this many minutes before kick-off

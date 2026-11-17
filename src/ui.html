@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Odds Board</title>
+<style>
+  :root { --bg:#0f1115; --fg:#e6e6e6; --mut:#8a90a0; --line:#252a33; --up:#2fbf71; --down:#e5484d; --hi:#1b2230; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.4 system-ui, sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  header b { font-size:15px; }
+  select, input { background:#171a21; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:3px 6px; }
+  #status { color:var(--mut); margin-left:auto; }
+  .wrap { overflow:auto; max-height:calc(100vh - 46px); }
+  table { border-collapse:separate; border-spacing:0; width:100%; }
+  th, td { padding:4px 8px; border-bottom:1px solid var(--line); white-space:nowrap; text-align:right; font-variant-numeric:tabular-nums; }
+  thead th { color:var(--mut); font-weight:500; position:sticky; background:var(--bg); z-index:1; }
+  thead tr:first-child th { top:0; height:18px; }
+  thead tr:nth-child(2) th { top:27px; font-size:11px; }
+  th.bk { text-align:center; border-left:1px solid var(--line); }
+  td.first { border-left:1px solid var(--line); }
+  td.m, th.m { text-align:left; }
+  td.m small { color:var(--mut); display:block; }
+  td.best { color:#ffd166; font-weight:600; }
+  td.up { background:rgba(47,191,113,.25); }
+  td.down { background:rgba(229,72,77,.25); }
+  td.na { color:#444; }
+  tr:hover td { background:var(--hi); }
+  #lagbox { padding:8px 16px 24px; }
+  #lagbox h3 { font-size:14px; margin:12px 0 4px; }
+  #lagbox small, .hint { color:var(--mut); font-weight:400; }
+  .hint { margin:0 0 8px; max-width:900px; }
+  #lag { width:auto; }
+  #lag th { position:static; }
+</style>
+</head>
+<body>
+<header>
+  <b>Live odds</b>
+  <label>Market <select id="market"><option>1x2</option><option>total</option><option>handicap</option><option>btts</option></select></label>
+  <label>Min books <select id="minb"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+  <input id="q" placeholder="filter team / league">
+  <span id="status">connecting…</span>
+</header>
+<div class="wrap"><table id="t"></table></div>
+<section id="lagbox">
+  <h3>Delay vs Polymarket <small id="lagmeta"></small></h3>
+  <p class="hint">A jump = 1X2 implied probability moving ≥ <span id="mj">4</span> points within 10 s. Each side is timed when it crosses halfway through its own move.
+  <b>Positive = Polymarket later.</b> “book → PM”: a bookmaker jumped, how long until Polymarket followed. “PM → book”: Polymarket jumped first or alone.</p>
+  <table id="lag"></table>
+</section>
+<script>
+// Served by oddsfeed -> same origin. Opened as a file / preview -> talk to the local server
+// (override with ?api=http://host:port).
+const API = new URLSearchParams(location.search).get('api')
+  || (location.protocol.startsWith('http') ? '' : 'http://127.0.0.1:8787');
+const OUT = { '1x2':['home','draw','away'], total:['over','under'], handicap:['home','away'], btts:['yes','no'] };
+const LBL = { home:'1', draw:'X', away:'2', over:'O', under:'U', yes:'Y', no:'N' };
+let prev = {};
+const $ = id => document.getElementById(id);
+function fmt(p){ return p == null ? '–' : p.toFixed(2); }
+function mainLine(lines){
+  // choose the line whose prices are closest to each other (the "main" line)
+  let best=null, bd=1e9;
+  for (const [l,o] of Object.entries(lines||{})) {
+    const v = Object.values(o).filter(x=>x!=null);
+    if (v.length<2) continue;
+    const d = Math.abs(v[0]-v[1]);
+    if (d<bd){ bd=d; best=l; }
+  }
+  return best;
+}
+async function tick(){
+  const market = $('market').value;
+  try {
+    const r = await fetch(API + '/board?market='+market+'&min_books='+$('minb').value);
+    const d = await r.json();
+    const outs = OUT[market];
+    const q = $('q').value.toLowerCase();
+    const books = d.books.sort();
+    const lined = market==='total'||market==='handicap';
+    let h = '<thead><tr><th class="m">Match</th><th>Score</th>';
+    for (const b of books) h += `<th class="bk" colspan="${outs.length + (lined?1:0)}">${b}</th>`;
+    h += '</tr><tr><th></th><th></th>';
+    for (const b of books) { if (lined) h += '<th class="bk">line</th>'; outs.forEach((k,i) => h += `<th class="${!lined&&i===0?'bk':''}">${LBL[k]}</th>`); }
+    h += '</tr></thead><tbody>';
+    const next = {};
+    for (const row of d.rows) {
+      if (q && !(row.home+' '+row.away+' '+row.league).toLowerCase().includes(q)) continue;
+      // best price per outcome (1x2/btts only, lines differ otherwise)
+      const best = {};
+      if (market==='1x2'||market==='btts') for (const b of books) { const o=row.books[b]; if(!o) continue; for (const k of outs) if (o[k]!=null && (best[k]==null||o[k]>best[k])) best[k]=o[k]; }
+      h += `<tr><td class="m">${row.home} – ${row.away}<small>${row.league||''} · #${row.id}</small></td><td>${row.score||''} ${row.clock||''}</td>`;
+      for (const b of books) {
+        let o = row.books[b];
+        let line = null;
+        if (lined) { line = mainLine(o); o = line!=null ? o[line] : null; h += `<td class="na first">${line??''}</td>`; }
+        for (const [i,k] of outs.entries()) {
+          const p = o ? o[k] : undefined;
+          const key = row.id+'|'+b+'|'+k+'|'+line;
+          next[key] = p;
+          let cls = p===undefined ? 'na' : '';
+          if (prev[key]!=null && p!=null && p!==prev[key]) cls += p>prev[key] ? ' up' : ' down';
+          if (p!=null && best[k]===p) cls += ' best';
+          if (!lined && i===0) cls += ' first';
+          h += `<td class="${cls}" title="${b} ${LBL[k]}">${p===undefined?'':fmt(p)}</td>`;
+        }
+      }
+      h += '</tr>';
+    }
+    prev = next;
+    $('t').innerHTML = h + '</tbody>';
+    $('status').textContent = d.rows.length + ' matches · ' + new Date(d.now_ms).toLocaleTimeString();
+  } catch (e) { $('status').textContent = 'cannot reach oddsfeed at ' + (API || location.origin) + ' — is it running? (' + e.message + ')'; }
+}
+setInterval(tick, 1000); tick();
+
+function secs(ms){ return ms==null ? '–' : (ms/1000).toFixed(1)+' s'; }
+async function lagTick(){
+  try {
+    const d = await (await fetch(API + '/lag?min_jump=0.04')).json();
+    $('lagmeta').textContent = `· last 24 h · ${d.matches} match(es) with Polymarket prices`;
+    let h = '<tr><th class="m">Direction</th><th class="m">Book</th><th>Jumps</th><th>Followed</th><th>Median</th><th>p25</th><th>p75</th><th>Polymarket first</th></tr>';
+    const rows = d.summary.sort((a,b)=> (a.trigger>b.trigger?1:-1) || (a.book>b.book?1:-1));
+    for (const s of rows) {
+      h += `<tr><td class="m">${s.trigger==='book'?'book → PM':'PM → book'}</td><td class="m">${s.book}</td><td>${s.jumps}</td><td>${s.followed}</td>`
+        + `<td>${secs(s.median_delay_ms)}</td><td>${secs(s.p25_delay_ms)}</td><td>${secs(s.p75_delay_ms)}</td>`
+        + `<td>${s.polymarket_first_share==null?'–':Math.round(s.polymarket_first_share*100)+'%'}</td></tr>`;
+    }
+    if (!rows.length) h += '<tr><td class="m" colspan="8">No jumps yet: needs a live match on Polymarket and at least one book, and a real price move (goal, red card).</td></tr>';
+    $('lag').innerHTML = h;
+  } catch (e) { $('lagmeta').textContent = '· unavailable'; }
+}
+setInterval(lagTick, 30000); lagTick();
+</script>
+</body>
+</html>
