@@ -1,9 +1,9 @@
 //! Kalshi account sync (read-only): balance, positions, resting orders, recent fills.
 //!
-//! Credentials (API key id + RSA private key PEM) live in `kalshi.json` next to the
+//! Credentials (API key id + RSA or Ed25519 private key PEM) live in `kalshi.json` next to the
 //! database and are edited from Settings; the private key is never sent back to the browser.
-//! Requests are signed the way Kalshi documents: RSA-PSS (SHA-256) over
-//! `timestamp_ms + METHOD + path`, sent as KALSHI-ACCESS-KEY / -SIGNATURE / -TIMESTAMP.
+//! Requests are signed the way Kalshi documents: RSA-PSS (SHA-256), or Ed25519 for Ed25519 keys,
+//! over `timestamp_ms + METHOD + path`, sent as KALSHI-ACCESS-KEY / -SIGNATURE / -TIMESTAMP.
 //! Nothing here places or cancels orders.
 
 use anyhow::{bail, Context, Result};
@@ -25,7 +25,7 @@ const BASE: &str = "/trade-api/v2";
 #[serde(default)]
 pub struct KalshiCreds {
     pub key_id: String,
-    /// PEM, PKCS#1 ("BEGIN RSA PRIVATE KEY") or PKCS#8 ("BEGIN PRIVATE KEY").
+    /// PEM: RSA as PKCS#1 ("BEGIN RSA PRIVATE KEY") or PKCS#8, or Ed25519 as PKCS#8 ("BEGIN PRIVATE KEY").
     pub private_key: String,
 }
 
@@ -65,23 +65,40 @@ pub fn merge(mut c: KalshiCreds, edit: &Value) -> KalshiCreds {
     c
 }
 
-fn parse_key(pem: &str) -> Result<RsaPrivateKey> {
-    let pem = pem.trim();
-    RsaPrivateKey::from_pkcs8_pem(pem)
-        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(pem))
-        .context("private key is not a PEM RSA key (PKCS#1 or PKCS#8)")
+enum Key {
+    Rsa(RsaPrivateKey),
+    Ed(ed25519_dalek::SigningKey),
 }
 
-fn headers(c: &KalshiCreds, method: &str, path: &str) -> Result<Vec<(&'static str, String)>> {
+fn parse_key(pem: &str) -> Result<Key> {
+    let pem = pem.trim();
+    if let Ok(k) = <ed25519_dalek::SigningKey as ed25519_dalek::pkcs8::DecodePrivateKey>::from_pkcs8_pem(pem) {
+        return Ok(Key::Ed(k));
+    }
+    RsaPrivateKey::from_pkcs8_pem(pem)
+        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(pem))
+        .map(Key::Rsa)
+        .context("private key is not a PEM RSA (PKCS#1 / PKCS#8) or Ed25519 (PKCS#8) key")
+}
+
+/// Signed request headers for `method` + `path` (path without the query string).
+pub fn headers(c: &KalshiCreds, method: &str, path: &str) -> Result<Vec<(&'static str, String)>> {
     let key = parse_key(&c.private_key)?;
     let ts = crate::clock::now_ms().to_string();
-    let signer = BlindedSigningKey::<Sha256>::new(key);
-    let sig = signer.sign_with_rng(&mut rand::thread_rng(), format!("{ts}{method}{path}").as_bytes());
+    let msg = format!("{ts}{method}{path}");
+    let sig = match key {
+        Key::Rsa(k) => BlindedSigningKey::<Sha256>::new(k).sign_with_rng(&mut rand::thread_rng(), msg.as_bytes()).to_vec(),
+        Key::Ed(k) => ed25519_dalek::Signer::sign(&k, msg.as_bytes()).to_bytes().to_vec(),
+    };
     Ok(vec![
         ("KALSHI-ACCESS-KEY", c.key_id.trim().to_string()),
-        ("KALSHI-ACCESS-SIGNATURE", base64::engine::general_purpose::STANDARD.encode(sig.to_bytes())),
+        ("KALSHI-ACCESS-SIGNATURE", base64::engine::general_purpose::STANDARD.encode(sig)),
         ("KALSHI-ACCESS-TIMESTAMP", ts),
     ])
+}
+
+pub fn has_key(c: &KalshiCreds) -> bool {
+    !c.key_id.trim().is_empty() && parse_key(&c.private_key).is_ok()
 }
 
 async fn get(http: &reqwest::Client, c: &KalshiCreds, path_q: &str) -> Result<Value> {
@@ -131,6 +148,17 @@ mod tests {
         let h = headers(&c, "GET", "/trade-api/v2/portfolio/balance").unwrap();
         assert_eq!(h[0].1, "abc");
         assert!(base64::engine::general_purpose::STANDARD.decode(&h[1].1).unwrap().len() == 128);
+        assert!(public_view(&c)["has_key"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn signs_with_an_ed25519_key() {
+        use ed25519_dalek::pkcs8::EncodePrivateKey;
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let pem = key.to_pkcs8_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF).unwrap().to_string();
+        let c = KalshiCreds { key_id: "abc".into(), private_key: pem };
+        let h = headers(&c, "GET", "/trade-api/v2/portfolio/balance").unwrap();
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(&h[1].1).unwrap().len(), 64);
         assert!(public_view(&c)["has_key"].as_bool().unwrap());
     }
 

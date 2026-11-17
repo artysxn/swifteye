@@ -10,6 +10,7 @@ base64 = "0.22"
 hmac = "0.12"
 rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 sha2 = "0.10"
 axum = "0.8"
 bytes = "1"

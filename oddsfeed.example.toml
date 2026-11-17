@@ -4,6 +4,11 @@
 bind = "127.0.0.1:8787"     # keep on localhost; there is no auth
 db = "oddsfeed.db"          # SQLite file with the full change log
 include_esoccer = false     # FIFA / 2x4-min / 4x4 / MLS+ style simulated football
+esports = true              # CS2, LoL, Dota 2, Valorant, ... (match winner)
+# Traditional sports to follow. Football and handball store home/draw/away; every other
+# sport stores a two-way winner (overtime / tie-break included) under the same "1x2" market.
+# Known: football basketball tennis hockey baseball volleyball amfootball mma tabletennis handball
+sports = ["football", "basketball", "tennis", "hockey", "baseball", "volleyball", "amfootball", "mma"]
 
 # Per book: enabled, poll_ms (min 250), param (adapter-specific override)
 [books.unibet]
@@ -19,8 +24,14 @@ param = "www.betpawa.ng"
 
 [books.betika]
 
-[books.linebet]
-param = "linebet.com"
+[books.leovegas]            # Kambi brands: leovegas (leose), paf (paf)
+[books.paf]
+
+[books.linebet]             # 1xBet-platform brands: linebet, melbet, betwinner, megapari
+param = "linebet.com"       # domain override (mirrors change often)
+
+[books.pinnacle]            # guest Arcadia API, all followed sports
+poll_ms = 2000
 
 [books.fonbet]
 param = "line52w.bk6bba-resources.com"   # Fonbet line CDN host

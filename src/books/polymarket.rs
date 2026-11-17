@@ -23,6 +23,14 @@ const GAMMA: &str = "https://gamma-api.polymarket.com";
 const SOCCER_TAG: &str = "100350";
 /// Gamma tag shared by every Polymarket e-sports title (FIFA/eFootball included, filtered out).
 const ESPORTS_TAG: &str = "64";
+/// Gamma tags of the two-way sports: (tag, sport key, hours a game can still be running).
+const SPORT_TAGS: &[(&str, &str, i64)] = &[
+    ("28", "basketball", 4),
+    ("864", "tennis", 6),
+    ("100088", "hockey", 4),
+    ("678", "baseball", 5),
+    ("102883", "volleyball", 3),
+];
 /// Above this spread the mid says little (empty / one-sided book): store as suspended.
 const MAX_SPREAD: f64 = 0.25;
 
@@ -74,14 +82,14 @@ pub async fn run(app: Arc<App>, prematch_min: i64) {
         let app = app.clone();
         tokio::spawn(async move {
             loop {
-                match discover(&http, prematch_min, app.cfg.esports).await {
+                match discover(&http, prematch_min, &app.cfg).await {
                     Ok(evs) => {
                         let changed = {
                             let cur = tx.borrow();
                             cur.len() != evs.len() || cur.iter().zip(evs.iter()).any(|(a, b)| a.id != b.id || a.tokens != b.tokens)
                         };
                         if changed {
-                            tracing::info!("polymarket: {} live/upcoming games ({} e-sports)", evs.len(), evs.iter().filter(|e| e.sport != "football").count());
+                            tracing::info!("polymarket: {} live/upcoming games ({} e-sports, {} other sports)", evs.len(), evs.iter().filter(|e| is_esports_sport(&e.sport)).count(), evs.iter().filter(|e| e.sport != "football" && !is_esports_sport(&e.sport)).count());
                             let _ = tx.send(Arc::new(evs));
                         }
                     }
@@ -292,7 +300,7 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
     app.emit(writes).await;
 }
 
-async fn discover(http: &reqwest::Client, prematch_min: i64, esports: bool) -> Result<Vec<PmEvent>> {
+async fn discover(http: &reqwest::Client, prematch_min: i64, cfg: &crate::Config) -> Result<Vec<PmEvent>> {
     let now = now_ms();
     let fmt = |ms: Ms| {
         time::OffsetDateTime::from_unix_timestamp(ms / 1000)
@@ -302,11 +310,16 @@ async fn discover(http: &reqwest::Client, prematch_min: i64, esports: bool) -> R
     let to = fmt(now + prematch_min * 60 * 1000);
     let mut out = Vec::new();
     // (tag, how far back to look): a football game is over within 3 h, a BO5 can run longer.
-    let mut tags = vec![(SOCCER_TAG, 3i64)];
-    if esports {
-        tags.push((ESPORTS_TAG, 6));
+    // (tag, sport key, how far back to look): a football game is over within 3 h, a BO5 can run longer.
+    let mut tags = Vec::new();
+    if cfg.follows("football") {
+        tags.push((SOCCER_TAG, "football", 3i64));
     }
-    for (tag, back_h) in tags {
+    if cfg.esports {
+        tags.push((ESPORTS_TAG, "esports", 6));
+    }
+    tags.extend(SPORT_TAGS.iter().copied().filter(|t| cfg.follows(t.1)));
+    for (tag, sport, back_h) in tags {
         let from = fmt(now - back_h * 3600 * 1000);
         for page in 0..10 {
             let url = format!(
@@ -315,16 +328,20 @@ async fn discover(http: &reqwest::Client, prematch_min: i64, esports: bool) -> R
             );
             let (v, _) = match fetch_json(http.get(url)).await {
                 Ok(x) => x,
-                // A failing e-sports page must not take the football games down with it.
-                Err(e) if tag == ESPORTS_TAG => {
-                    tracing::warn!("polymarket e-sports discovery: {e:#}");
+                // A failing side page must not take the football games down with it.
+                Err(e) if tag != SOCCER_TAG => {
+                    tracing::warn!("polymarket {sport} discovery: {e:#}");
                     break;
                 }
                 Err(e) => return Err(e),
             };
             let list = v.as_array().cloned().unwrap_or_default();
             for e in &list {
-                let pe = if tag == ESPORTS_TAG { parse_esports_event(e) } else { parse_event(e) };
+                let pe = match sport {
+                    "football" => parse_event(e),
+                    "esports" => parse_two_way(e, None),
+                    s => parse_two_way(e, Some(s)),
+                };
                 if let Some(pe) = pe {
                     out.push(pe);
                 }
@@ -343,20 +360,29 @@ async fn discover(http: &reqwest::Client, prematch_min: i64, esports: bool) -> R
     Ok(out)
 }
 
-/// E-sports: one "Match Winner" moneyline market with two tokens (one per team), no draw.
-/// Title: "Counter-Strike: A vs B (BO3) - Tournament".
-fn parse_esports_event(e: &Value) -> Option<PmEvent> {
+/// Two-way games: one "moneyline" market with two tokens (one per team / player), no draw.
+/// E-sports title: "Counter-Strike: A vs B (BO3) - Tournament" (`sport` = None, read from the title).
+/// Others: "Magic vs. Celtics" (NBA, NHL), "ATP Finals, Group X: Alexander Zverev vs Ben Shelton".
+fn parse_two_way(e: &Value, sport: Option<&'static str>) -> Option<PmEvent> {
     if e["closed"].as_bool() == Some(true) {
         return None;
     }
     let title = text(&e["title"]);
     let slug = text(&e["seriesSlug"]);
     let game = title.split_once(": ").map(|(g, _)| g.to_string()).unwrap_or_default();
-    let sport = esport_key(&slug).or_else(|| esport_key(&game))?;
+    let sport = match sport {
+        Some(s) => s,
+        None => esport_key(&slug).or_else(|| esport_key(&game))?,
+    };
+    let esports = is_esports_sport(sport);
     let rest = title.split_once(": ").map(|(_, r)| r).unwrap_or(&title);
+    // Child events of traditional sports ("A vs. B - More Markets") repeat the game.
+    if !esports && rest.contains(" - ") {
+        return None;
+    }
     let (teams, tournament) = match rest.split_once(" - ") {
         Some((t, l)) => (t, l.trim().to_string()),
-        None => (rest, String::new()),
+        None => (rest, if esports { String::new() } else { game.clone() }),
     };
     // Drop the "(BO3)" suffix.
     let teams = teams.rsplit_once(" (BO").map(|(t, _)| t).unwrap_or(teams);

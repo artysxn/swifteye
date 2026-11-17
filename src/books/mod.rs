@@ -8,7 +8,9 @@ pub mod fonbet;
 pub mod kalshi;
 pub mod kambi;
 pub mod linebet;
+pub mod m88;
 pub mod novibet;
+pub mod pinnacle;
 pub mod polymarket;
 pub mod sportybet;
 pub mod thunderpick;
@@ -148,9 +150,7 @@ pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
                 if !app.cfg.include_esoccer {
                     snap.events.retain(|e| e.sport != "football" || !is_esoccer(e));
                 }
-                if !app.cfg.esports {
-                    snap.events.retain(|e| !is_esports_sport(&e.sport));
-                }
+                snap.events.retain(|e| app.cfg.follows(&e.sport));
                 let writes = app.engine.lock().apply(name, snap, req_ms);
                 app.emit(writes).await;
                 if !backoff.is_zero() {
@@ -174,6 +174,46 @@ pub const ESPORTS: &[&str] = &["cs2", "lol", "dota2", "valorant", "ow", "rl", "r
 
 pub fn is_esports_sport(sport: &str) -> bool {
     sport == "esports" || ESPORTS.contains(&sport)
+}
+
+/// Traditional sports followed besides football. Every adapter maps its own naming onto these keys.
+pub const SPORTS: &[&str] = &["football", "basketball", "tennis", "hockey", "baseball", "volleyball", "amfootball", "mma", "tabletennis", "handball"];
+
+/// Sports whose main market is three-way (home / draw / away, regular time).
+/// Everything else stores a two-way winner (overtime / tie-break / series included) under
+/// `Market::X12` with only home and away, so a draw price never appears for them.
+pub fn three_way(sport: &str) -> bool {
+    matches!(sport, "football" | "handball")
+}
+
+/// Map a source's sport name ("ICE_HOCKEY", "Ice Hockey", "Hockey", "Soccer"...) to a sport key.
+/// E-sports return `None` here: they need the title from `esport_key`.
+pub fn sport_key(raw: &str) -> Option<&'static str> {
+    let s = raw.to_lowercase().replace(['_', '-'], " ");
+    Some(match s.trim() {
+        "football" | "soccer" => "football",
+        "basketball" => "basketball",
+        "tennis" => "tennis",
+        "ice hockey" | "hockey" => "hockey",
+        "baseball" => "baseball",
+        "volleyball" => "volleyball",
+        "american football" => "amfootball",
+        "mma" | "mixed martial arts" | "ufc" | "ufc/mma" => "mma",
+        "table tennis" => "tabletennis",
+        "handball" => "handball",
+        _ => return None,
+    })
+}
+
+/// Keep only the winner prices that make sense for the sport: no draw for two-way sports.
+/// A two-way sport that offered a draw is quoting regular-time 1X2 (hockey), which is a
+/// different market from the winner other sources quote, so the whole market is dropped.
+pub fn winner_quotes(sport: &str, qs: Vec<QuoteIn>) -> Vec<QuoteIn> {
+    if three_way(sport) {
+        return qs;
+    }
+    let has_draw = qs.iter().any(|q| q.market == Market::X12 && q.outcome == Outcome::Draw);
+    qs.into_iter().filter(|q| q.market != Market::X12 || !has_draw).collect()
 }
 
 /// Map any source's game name (a Polymarket series slug, a Kalshi competition, a bookmaker
