@@ -442,7 +442,8 @@ SE.pages.snipe = {
       no_data: ['No price to compare', 'The market or the bookmaker had no quote at that moment.'],
       book_reverted: ['Bookmaker moved back', 'By the time we could act, the bookmaker\'s move had gone.'],
       already_moved: ['Market already moved', 'Not delayed: the market had already made more than its allowed share of the move.'],
-      too_few_books: ['Too few bookmakers moved', 'Only one bookmaker had moved; the market rarely follows a single book.'],
+      too_few_books: ['Too few independent bookmakers', 'Not enough DIFFERENT bookmakers had made the move. Brands sharing one feed (the 1xBet brands, the Kambi brands, Fonbet/PARI, VINN/BetKing) count once.'],
+      second_test_failed: ['Second test failed', 'Half a second later the delay, the confirming bookmakers or the gap were no longer all there, so it did not buy.'],
       price_unknown: ['Real price unknown', 'No recorded Kalshi quote or minute candle for that moment, so no honest price to trade at.'],
       spread_too_wide: ['Spread too wide', 'Buying and selling back would cost more than the rule allows.'],
       market_quiet: ['Market quiet', 'The market had not changed for too long.'],
@@ -452,12 +453,13 @@ SE.pages.snipe = {
       price_ran: ['Price ran before the fill', 'By the time the order landed the price was more than 2c worse.'],
     };
     const gateText = (g) => [
-      `${g.min_books}+ bookmaker${g.min_books > 1 ? 's' : ''} moved`,
+      `${g.min_books}+ independent bookmakers moved`,
       `market made ≤ ${Math.round(g.max_followed * 100)}% of the move`,
       `spread ≤ ${Math.round(g.max_spread * 100)}¢`,
       g.min_entry > 0 ? `price ≥ ${Math.round(g.min_entry * 100)}¢` : '',
       g.min_edge > 0 ? `expected gain ≥ ${Math.round(g.min_edge * 100)}¢` : 'expected gain > 0',
       g.need_real ? 'real price known' : '',
+      `both delay tests pass (${(data?.settings?.confirm_ms ?? 500) / 1000} s apart)`,
       `give up after ${g.give_up_s < 60 ? g.give_up_s + ' s' : g.give_up_s / 60 + ' min'}`,
     ].filter(Boolean).join(' · ');
     const name = (b) => SE.bookName(b);
@@ -482,7 +484,7 @@ SE.pages.snipe = {
           return fact('timer', `<b>${name(b)}</b>: on average <b>${secs(s1?.mean_ms)}</b> after the first bookmaker (median ${secs(s1?.median_ms)}); still ≥ 2 s behind on <b>${SE.fmtPct(g2?.[2])}</b> of ${SE.fmtInt(o?.events || 0)} moves. The model found it delayed and bought on <b>${SE.fmtInt(f?.entered || 0)}</b> of ${SE.fmtInt(f?.triggers || 0)} bookmaker moves. ${bh ? `Best give-up time: <b>${bh.hold_s < 60 ? bh.hold_s + ' s' : bh.hold_s / 60 + ' min'}</b> (${SE.fmtPct(bh.roi, 1)} per trade).` : ''}`);
         }).join('') +
         ['polymarket', 'kalshi'].map((b) => fact('rule', `<b>${name(b)} buys only when:</b> ${esc(gateText(base(b)?.gate || {}))}. Sells at the bid once it has made <b>${SE.fmtPct(data.settings.catch)}</b> of the bookmaker\'s move.`)).join('') +
-        fact('info', `Decides ${data.settings.reaction_ms / 1000} s after the bookmaker moves; the order lands ${data.settings.fill_ms / 1000} s later at that moment\'s price, ${Math.round(data.settings.slip * 100)}¢ worse on every buy and sale, and is not taken if the price ran more than ${Math.round(data.settings.cap * 100)}¢. ${money(data.settings.stake)} a trade, Polymarket fee ${data.settings.pm_fee_bps / 100}% a side, Kalshi taker fee. Polymarket prices are its real order book; Kalshi uses its real quotes since they were recorded and its own 1-minute candles before that (${(() => { const q = base('kalshi')?.quote_source || {}; return `this range: ${SE.fmtInt(q.book || 0)} buys on recorded quotes, ${SE.fmtInt(q.candle || 0)} on candles`; })()}). Order-book depth is not modelled.`);
+        fact('info', `Tests the delay ${data.settings.reaction_ms / 1000} s after the bookmaker moves and again ${data.settings.confirm_ms / 1000} s later; the order lands ${data.settings.fill_ms / 1000} s later at that moment\'s price, ${Math.round(data.settings.slip * 100)}¢ worse on every buy and sale, and is not taken if the price ran more than ${Math.round(data.settings.cap * 100)}¢. ${money(data.settings.stake)} a trade, Polymarket fee ${data.settings.pm_fee_bps / 100}% a side, Kalshi taker fee. Polymarket prices are its real order book; Kalshi uses its real quotes since they were recorded and its own 1-minute candles before that (${(() => { const q = base('kalshi')?.quote_source || {}; return `this range: ${SE.fmtInt(q.book || 0)} buys on recorded quotes, ${SE.fmtInt(q.candle || 0)} on candles`; })()}). Order-book depth is not modelled.`);
       // ---- tiles
       $('#pTiles').innerHTML = ['polymarket', 'kalshi'].map((b) => {
         const h = holdOf(b), o = base(b)?.opportunity, g2 = o?.lead_at_least.find((x) => x[0] === 2000);

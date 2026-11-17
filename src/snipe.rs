@@ -203,6 +203,8 @@ pub struct SimQ {
     pub k_min_entry_c: Option<u32>,
     /// false = also trade on an assumed spread when Kalshi's real price is unknown (research only).
     pub k_need_real: Option<bool>,
+    /// ms between the two delay tests; both must pass before buying. Default 500.
+    pub confirm_ms: Option<i64>,
     /// Return every trade (for research), not just the latest 60.
     pub all: Option<bool>,
 }
@@ -238,7 +240,7 @@ pub struct Gate {
 ///   spread <= 4c, expected gain >= 2c: +$13.7 a trade before (18), +$10.0 after (24).
 /// Small samples (one day); re-run the research as data grows.
 pub const PM_GATE: Gate = Gate { min_edge: 0.0, max_followed: 0.10, min_books: 2, max_spread: 0.02, max_age_ms: 86_400_000, min_entry: 0.40, need_real: true, give_up_s: 120 };
-pub const K_GATE: Gate = Gate { min_edge: 0.02, max_followed: 0.25, min_books: 1, max_spread: 0.04, max_age_ms: 86_400_000, min_entry: 0.0, need_real: true, give_up_s: 300 };
+pub const K_GATE: Gate = Gate { min_edge: 0.02, max_followed: 0.25, min_books: 2, max_spread: 0.04, max_age_ms: 86_400_000, min_entry: 0.0, need_real: true, give_up_s: 300 };
 
 impl SimQ {
     fn gate(&self, base: &str) -> Gate {
@@ -421,6 +423,25 @@ impl Quotes for KalshiQuotes<'_> {
     }
 }
 
+/// Brands that share one odds feed count as ONE confirmation (same trading desk, same prices).
+fn platform(book: &str) -> &str {
+    match book {
+        "linebet" | "melbet" | "betwinner" | "megapari" | "paripesa" | "22bet" | "22bit" | "1xbit" => "1xbet",
+        "unibet" | "leovegas" | "paf" => "kambi",
+        "fonbet" | "pari" => "fonbet",
+        "vinn" | "betking" => "altenar",
+        b => b,
+    }
+}
+
+/// Independent bookmakers (distinct platforms) that had made the move by time `t`.
+fn confirmations(e: &RankEvent, t: Ms) -> usize {
+    let mut p: Vec<&str> = e.order.iter().filter(|x| x.0 != PM && x.0 != KALSHI && x.1 <= t).map(|x| platform(&x.0)).collect();
+    p.sort();
+    p.dedup();
+    p.len()
+}
+
 /// A bookmaker's implied probability for (match, outcome) at `t` (last change at or before).
 fn book_prob(c: &Connection, book: &str, match_id: i64, outcome: &str, t: Ms) -> Option<f64> {
     let mut st = c
@@ -451,6 +472,7 @@ pub async fn simulate_cached(app: &Arc<App>, q: &LagQ, s: &SimQ) -> Result<Arc<V
     n.pm_fee_bps.get_or_insert(0);
     n.k_spread_c.get_or_insert(4);
     n.catch_pct.get_or_insert(75);
+    n.confirm_ms.get_or_insert(500);
     if n.trigger.as_deref().map_or(true, str::is_empty) {
         n.trigger = Some("first".into());
     }
@@ -487,6 +509,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
     let pm_fee = s.pm_fee_bps.unwrap_or(0).min(1000) as f64 / 10_000.0;
     let k_half = s.k_spread_c.unwrap_or(4).min(50) as f64 / 200.0;
     let catch = s.catch_pct.unwrap_or(75).clamp(5, 200) as f64 / 100.0;
+    let confirm_ms = s.confirm_ms.unwrap_or(500).clamp(0, 10_000);
     // A fill more than this worse than the decided price is not taken (limit order cap).
     let cap = 0.02;
     let trigger = s.trigger.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| "first".into());
@@ -540,8 +563,8 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                 skip("already_moved");
                 continue;
             }
-            // Bookmakers that had made the move by now (crossed halfway before the decision).
-            let books = e.order.iter().filter(|x| x.0 != PM && x.0 != KALSHI && x.1 <= td).count();
+            // Independent bookmakers (distinct platforms) that had made the move by now.
+            let books = confirmations(e, td);
             if books < g.min_books {
                 skip("too_few_books");
                 continue;
@@ -577,8 +600,36 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                 skip("gap_too_small");
                 continue;
             }
-            // The order lands fill_ms later at that moment's price (+ slippage), capped.
-            let tf = td + fill_ms;
+            // Test 2: `confirm_ms` later every condition is checked again on fresh prices — the
+            // bookmakers still hold the move, still from 2+ independent platforms, the market is
+            // still delayed, and the trade still pays. Only when both tests pass does it buy.
+            let td2 = td + confirm_ms;
+            let (Some(b2), Some(q2)) = (book_prob(&c, tb, e.match_id, &e.outcome, td2), quotes.at(e.match_id, &e.outcome, td2)) else {
+                skip("second_test_failed");
+                continue;
+            };
+            let bm2 = (b2 - b_pre) * dir;
+            let spread2 = q2.1 - q2.0;
+            let followed2 = if bm2 > 0.0 { ((q2.0 + q2.1) / 2.0 - pre_mid) * dir / bm2 } else { 1.0 };
+            let target2 = pre_mid + dir * bm2 * catch;
+            let (dec2, exp2) = if dir > 0.0 { (q2.1 + slip, target2 - spread2 / 2.0 - slip) } else { (1.0 - q2.0 + slip, 1.0 - (target2 + spread2 / 2.0) - slip) };
+            let n2 = stake / dec2.max(0.01);
+            let edge2 = (n2 * (exp2 - dec2) - fee(n2, dec2) - fee(n2, exp2.clamp(0.0, 1.0))) / n2;
+            let pass2 = bm2 >= 0.01
+                && followed2 <= g.max_followed
+                && confirmations(e, td2) >= g.min_books
+                && spread2 <= g.max_spread + 1e-9
+                && !(g.need_real && q2.3 == "assumed")
+                && (0.02..=0.98).contains(&dec2)
+                && dec2 >= g.min_entry
+                && edge2 >= g.min_edge;
+            if !pass2 {
+                skip("second_test_failed");
+                continue;
+            }
+            let dec_entry = dec2;
+            // The order lands fill_ms after the second test at that moment's price (+ slippage), capped.
+            let tf = td2 + fill_ms;
             let Some(qf) = quotes.at(e.match_id, &e.outcome, tf) else {
                 skip("no_data");
                 continue;
@@ -660,7 +711,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
         "trigger": trigger,
         "settings": {
             "reaction_ms": reaction, "fill_ms": fill_ms, "slip": slip, "stake": stake, "pm_fee_bps": pm_fee * 10_000.0,
-            "k_spread": k_half * 2.0, "catch": catch, "cap": cap,
+            "k_spread": k_half * 2.0, "catch": catch, "cap": cap, "confirm_ms": confirm_ms,
         },
         "snipe": r.snipe,
         "sources": r.sources,
