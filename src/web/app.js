@@ -156,7 +156,7 @@ SE.BOOK_COLORS = {
 SE.BOOK_NAMES = { polymarket: 'Polymarket', sportybet: 'SportyBet', betika: 'Betika', betpawa: 'betPawa', linebet: 'Linebet', fonbet: 'Fonbet', unibet: 'Unibet', vinn: 'VINN', kalshi: 'Kalshi', thunderpick: 'Thunderpick', novibet: 'Novibet' };
 SE.bookColor = (b) => SE.BOOK_COLORS[b] || '#8e8e93';
 SE.bookName = (b) => SE.BOOK_NAMES[b] || b;
-SE.logo = (b) => `<img src="/assets/img/${SE.esc(b)}.png" alt="" onerror="this.style.visibility='hidden'">`;
+SE.logo = (b) => `<img class="lg" src="/assets/img/${SE.esc(b)}.png" alt="" onerror="this.style.visibility='hidden'">`;
 SE.book = (b, cls = '') => `<span class="src ${cls}" data-tipsrc="${SE.esc(b)}">${SE.logo(b)}${SE.esc(SE.bookName(b))}</span>`;
 SE.logos = (books) => `<span class="logos">${books.map((b) => `<span data-tipsrc="${SE.esc(b)}">${SE.logo(b)}</span>`).join('')}</span>`;
 

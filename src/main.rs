@@ -30,6 +30,8 @@ pub struct Config {
     pub include_esoccer: bool,
     /// Follow real e-sports (CS2, LoL, Dota 2, Valorant, ...) alongside football.
     pub esports: bool,
+    /// Traditional sports to follow (keys from `books::SPORTS`). E-sports are switched by `esports`.
+    pub sports: Vec<String>,
     /// Only record and show matches that Polymarket or Kalshi and at least one bookmaker list.
     pub prediction_only: bool,
     /// How far ahead to follow games before kick-off (0 = live only).
@@ -55,10 +57,22 @@ impl Default for Config {
             db: "oddsfeed.db".into(),
             include_esoccer: false,
             esports: true,
+            sports: ["football", "basketball", "tennis", "hockey", "baseball", "volleyball", "amfootball", "mma"].map(String::from).to_vec(),
             prediction_only: true,
             prematch_hours: 8.0,
             prematch_refresh_ms: 15_000,
             books: HashMap::new(),
+        }
+    }
+}
+
+impl Config {
+    /// Is this sport key followed?
+    pub fn follows(&self, sport: &str) -> bool {
+        if books::is_esports_sport(sport) {
+            self.esports
+        } else {
+            self.sports.iter().any(|s| s == sport)
         }
     }
 }
@@ -99,6 +113,11 @@ async fn main() -> anyhow::Result<()> {
             Config::default()
         }
     };
+    for s in &cfg.sports {
+        if !books::SPORTS.contains(&s.as_str()) {
+            tracing::warn!("config: unknown sport '{s}' (known: {})", books::SPORTS.join(", "));
+        }
+    }
     let db_path = PathBuf::from(&cfg.db);
 
     // Correct the PC clock before anything gets timestamped.
@@ -166,20 +185,41 @@ fn start_books(app: &Arc<App>) {
     let (ph, pr) = (cfg.prematch_hours, cfg.prematch_refresh_ms.max(3_000));
     let pre = || Pre::new(ph, pr);
 
-    start!("unibet", 1000, |p: Option<String>| kambi::Kambi {
-        name: "unibet",
-        offering: p.unwrap_or_else(|| "ubse".into()),
-        market: "SE".into(),
-        lang: "en_GB".into(),
-        pre: pre(),
-    });
+    let follows = |s: &str| cfg.follows(s);
+    // Kambi brands share Kambi's trading desk; operators can still shade margins and timing.
+    for (name, offering, market) in [("unibet", "ubse", "SE"), ("leovegas", "leose", "SE"), ("paf", "paf", "FI")] {
+        start!(name, 1000, |p: Option<String>| kambi::Kambi {
+            name,
+            offering: p.unwrap_or_else(|| offering.into()),
+            market: market.into(),
+            lang: "en_GB".into(),
+            sports: kambi::sport_slugs(follows),
+            pre: pre(),
+        });
+    }
     start!("sportybet", 1000, |p: Option<String>| sportybet::SportyBet { country: p.unwrap_or_else(|| "ng".into()), pre: pre() });
     start!("betpawa", 1500, |p: Option<String>| {
         let host = p.unwrap_or_else(|| "www.betpawa.ng".into());
         betpawa::BetPawa { brand: if host.ends_with(".ng") { "betpawa-nigeria".into() } else { "betpawa".into() }, host, pre: pre() }
     });
     start!("betika", 1000, |_p: Option<String>| betika::Betika { pre: pre() });
-    start!("linebet", 1000, |p: Option<String>| linebet::Linebet { host: p.unwrap_or_else(|| "linebet.com".into()), pre: pre() });
+    // 1xBet-platform brands: same API on each brand's own domain.
+    for (name, host, extra) in [
+        ("linebet", "linebet.com", "&country=137&partner=189"),
+        ("melbet", "melbet.com", ""),
+        ("betwinner", "betwinner.com", ""),
+        ("megapari", "megapari.com", ""),
+    ] {
+        start!(name, 1000, |p: Option<String>| linebet::Linebet {
+            name,
+            host: p.unwrap_or_else(|| host.into()),
+            extra: extra.into(),
+            sports: linebet::sport_ids(follows),
+            pre: pre(),
+        });
+    }
+    start!("m88", 1500, |_p: Option<String>| m88::M88::new(follows, pre()));
+    start!("pinnacle", 2000, |_p: Option<String>| pinnacle::Pinnacle::new(follows, pre()));
     start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new(p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into()), ph));
     start!("vinn", 1000, |p: Option<String>| altenar::Altenar {
         name: "vinn",
@@ -191,7 +231,11 @@ fn start_books(app: &Arc<App>) {
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
     // Kalshi: second prediction-market baseline, polled in batches.
-    start!("kalshi", 1000, |_p: Option<String>| kalshi::Kalshi::new(ph, cfg.esports));
+    // With an API key Kalshi pushes over its WebSocket and a poll is only a memory read, so it
+    // runs every 250 ms; without one each poll is a batched REST call. Key edits apply on restart.
+    let kcreds = kalacct::load(&app.db_path);
+    let kpoll = if kalacct::has_key(&kcreds) { 250 } else { 1000 };
+    start!("kalshi", kpoll, |_p: Option<String>| kalshi::Kalshi::new(ph, follows, kcreds.clone()));
 
     // Polymarket is push (WebSocket), not polled. param = minutes before kick-off to start watching.
     let pc = get("polymarket");

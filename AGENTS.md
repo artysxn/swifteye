@@ -142,6 +142,38 @@ To add a book: create `src/books/x.rs` implementing `Book` (return the full live
 list as `EventIn`s with normalized `QuoteIn`s), add `pub mod x;` to
 `books/mod.rs`, and add a `start!(...)` line in `main.rs`.
 
+## 8b. Multi-sport + more books (2026-11-17, Mac session)
+
+- Sports: `cfg.sports` (keys in `books::SPORTS`) + `cfg.esports`. `books::run` drops events of
+  sports not followed (`Config::follows`). `books::three_way(sport)`: football/handball store
+  home/draw/away; every other sport stores a TWO-WAY WINNER (overtime/series included) under
+  `Market::X12` with only home/away. `books::winner_quotes` drops a draw-bearing X12 for a two-way
+  sport (that is regular-time 1X2, a different market). `sport_key()` maps source sport names.
+- Pinnacle (`books/pinnacle.rs`): guest Arcadia API (`x-api-key` from pinnacle.com), per sport
+  `matchups[/live]` + `markets[/live]/straight`; American odds; only `type=matchup, units=Regular`;
+  event id = `parentId` when live. Idle sports re-checked every 30 s.
+- 1xBet platform (`books/linebet.rs`) is now multi-brand: linebet, melbet, betwinner, megapari
+  (same feed, near-identical prices). Sport ids in `linebet::SPORT_IDS`; 401/402 = winner incl. OT.
+  1xbet.com, paripesa, 22bet are Cloudflare-blocked from here.
+- Kambi brands: unibet (ubse), leovegas (leose), paf (paf). Live list is `listView/all/...`;
+  pre-match per sport slug. Kambi's list view has only 3-way regular-time hockey, so Kambi hockey
+  links but has no winner price.
+- Polymarket discovery adds Gamma tags basketball 28, tennis 864, hockey 100088, baseball 678,
+  volleyball 102883 (`parse_two_way`). Kalshi is still football + e-sports only.
+- M88 (`books/m88.rs`, Asian book): guest JSON at msports.m88.com (`Bearer GUEST`), odds_type 3 =
+  decimal, sports 10 football / 11 tennis / 12 basketball / 52 e-sports, game_type 1 = 1X2, 12 = winner,
+  `match_date` UTC+8.
+- Kalshi: key in `<db dir>/kalshi.json` (Settings or `POST /kalshi/settings`); RSA **or Ed25519**
+  (Kalshi accepts Ed25519 signatures). With a key: authenticated WS `ticker` channel push, poll 250 ms
+  (memory read) + REST re-seed every 30 s. Key edits apply on restart. Discovery now covers basketball,
+  hockey, baseball, NFL/NCAAF, tennis, UFC, volleyball series; idle series re-checked every 30 min.
+  Kick-off = `close_time - 48 h` (occurrence_datetime is the expected END), else end - typical length.
+- Cloudflare challenge / blocked (not bypassed, by design): Favbet, GG.BET, 20Bet, Betfair,
+  sportsbet.io, bet365, Altenar widget from curl (VINN itself works from the service). Rivalry's
+  `/api/v1/matches` returns an empty list. Betway's captured API needs event ids from a session.
+- Probed and NOT usable from here: bwin, Betano, Betsson, Stake, bet9ja, vbet (403/bot walls),
+  Cloudbet (needs API key), Superbet (endpoint guess 404). Rivalry `/api/v1/matches` answers (e-sports book, not wired).
+
 ## 9. Hard rules
 
 - Never change the system clock; correct timestamps in software (clock.rs).
