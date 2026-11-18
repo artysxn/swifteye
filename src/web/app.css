@@ -497,3 +497,84 @@ tr.on td { background: var(--bg-2); }
 .sp-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-side { flex: none; font-size: 12px; }
 .tbl.raw td { padding-top: 6px; padding-bottom: 6px; font-size: 12px; }
+
+/* Arbitrage Scout: sources you can bet on */
+.src-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -10px 0 22px; }
+.src-filter .muted { margin-right: 6px; }
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--text-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip-btn:hover { color: var(--text); border-color: var(--text-3); }
+.chip-btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--text); }
+
+/* ---- page header v2: title + actions, then a quiet filter toolbar */
+.page-head { align-items: center; margin-bottom: 18px; gap: 16px; flex-wrap: nowrap; }
+.page-head h1 { font: 650 26px/1.15 var(--font-display); letter-spacing: -0.025em; }
+.ph-main { min-width: 0; }
+.ph-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.ph-actions:empty { display: none; }
+.ph-actions > span { color: var(--text-3); font-size: 12.5px; }
+.page-sub { color: var(--text-2); margin: -10px 0 26px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 30px; }
+.toolbar + .sec, .toolbar + .stats, .toolbar + .grid, .toolbar + .page-sub { margin-top: 0; }
+.toolbar .input, .toolbar .sel-btn { border-color: transparent; background: var(--bg-2); }
+.toolbar .input:hover, .toolbar .sel-btn:hover, .toolbar .sel.open .sel-btn { border-color: transparent; background: var(--bg-3); }
+.toolbar .input:focus { background: var(--bg-2); border-color: var(--accent-line); }
+.toolbar .search .input { border-radius: 999px; width: 240px; }
+.toolbar .sel-btn { border-radius: 999px; }
+.toolbar .seg { border-radius: 999px; }
+.toolbar .seg button { border-radius: 999px; }
+.toolbar .btn { border-color: transparent; background: var(--bg-2); border-radius: 999px; }
+.toolbar .btn:hover, .toolbar .btn.on { background: var(--bg-3); }
+.toolbar > label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.toolbar > label .input { height: 32px; }
+@media (max-width: 760px) { .page-head { flex-wrap: wrap; } .toolbar .search .input { width: 100%; } }
+
+/* settings panel (Snipe window) */
+.panel { margin: -10px 0 28px; padding: 18px 20px 8px; border-radius: 14px; background: var(--bg-2); }
+.panel[hidden] { display: none; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.set-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.set-row > span { color: var(--text-2); }
+.set-row .seg { background: var(--bg-3); flex-wrap: wrap; }
+@media (max-width: 1100px) { .set-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* folds: quiet expandable explanations */
+.fold { margin: 0 0 26px; }
+.sec + .fold, .stats + .fold, .grid + .fold { margin-top: 26px; }
+.fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; color: var(--text-2); font-weight: 550; user-select: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary .ic { font-size: 18px; color: var(--text-3); }
+.fold > summary::after { content: 'expand_more'; font-family: 'Material Symbols Rounded'; font-size: 18px; color: var(--text-3); transition: transform .18s var(--ease); }
+.fold[open] > summary::after { transform: rotate(180deg); }
+.fold > summary:hover { color: var(--text); }
+.fold-body { margin-top: 16px; padding: 18px 20px; border-radius: 14px; background: var(--bg-2); }
+.fold-body .sec:first-child, .fold-body .grid:first-child { margin-top: 0; }
+
+/* simple horizontal bars */
+.bar-row { display: grid; grid-template-columns: 170px minmax(0, 1fr) 150px; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.bar-row:last-child { border-bottom: 0; }
+.bar-label { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { height: 8px; border-radius: 4px; background: var(--bg-3); overflow: hidden; }
+.bar-track b { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bar-val { text-align: right; font-variant-numeric: tabular-nums; }
+.set-row.wide { grid-column: 1 / -1; }
+.page-head { margin-bottom: 24px; }
+.page-head + .toolbar { margin-top: -8px; }
+.tierbar .input { border-color: transparent; background: var(--bg-2); border-radius: 999px; }
+.tierbar .input:hover { background: var(--bg-3); }
+.tierbar .seg { border-radius: 999px; }
+.tierbar .seg button { border-radius: 999px; }
+
+/* Snipe paper bot rules */
+.rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.rule { background: var(--bg-2); border-radius: 10px; padding: 10px 12px; }
+.rule span { display: block; color: var(--text-3); font-size: 12px; margin-bottom: 3px; }
+.rule.changed { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.rule.changed b { color: var(--accent); }
+.bot-base + .bot-base { margin-top: 48px; }
+
+/* Paper bot balance settings */
+.bank-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 0 0 16px; }
+.bank-bar label { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
+.bank-in { display: inline-flex; align-items: center; gap: 6px; }
+.bank-in .input { width: 96px; }

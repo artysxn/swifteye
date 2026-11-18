@@ -409,6 +409,7 @@ SE.pages.settings = {
         ${P.sec('palette', 'Display', `
           <div class="field"><label>Theme</label><div id="sTheme"></div></div>
           <div class="field"><label>Odds</label><div id="sOdds"></div></div>
+          <div class="field"><label data-tip="How every price chart draws odds: the chance to win in percent, or decimal odds (1.50, 3.00). The switch on a chart changes this too.">Charts</label><div id="sChart"></div></div>
           <div class="field"><label>Times</label><div id="sTz"></div></div>`)}
         ${P.sec('timer', 'Delay analysis', `
           <div class="field"><label data-tip="${esc(G.jump)}">Smallest jump</label><div id="sJump"></div></div>
@@ -417,6 +418,7 @@ SE.pages.settings = {
       <div>${P.sec('dns', 'Service', '<div id="sInfo"></div>')}</div></div>`;
     SE.seg($('#sTheme'), [['dark', 'Dark'], ['light', 'Light']], SE.pref('theme'), (v) => SE.setPref('theme', v));
     SE.seg($('#sOdds'), [['decimal', 'Decimal'], ['prob', 'Probability'], ['american', 'American']], SE.pref('odds'), (v) => SE.setPref('odds', v));
+    SE.seg($('#sChart'), [['prob', 'Win %'], ['odds', 'Decimal (1.50)']], SE.pref('chartOdds'), (v) => SE.setPref('chartOdds', v));
     SE.seg($('#sTz'), [['local', 'Local'], ['utc', 'UTC']], SE.pref('tz'), (v) => SE.setPref('tz', v));
     SE.seg($('#sJump'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], SE.pref('minJump'), (v) => { SE.setPref('minJump', +v); SE.loadCtx(); });
     SE.seg($('#sWin'), [[30, '30 s'], [60, '60 s'], [90, '90 s'], [180, '3 min']], SE.pref('windowS'), (v) => { SE.setPref('windowS', +v); SE.loadCtx(); });

@@ -711,42 +711,29 @@ async fn scan_loop(app: Arc<App>) {
             sent_arbs.retain(|_, (t, _)| now - *t < 6 * 3_600_000);
         }
         if c.paper.enabled && tick % 2 == 0 {
-            let mut q = crate::api::LagQ::default();
-            q.since = Some(now_ms() - 24 * 3_600_000);
-            if let Ok(v) = crate::snipe::simulate_cached(&app, &q, &crate::snipe::SimQ::default()).await {
-                let mut lines = Vec::new();
-                let mut newest = paper_seen;
-                for b in v["baselines"].as_array().into_iter().flatten() {
-                    let base = b["baseline"].as_str().unwrap_or("");
-                    let hold = b["gate"]["give_up_s"].as_i64().unwrap_or(300);
-                    let Some(h) = b["holds"].as_array().and_then(|hs| hs.iter().find(|h| h["hold_s"].as_i64() == Some(hold))) else { continue };
-                    for t in h["recent"].as_array().into_iter().flatten() {
-                        let exit = t["exit_ts"].as_i64().unwrap_or(0);
-                        if exit <= paper_seen {
-                            continue;
-                        }
-                        newest = newest.max(exit);
-                        let pnl = t["pnl"].as_f64().unwrap_or(0.0);
-                        lines.push(format!(
-                            "{} {} · {} v {} · {} {} bought {:.2}, sold {:.2} ({}) · <b>{}${:.2}</b>",
-                            if pnl >= 0.0 { "✅" } else { "❌" },
-                            esc(base),
-                            esc(t["home"].as_str().unwrap_or("")),
-                            esc(t["away"].as_str().unwrap_or("")),
-                            if t["dir"].as_i64() == Some(1) { "Yes" } else { "No" },
-                            outcome_name(t["outcome"].as_str().unwrap_or("")),
-                            t["entry"].as_f64().unwrap_or(0.0),
-                            t["exit"].as_f64().unwrap_or(0.0),
-                            t["reason"].as_str().unwrap_or(""),
-                            if pnl >= 0.0 { "+" } else { "-" },
-                            pnl.abs()
-                        ));
-                    }
-                }
-                paper_seen = newest;
-                if !lines.is_empty() {
-                    let _ = send("paper", &format!("<b>Paper bot</b> ($100 a trade)\n{}", lines.join("\n"))).await;
-                }
+            // Closed trades of the adaptive paper bot (rules re-chosen every 4 hours).
+            let trades = tokio::task::spawn_blocking(move || crate::adaptive::closed_since(paper_seen)).await.unwrap_or_default();
+            let mut lines = Vec::new();
+            for t in &trades {
+                paper_seen = paper_seen.max(t["exit_ts"].as_i64().unwrap_or(0));
+                let pnl = t["pnl"].as_f64().unwrap_or(0.0);
+                lines.push(format!(
+                    "{} {} · {} v {} · {} {} bought {:.2}, sold {:.2} ({}) · <b>{}${:.2}</b>",
+                    if pnl >= 0.0 { "✅" } else { "❌" },
+                    esc(t["base"].as_str().unwrap_or("")),
+                    esc(t["home"].as_str().unwrap_or("")),
+                    esc(t["away"].as_str().unwrap_or("")),
+                    if t["dir"].as_i64() == Some(1) { "Yes" } else { "No" },
+                    outcome_name(t["outcome"].as_str().unwrap_or("")),
+                    t["entry"].as_f64().unwrap_or(0.0),
+                    t["exit"].as_f64().unwrap_or(0.0),
+                    t["reason"].as_str().unwrap_or(""),
+                    if pnl >= 0.0 { "+" } else { "-" },
+                    pnl.abs()
+                ));
+            }
+            if !lines.is_empty() {
+                let _ = send("paper", &format!("<b>Paper bot</b> (adaptive rules, share of the balance a trade)\n{}", lines.join("\n"))).await;
             }
         }
     }

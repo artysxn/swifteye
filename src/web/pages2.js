@@ -64,7 +64,7 @@ SE.pages.match = {
         <button data-t="timeline">${ic('history')}Changes</button>
       </div><div id="mBody"></div>`;
     let tab = 'prices', detail = null, chart = null, changes = [], snChart = null;
-    const cs = { outcome: 'home', scale: 'prob' };
+    const cs = { outcome: 'home', scale: SE.pref('chartOdds') };
     $$('#mTabs button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; $$('#mTabs button').forEach((x) => x.classList.toggle('on', x === b)); draw(true); }));
 
     async function loadDetail() {
@@ -162,7 +162,7 @@ SE.pages.match = {
       SE.destroyChart(chart);
       chart = null;
       SE.seg($('#cO'), [['home', '1'], ['draw', 'X'], ['away', '2']], cs.outcome, (v) => { cs.outcome = v; SE.destroyChart(chart); chart = null; renderChart(); });
-      SE.seg($('#cS'), [['prob', 'Probability'], ['odds', 'Odds']], cs.scale, (v) => { cs.scale = v; SE.destroyChart(chart); chart = null; renderChart(); });
+      SE.seg($('#cS'), [['prob', 'Win %'], ['odds', 'Decimal']], cs.scale, (v) => { cs.scale = v; SE.setPref('chartOdds', v); SE.destroyChart(chart); chart = null; renderChart(); });
       renderChart();
     }
     function renderChart() {
@@ -403,8 +403,8 @@ SE.pages.charts = {
         ${P.sec('expand', 'Disagreement between sources', '<div class="chart sm" id="gSpread"></div>', '', 'Highest minus lowest implied probability across sources at each moment. Spikes show one source moving before the others.')}
         ${P.sec('format_list_numbered', 'Moves by source', '<div id="gMoves"></div>')}
       </div>`;
-    let scale = 'prob', charts = [], hist = [], matchId = null, sel = null;
-    SE.seg($('#gScale'), [['prob', 'Probability'], ['odds', 'Odds']], scale, (v) => { scale = v; render(); });
+    let scale = SE.pref('chartOdds'), charts = [], hist = [], matchId = null, sel = null;
+    SE.seg($('#gScale'), [['prob', 'Win %'], ['odds', 'Decimal']], scale, (v) => { scale = v; SE.setPref('chartOdds', v); render(); });
     const mSel = SE.select($('#gMatch'), { options: [], placeholder: 'Choose a match', width: '340px', search: true, onChange: () => loadMatch() });
     const sSel = SE.select($('#gSel'), { options: [], placeholder: 'Selection', width: '220px', onChange: () => loadSel() });
 

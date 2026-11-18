@@ -114,6 +114,13 @@ CREATE TABLE IF NOT EXISTS cs2_activity(
   updated_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS cs2_activity_start ON cs2_activity(start_ms);
+-- Snipe paper bot: every 4-hourly re-choice of its rules, per market (adaptive.rs).
+CREATE TABLE IF NOT EXISTS adaptive_runs(
+  ts_ms INTEGER NOT NULL,
+  base TEXT NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY(ts_ms, base)
+);
 -- Other machines' databases merged into this one (data.rs).
 CREATE TABLE IF NOT EXISTS merges(
   id INTEGER PRIMARY KEY,

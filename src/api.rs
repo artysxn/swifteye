@@ -52,6 +52,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/pred/meta", get(pred_meta))
         .route("/rankings", get(rankings))
         .route("/snipe", get(snipe))
+        .route("/adaptive", get(adaptive))
+        .route("/adaptive/settings", post(adaptive_settings))
         .route("/api", get(index))
         .route("/ui", get(ui))
         .route("/quotes", get(quotes))
@@ -914,8 +916,8 @@ async fn suspicious(State(app): S, Query(q): Query<SuspQ>) -> Response {
     }
 }
 
-async fn suspicious_event(Path(id): Path<String>) -> Response {
-    match crate::suspect::event_detail(&id).await {
+async fn suspicious_event(State(app): S, Path(id): Path<String>) -> Response {
+    match crate::suspect::event_detail(&app, &id).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err(StatusCode::BAD_GATEWAY, format!("{e:#}")),
     }
@@ -1098,6 +1100,22 @@ async fn rankings(State(app): S, Query(q): Query<LagQ>) -> Response {
             Json(json!({"since": q.params().since, "event_count": n, "age_ms": age_ms, "rankings": v})).into_response()
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// The adaptive paper bot: current rules, the 4-hourly re-choices and the walk-forward record.
+async fn adaptive(State(app): S) -> Response {
+    match tokio::task::spawn_blocking(move || crate::adaptive::view(&app)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Paper bot balance settings: {start, pct}. A change recomputes the bot's history.
+async fn adaptive_settings(State(app): S, Json(edit): Json<Value>) -> Response {
+    match crate::adaptive::save_settings(&app, &edit) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
     }
 }
 

@@ -8,7 +8,7 @@ SE.$ = $;
 SE.$$ = $$;
 
 // ---------------------------------------------------------------- preferences
-const PREF_DEFAULTS = { theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90, baseline: 'polymarket', sport: 'all' };
+const PREF_DEFAULTS = { chartOdds: 'prob', theme: 'dark', odds: 'decimal', tz: 'local', minJump: 0.04, windowS: 90, baseline: 'polymarket', sport: 'all' };
 SE.pref = (k) => {
   try {
     const v = localStorage.getItem('se.' + k);
@@ -477,6 +477,34 @@ SE.chart = (el, xs, series, opts = {}) => {
         })),
       ],
       hooks: {
+        // Vertical markers (e.g. map starts): a dashed line and a small label at the top.
+        draw: opts.marks?.length ? [(u) => {
+          const c = u.ctx, { top, height, left, width } = u.bbox, dpr = devicePixelRatio || 1;
+          c.save();
+          c.font = `${11 * dpr}px ${cssVar('--font')}`;
+          c.textBaseline = 'top';
+          c.textAlign = 'left'; // uPlot leaves it right-aligned from drawing the axes
+          let lastRight = -Infinity, row = 0;
+          for (const m of [...opts.marks].sort((a, b) => a.x - b.x)) {
+            const x = Math.round(u.valToPos(m.x, 'x', true));
+            if (x < left || x > left + width) continue;
+            c.strokeStyle = m.color || cssVar('--text-3');
+            c.lineWidth = dpr;
+            c.setLineDash([4 * dpr, 4 * dpr]);
+            c.beginPath(); c.moveTo(x + 0.5, top); c.lineTo(x + 0.5, top + height); c.stroke();
+            c.setLineDash([]);
+            const w = c.measureText(m.label).width + 10 * dpr;
+            row = x < lastRight ? row + 1 : 0;   // stack labels that would overlap
+            const y = top + 4 * dpr + row * 18 * dpr;
+            const bx = Math.min(x + 4 * dpr, left + width - w);
+            c.fillStyle = cssVar('--bg-2');
+            c.fillRect(bx, y, w, 16 * dpr);
+            c.fillStyle = m.color || cssVar('--text-2');
+            c.fillText(m.label, bx + 5 * dpr, y + 2 * dpr);
+            lastRight = Math.max(lastRight, bx + w);
+          }
+          c.restore();
+        }] : [],
         setCursor: [(u) => {
           const i = u.cursor.idx;
           if (i == null || u.cursor.left < 0) { SE.tipHide(); return; }
@@ -654,10 +682,21 @@ function route() {
   $('#main').scrollTop = 0;
   el.innerHTML = '';
   document.title = page.title + ' | Swifteye';
-  try { cleanup = page.render(el, rest.map(decodeURIComponent)); }
+  try { cleanup = page.render(el, rest.map(decodeURIComponent)); SE.tidyHead(el); }
   catch (e) { console.error(e); el.innerHTML = `<div class="empty err">${SE.ic('error')}${SE.esc(e.message)}</div>`; }
 }
 SE.go = (h) => (location.hash = h);
+/** Move a header's actions (buttons, links, status text) from the toolbar up beside the title;
+ *  filters (search, selects, segmented controls, labelled inputs) stay in the toolbar. */
+SE.tidyHead = (root) => {
+  const tb = $('.toolbar', root), acts = $('.ph-actions', root);
+  if (!tb || !acts) return;
+  for (const c of [...tb.children]) {
+    const isAction = c.matches('button.btn, a.btn, .chip') || (c.matches('span') && !c.matches('.search') && !c.querySelector('input, select, button'));
+    if (isAction) acts.appendChild(c);
+  }
+  if (!tb.children.length) tb.remove();
+};
 
 async function tickNav() { try { $('#navLive').textContent = (await SE.api('/matches')).count || ''; } catch {} }
 async function tickMe() {

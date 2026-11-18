@@ -7,8 +7,12 @@ const PM = 'polymarket';
 // ---------------------------------------------------------------- shared building blocks (SE.P)
 const P = (SE.P = {});
 P.PM = PM;
+// Page header: the title with the page's actions on the right, then one quiet toolbar row with
+// the filters. Pages pass everything as `tools`; SE.tidyHead (run after each render) moves
+// buttons and status text up next to the title and leaves filters in the toolbar.
 P.head = (title, tools = '', back = '') =>
-  `<div class="page-head"><div>${back ? `<a class="back" href="${back[1]}">${ic('chevron_left')}${esc(back[0])}</a>` : ''}<h1>${title}</h1></div><div class="tools">${tools}</div></div>`;
+  `<header class="page-head"><div class="ph-main">${back ? `<a class="back" href="${back[1]}">${ic('chevron_left')}${esc(back[0])}</a>` : ''}<h1>${title}</h1></div><div class="ph-actions"></div></header>` +
+  (tools ? `<div class="toolbar">${tools}</div>` : '');
 P.sec = (icon, title, body, tools = '', tip = '') =>
   `<section class="sec"><div class="sec-head"><h2 ${tip ? `data-tip="${esc(tip)}"` : ''}>${ic(icon)}${title}</h2><div class="tools">${tools}</div></div>${body}</section>`;
 P.stat = (id, icon, label, tip = '', hero = false) =>
@@ -388,40 +392,55 @@ SE.pages.rankings = {
 SE.pages.snipe = {
   title: 'Snipe window',
   render(el) {
-    el.innerHTML = P.head('Snipe window', '<div id="pS"></div><div id="pG"></div><div id="pR"></div><div id="pJ"></div>') +
-      `<div class="note" style="margin:-8px 0 22px">Paper money only: nothing is traded. When a bookmaker moves, the model checks the prediction market at that moment and buys ONLY if it is still delayed (it has made little of the bookmaker\'s move) and the gain if it catches up beats spread and fees. It sells at the bid as soon as the price catches up, or gives up after the set time.</div>` +
-      P.sec('tune', 'Setup', `<div class="sn-setup">
-          <div><div class="note">Trigger</div><div id="pT"></div></div>
-          <div><div class="note">Reaction</div><div id="pRe"></div></div>
-          <div><div class="note">Order reaches the market after</div><div id="pFi"></div></div>
-          <div><div class="note">Slippage on every buy and sale</div><div id="pSl"></div></div>
-          <div><div class="note">Sell when the market has made</div><div id="pCa"></div></div>
-          <div><div class="note">Give up after</div><div id="pH"></div></div>
-          <div><div class="note">Stake per trade</div><div id="pSt"></div></div>
-          <div><div class="note">Polymarket fee</div><div id="pF"></div></div>
-        </div><div id="pFacts" class="sn-facts"></div>`) +
+    el.innerHTML = P.head('Snipe window', `<div id="pTab"></div><div id="pS"></div><div id="pG"></div><div id="pR"></div><div id="pJ"></div><button class="btn" id="pSet">${ic('tune')}Settings</button>`) +
+      `<div id="pBot"></div><div id="pSim"><div class="panel" id="pPanel" hidden><div class="panel-head"><b>Simulation settings</b><button class="btn ghost" id="pSetX">${ic('close')}</button></div><div class="set-grid">
+          <div class="set-row"><span>Trigger</span><div id="pT"></div></div>
+          <div class="set-row"><span>Reaction</span><div id="pRe"></div></div>
+          <div class="set-row"><span>Order reaches the market</span><div id="pFi"></div></div>
+          <div class="set-row"><span>Slippage on every buy and sale</span><div id="pSl"></div></div>
+          <div class="set-row"><span>Sell when the market has made</span><div id="pCa"></div></div>
+          <div class="set-row wide"><span>Give up after</span><div id="pH"></div></div>
+          <div class="set-row"><span>Stake per trade</span><div id="pSt"></div></div>
+          <div class="set-row"><span>Polymarket fee</span><div id="pF"></div></div>
+        </div></div>` +
+      `<details class="fold" id="pHow"><summary>${ic('help')}How does it work?</summary><div class="fold-body"><p class="note" style="margin:0 0 6px">Paper money only: nothing is traded. When a bookmaker moves, the model checks the prediction market at that moment and buys only if it is still delayed (it has made little of the bookmaker\'s move) and the gain if it catches up beats spread and fees. It sells at the bid as soon as the price catches up, or gives up after the set time.</p><div id="pFacts" class="sn-facts"></div></div></details>` +
       `<div id="pTiles"></div>` +
-      `<div class="grid g-2" style="margin-top:40px">
+      P.sec('show_chart', 'Paper P&amp;L over time', '<div class="chart" id="pEq" style="height:320px"></div><div class="legend" id="pEqL"></div>', '', 'Running total of every paper trade at the chosen hold time.') +
+      `<details class="fold" id="pWhy"><summary>${ic('filter_alt')}Why it bought or skipped, and how often the market was behind</summary><div class="fold-body">
+        <div class="grid g-2">
         ${P.sec('filter_alt', 'Polymarket: when it bought', '<div id="pFunPm"></div>', '', 'Every bookmaker move, and why the model did or did not buy.')}
         ${P.sec('filter_alt', 'Kalshi: when it bought', '<div id="pFunK"></div>', '', 'Every bookmaker move, and why the model did or did not buy.')}
-      </div>` +
-      `<div class="grid g-2" style="margin-top:40px">
+        </div>
+        <div class="grid g-2" style="margin-top:40px">
         ${P.sec('percent', 'Polymarket still behind', '<div id="pLadPm"></div>', '', G.buy)}
         ${P.sec('percent', 'Kalshi still behind', '<div id="pLadK"></div>', '', G.buy.replace(/Polymarket/g, 'Kalshi'))}
-      </div>` +
-      P.sec('show_chart', 'Paper P&amp;L over time', '<div class="chart" id="pEq" style="height:320px"></div><div class="legend" id="pEqL"></div>', '', 'Running total of every paper trade at the chosen hold time.') +
+        </div></div></details>` +
       P.sec('timer', 'Give-up time compared', '<div id="pHolds"></div>', '', 'The same buys, giving up (selling at the bid) after each time if the price has not caught up.') +
       `<div class="grid g-2" style="margin-top:40px">
         ${P.sec('savings', 'Where the money comes from', '<div id="pLead"></div>', '<div id="pLeadB"></div>', 'Trades grouped by how far the prediction market really was behind, known only afterwards. "Already moved" and "did not follow" are the trades that cannot win.')}
         ${P.sec('category', 'By exit, sport and trigger', '<div id="pReason"></div><div id="pSport" style="margin-top:22px"></div><div id="pTrig" style="margin-top:22px"></div>', '<div id="pGrpB"></div>')}
       </div>` +
-      P.sec('receipt_long', 'Recent paper trades', '<div id="pTr"></div>', '<div id="pTrB"></div>');
+      P.sec('receipt_long', 'Recent simulated trades', '<div id="pTr"></div>', '<div id="pTrB"></div>') + '</div>';
 
+    const panel = () => $('#pPanel');
+    // Paper bot (adaptive rules) or the manual simulator.
+    const tab = (v) => {
+      SE.setPref('snipeTab', v);
+      const bot = v === 'bot';
+      $('#pBot').hidden = !bot;
+      $('#pSim').hidden = bot;
+      for (const id of ['#pS', '#pG', '#pR', '#pJ', '#pSet']) { const x = $(id); if (x) x.style.display = bot ? 'none' : ''; }
+      if (bot && !$('#pBot').dataset.on) { $('#pBot').dataset.on = '1'; SE.snipeBot($('#pBot')); }
+    };
+    SE.seg($('#pTab'), [['bot', 'Paper bot', 'Rules re-chosen from the data every 4 hours, traded on paper.'], ['sim', 'Simulator', 'Try any settings by hand.']], SE.pref('snipeTab') || 'bot', tab);
+    tab(SE.pref('snipeTab') || 'bot');
+    $('#pSet').addEventListener('click', () => { panel().hidden = !panel().hidden; $('#pSet').classList.toggle('on', !panel().hidden); });
+    $('#pSetX').addEventListener('click', () => { panel().hidden = true; $('#pSet').classList.remove('on'); });
     const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 0, ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket', game: '' };
     let data = null, eq = null;
     const gs = P.gameSelect($('#pG'), (v) => { st.game = v; load(); });
     P.sportSelect($('#pS'), () => { st.game = ''; gs.load(); load(); });
-    SE.seg($('#pR'), [[6, '6h'], [24, '24h'], [72, '3d'], [168, '7d']], st.hours, (v) => { st.hours = +v; load(); });
+    SE.seg($('#pR'), [[6, '6h'], [24, '24h'], [72, '3d'], [168, '7d'], [0, 'All', 'Every move since recording began.']], st.hours, (v) => { st.hours = +v; load(); });
     SE.seg($('#pJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], st.jump, (v) => { st.jump = +v; load(); });
     const segs = () => {
       SE.seg($('#pT'), [['first', 'First bookmaker', 'Trade on whichever bookmaker moves first.'], ['fastest', data?.fastest_book ? SE.bookName(data.fastest_book) : 'Fastest book', 'Trade only on the bookmaker that is fastest across all games.']], st.trigger, (v) => { st.trigger = v; load(); });
@@ -444,6 +463,8 @@ SE.pages.snipe = {
     const holdOf = (b) => base(b)?.holds.find((h) => h.hold_s === holdS(b));
     const SKIP = {
       no_data: ['No price to compare', 'The market or the bookmaker had no quote at that moment.'],
+      no_book_price: ['No bookmaker price before the move', 'The bookmaker that moved had no price 10 s earlier (it had only just listed the game), so there is no move to measure.'],
+      no_market_price: ['No market price', 'The prediction market had no usable quote 10 s before the move, when deciding, or when the order would land (not listed yet, one-sided, or quiet for 30+ minutes).'],
       book_reverted: ['Bookmaker moved back', 'By the time we could act, the bookmaker\'s move had gone.'],
       already_moved: ['Market already moved', 'Not delayed: the market had already made more than its allowed share of the move.'],
       too_few_books: ['Too few independent bookmakers', 'Not enough DIFFERENT bookmakers had made the move. Brands sharing one feed (the 1xBet brands, the Kambi brands, Fonbet/PARI, VINN/BetKing) count once.'],
@@ -545,7 +566,7 @@ SE.pages.snipe = {
 
     async function load() {
       $('#pTiles').innerHTML = `<div class="empty">${ic('hourglass_top')}Simulating…</div>`;
-      const q = `/snipe?since=${P.rangeSince(st.hours)}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}${st.game ? '&match=' + st.game : ''}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
+      const q = `/snipe?since=${st.hours ? P.rangeSince(st.hours) : 0}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}${st.game ? '&match=' + st.game : ''}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
       const d = await api(q).catch((e) => { $('#pTiles').innerHTML = `<div class="empty">${ic('error')}${esc(String(e.message || e))}</div>`; return null; });
       if (!d) return;
       data = d;

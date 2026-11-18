@@ -314,10 +314,10 @@ struct Group {
 }
 
 /// One top-of-book reading: (bid, ask, time of the quote, source).
-type Q = (f64, f64, Ms, &'static str);
+pub(crate) type Q = (f64, f64, Ms, &'static str);
 
 /// Top of book for one prediction market.
-trait Quotes {
+pub(crate) trait Quotes {
     fn at(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<Q>;
     /// Order-book size behind the latest quote at or before t (None = not recorded).
     fn depth(&mut self, _match_id: i64, _outcome: &str, _t: Ms) -> Option<crate::engine::Depth> {
@@ -483,7 +483,7 @@ pub(crate) fn kalshi_side(outcome: &str, swap: bool) -> &str {
 /// A source stopped being seen for this outcome (collector restart, event dropped from the
 /// feed) and came back inside (from, to]: an `open` row with earlier rows before it. A
 /// "move" measured across that gap is whatever happened while nobody was watching.
-fn reopened(c: &Connection, book: &str, match_id: i64, outcome: &str, from: Ms, to: Ms) -> bool {
+pub(crate) fn reopened(c: &Connection, book: &str, match_id: i64, outcome: &str, from: Ms, to: Ms) -> bool {
     let Ok(mut st) = c.prepare_cached(
         "SELECT 1 FROM changes o WHERE o.match_id = ?1 AND o.book = ?2 AND o.market = '1x2' AND o.outcome = ?3
            AND o.kind = 'open' AND o.ts_ms > ?4 AND o.ts_ms <= ?5
@@ -494,6 +494,15 @@ fn reopened(c: &Connection, book: &str, match_id: i64, outcome: &str, from: Ms, 
         return false;
     };
     st.exists(params![match_id, book, outcome, from, to]).unwrap_or(false)
+}
+
+/// Quote readers for the adaptive paper bot (adaptive.rs).
+pub(crate) fn pm_quotes(c: &Connection) -> Box<dyn Quotes + '_> {
+    Box::new(PmQuotes { c })
+}
+
+pub(crate) fn kalshi_quotes(c: &Connection) -> Box<dyn Quotes + '_> {
+    Box::new(KalshiQuotes { c, half: 0.02, events: HashMap::new() })
 }
 
 /// Brands that share one odds feed count as ONE confirmation (same trading desk, same prices).
@@ -508,7 +517,7 @@ pub(crate) fn platform(book: &str) -> &str {
 }
 
 /// Independent bookmakers (distinct platforms) that had made the move by time `t`.
-fn confirmations(e: &RankEvent, t: Ms) -> usize {
+pub(crate) fn confirmations(e: &RankEvent, t: Ms) -> usize {
     let mut p: Vec<&str> = e.order.iter().filter(|x| x.0 != PM && x.0 != KALSHI && x.1 <= t).map(|x| platform(&x.0)).collect();
     p.sort();
     p.dedup();
@@ -516,15 +525,19 @@ fn confirmations(e: &RankEvent, t: Ms) -> usize {
 }
 
 /// A bookmaker's implied probability for (match, outcome) at `t` (last change at or before).
-fn book_prob(c: &Connection, book: &str, match_id: i64, outcome: &str, t: Ms) -> Option<f64> {
+/// The bookmaker's last real price at or before `t`. A suspension (a row with no price) does
+/// not count: across a goal the book suspends, then reopens at the new price, and the move is
+/// measured from the price before the suspension (as the move detector in rank.rs does).
+/// Gaps in recording are handled separately (`reopened`).
+pub(crate) fn book_prob(c: &Connection, book: &str, match_id: i64, outcome: &str, t: Ms) -> Option<f64> {
     let mut st = c
-        .prepare_cached("SELECT new_price FROM changes WHERE match_id = ?1 AND book = ?2 AND market = '1x2' AND outcome = ?3 AND ts_ms <= ?4 ORDER BY ts_ms DESC LIMIT 1")
+        .prepare_cached("SELECT new_price FROM changes WHERE match_id = ?1 AND book = ?2 AND market = '1x2' AND outcome = ?3 AND ts_ms <= ?4 AND new_price IS NOT NULL ORDER BY ts_ms DESC LIMIT 1")
         .ok()?;
     let p: Option<Option<f64>> = st.query_row(params![match_id, book, outcome, t], |r| r.get(0)).optional().ok()?;
     Some(1.0 / p??.max(1.0001))
 }
 
-fn kalshi_fee(contracts: f64, p: f64) -> f64 {
+pub(crate) fn kalshi_fee(contracts: f64, p: f64) -> f64 {
     // Round up to the cent, ignoring float noise (175.00000000000003 cents is 1.75, not 1.76).
     (0.07 * contracts * p * (1.0 - p) * 100.0 - 1e-9).ceil() / 100.0
 }
@@ -532,7 +545,7 @@ fn kalshi_fee(contracts: f64, p: f64) -> f64 {
 /// Give-up times compared on the page (seconds).
 const HOLDS_S: [i64; 7] = [30, 60, 120, 300, 600, 1200, 1800];
 /// How long before the trigger the "before the move" levels are read.
-const PRE_MS: Ms = 10_000;
+pub(crate) const PRE_MS: Ms = 10_000;
 
 pub async fn simulate_cached(app: &Arc<App>, q: &LagQ, s: &SimQ) -> Result<Arc<Value>, String> {
     let (rank, _) = rankings_cached(app, q).await?;
@@ -577,14 +590,14 @@ struct Buy<'a> {
 }
 
 /// Entries on one match closer than this are one move.
-const SAME_MOVE_MS: Ms = 120_000;
+pub(crate) const SAME_MOVE_MS: Ms = 120_000;
 /// With a known book, a fill under this many dollars is not a trade.
-const MIN_FILL: f64 = 10.0;
+pub(crate) const MIN_FILL: f64 = 10.0;
 
 /// Buy for `stake` at `price` with `best` contracts resting there and `near` within 2c
 /// (including `best`); the rest of `near` fills 2c worse, anything beyond is not filled.
 /// Returns (contracts, average price).
-fn fill_buy(stake: f64, price: f64, best: f64, near: f64) -> (f64, f64) {
+pub(crate) fn fill_buy(stake: f64, price: f64, best: f64, near: f64) -> (f64, f64) {
     let a = (stake / price).min(best.max(0.0));
     let b = ((stake - a * price) / (price + 0.02)).min((near - best).max(0.0)).max(0.0);
     let n = a + b;
@@ -595,14 +608,14 @@ fn fill_buy(stake: f64, price: f64, best: f64, near: f64) -> (f64, f64) {
 /// the bid, selling No hits the Yes ask. The move counts from the mid before the trigger, with
 /// half the entry spread allowed, so a normal quote passes as the old mid test did but a spread
 /// that blows out (mid on target, bid collapsed) does not.
-fn caught_up(q: &Q, dir: f64, pre_mid: f64, need: f64, entry_spread: f64) -> bool {
+pub(crate) fn caught_up(q: &Q, dir: f64, pre_mid: f64, need: f64, entry_spread: f64) -> bool {
     let px = if dir > 0.0 { q.0 } else { q.1 };
     (px - pre_mid) * dir >= need - entry_spread / 2.0
 }
 
 /// Sell `n` contracts at `price` with `best` resting there and `near` within 2c; the rest of
 /// `near` 2c lower, anything beyond 5c lower. Returns the average price.
-fn fill_sell(n: f64, price: f64, best: f64, near: f64) -> f64 {
+pub(crate) fn fill_sell(n: f64, price: f64, best: f64, near: f64) -> f64 {
     if n <= 0.0 {
         return price;
     }
@@ -656,11 +669,11 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
             let td = t0 + reaction;
             let dir = e.direction as f64;
             let (Some(b_pre), Some(b_now)) = (book_prob(&c, tb, e.match_id, &e.outcome, t0 - PRE_MS), book_prob(&c, tb, e.match_id, &e.outcome, td)) else {
-                skip("no_data");
+                skip("no_book_price");
                 continue;
             };
             let (Some(q0), Some(q)) = (quotes.at(e.match_id, &e.outcome, t0 - PRE_MS), quotes.at(e.match_id, &e.outcome, td)) else {
-                skip("no_data");
+                skip("no_market_price");
                 continue;
             };
             // Either side came back from a gap between "before" and the fill: the "move" and the
@@ -750,7 +763,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
             // The order lands fill_ms after the second test at that moment's price (+ slippage), capped.
             let tf = td2 + fill_ms;
             let Some(qf) = quotes.at(e.match_id, &e.outcome, tf) else {
-                skip("no_data");
+                skip("no_market_price");
                 continue;
             };
             let entry = if dir > 0.0 { qf.1 + slip } else { 1.0 - qf.0 + slip };
@@ -920,7 +933,10 @@ fn summarise(hold: i64, stake: f64, trades: &[Trade], all: bool) -> Value {
         v.sort_by(|a, b| b.1.trades.cmp(&a.1.trades));
         v.into_iter().map(|(k, g)| json!({"key": k, "trades": g.trades, "win_rate": g.wins as f64 / g.trades.max(1) as f64, "pnl": g.pnl})).collect()
     };
-    let mut rets: Vec<f64> = trades.iter().map(|t| t.pnl / stake).collect();
+    // Dollars actually spent per trade (the recorded order book can fill only part of the stake).
+    let spent = |t: &Trade| stake * t.filled.unwrap_or(1.0).max(1e-9);
+    let staked: f64 = trades.iter().map(spent).sum();
+    let mut rets: Vec<f64> = trades.iter().map(|t| t.pnl / spent(t)).collect();
     rets.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     json!({
         "hold_s": hold,
@@ -931,7 +947,8 @@ fn summarise(hold: i64, stake: f64, trades: &[Trade], all: bool) -> Value {
         "median_held_ms": held.get(n / 2),
         "win_rate": if n > 0 { Some(wins as f64 / n as f64) } else { None },
         "pnl": pnl,
-        "roi": if n > 0 { Some(pnl / (n as f64 * stake)) } else { None },
+        "roi": if n > 0 { Some(pnl / staked) } else { None },
+        "staked": staked,
         "median_return": rets.get(n / 2),
         "max_drawdown": dd,
         "curve": curve,

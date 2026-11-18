@@ -213,6 +213,7 @@ SE.pages.arbs = {
   title: 'Arbitrage Scout',
   render(el) {
     el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake $<input class="input" id="aSt" type="number" min="1" step="10" value="${SE.pref('arbStake') || 100}" style="width:90px"></label>`) +
+      `<div class="src-filter" id="aBk"></div>` +
       P.stats(P.stat('aN', 'balance', 'Arbitrage now', 'Pre-match sets of bets that pay out more than they cost, whatever the result.', true), P.stat('aB', 'trending_up', 'Best return'), P.stat('aL', 'hourglass_bottom', 'Typical lifetime', 'Median time an arbitrage stayed open before closing on its own, from the live scan every 5 s. Ones that ended at kick-off or with a restart are left out.'), P.stat('aNear', 'near_me', 'Within 2% of one', 'Sets that cost up to 2% more than they pay: one price move away.')) +
       P.sec('balance', 'Opportunities', '<div id="aT"></div>', '<span class="muted" id="aScan"></span>', 'Best price for each outcome across every source, pre-match only, scanned every 5 s. Polymarket and Kalshi legs use the best ask (No = 1 minus the Yes bid), Kalshi with its taker fee.') +
       `<div class="grid g-2" style="margin-top:40px">${P.sec('hourglass_bottom', 'How long they last', '<div id="aLife"></div>', '', 'Finished arbitrage from the last 14 days. Each lasted from the first scan that saw it to halfway between its last scan and the one that found it gone.')}${P.sec('history', 'Recently closed', '<div id="aH"></div>')}</div>` +
@@ -239,6 +240,25 @@ SE.pages.arbs = {
       { key: 'l', label: 'Bets', fmt: (r) => `<div class="legs">${r.legs.map((l) => `<div><span class="leg-o">${outLabel(l)}</span> ${SE.book(l.book, 'sm')} <b>${l.odds.toFixed(2)}</b> <span class="muted">$${l.stake.toFixed(2)}</span> <span class="faint">${SE.fmtAgo(l.updated_ms)}</span></div>`).join('')}</div>` },
       { key: 'w', label: '', fmt: (r) => (r.warn.length ? `<span class="ic faint" data-tip="${esc(r.warn.join('. '))}">warning</span>` : '') },
     ], { sort: 'p', empty: 'No pre-match arbitrage right now. Try Near misses.', emptyIcon: 'balance', onClick: (r) => SE.go('#/match/' + r.match_id) });
+    // Sources you can bet on: only arbitrage whose every bet is on one of them (none chosen = all).
+    const books = new Set(SE.pref('arbBooks') || []);
+    function drawBooks(arbs) {
+      const el2 = $('#aBk');
+      if (!el2) return;
+      const seen = [...new Set([...arbs.flatMap((a) => a.legs.map((l) => l.book)), ...books])].sort((x, y) => (SE.PRED.includes(y) - SE.PRED.includes(x)) || SE.bookName(x).localeCompare(SE.bookName(y)));
+      const key = seen.join(',') + '|' + [...books].join(',');
+      if (el2.dataset.k === key) return;
+      el2.dataset.k = key;
+      el2.innerHTML = `<span class="muted" data-tip="Show only arbitrage where every bet is on a source you choose, such as the ones you have accounts with. None chosen = every source.">Bet on</span>` +
+        `<button class="chip-btn ${books.size ? '' : 'on'}" data-b="">All sources</button>` +
+        seen.map((b) => `<button class="chip-btn ${books.has(b) ? 'on' : ''}" data-b="${esc(b)}">${SE.logo(b)}${esc(SE.bookName(b))}</button>`).join('');
+      $$('[data-b]', el2).forEach((btn) => btn.addEventListener('click', () => {
+        const b = btn.dataset.b;
+        if (!b) books.clear(); else if (books.has(b)) books.delete(b); else books.add(b);
+        SE.setPref('arbBooks', [...books]);
+        load();
+      }));
+    }
     async function load() {
       const stake = Math.max(1, +$('#aSt').value || 100);
       const r = await api(`/arbs?min_profit=${Math.min(min, -0.02)}&stake=${stake}`);
@@ -246,6 +266,8 @@ SE.pages.arbs = {
       const q = $('#aQ').value.trim().toLowerCase();
       let all = r.arbs.filter((a) => P.sportOk(a.sport));
       if (q) all = all.filter((a) => `${a.home} ${a.away} ${a.league}`.toLowerCase().includes(q));
+      drawBooks(r.arbs);
+      if (books.size) all = all.filter((a) => a.legs.every((l) => books.has(l.book)));
       const real = all.filter((a) => a.profit > 0);
       P.set('aN', real.length);
       P.set('aB', real.length ? `<span class="up">+${(real[0].profit * 100).toFixed(2)}%</span>` : '-');

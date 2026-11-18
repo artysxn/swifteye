@@ -174,6 +174,15 @@ pub fn spawn(app: Arc<App>) {
             tokio::time::sleep(Duration::from_secs(180)).await;
         }
     });
+    // Kalshi's CS2 game list (for game pages' Kalshi history), built off the request path.
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let http = crate::books::http_client();
+        loop {
+            kalshi_cs2_events(&http).await;
+            tokio::time::sleep(Duration::from_secs(25 * 60)).await;
+        }
+    });
     // Line moves on their own clock: the CS2 backfill can take minutes.
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -782,7 +791,7 @@ pub fn view(app: &App, days: i64) -> Value {
 
 /// One game in detail (fetched live from Polymarket): the match price over time, every big bet,
 /// and money bought per side.
-pub async fn event_detail(id: &str) -> Result<Value> {
+pub async fn event_detail(app: &App, id: &str) -> Result<Value> {
     let s = settings();
     let http = crate::books::http_client();
     let (v, _) = fetch_json(http.get(format!("{GAMMA}/events/{id}"))).await?;
@@ -838,6 +847,213 @@ pub async fn event_detail(id: &str) -> Result<Value> {
         }
     }
     bets.sort_by_key(|b| b["ts"].as_i64());
+    // Swifteye's match for this game (for every bookmaker's line), and whether it lists the
+    // teams the other way round from Polymarket.
+    let linked: Option<(i64, String, String)> = {
+        let eng = app.engine.lock();
+        eng.known.get(&("polymarket".to_string(), ev.id.clone())).and_then(|m| eng.matcher.matches.get(m).map(|x| (*m, x.home.clone(), x.away.clone())))
+    };
+    let linked = match linked {
+        Some(x) => Some(x),
+        None => conn(app).ok().and_then(|c| {
+            c.query_row(
+                "SELECT m.id, m.home, m.away FROM book_events b JOIN matches m ON m.id = b.match_id WHERE b.book = 'polymarket' AND b.book_event_id = ?1",
+                [&ev.id],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+            )
+            .ok()
+        }),
+    };
+    let swapped = linked.as_ref().is_some_and(|(_, mh, ma)| crate::matcher::names_swapped("cs2", mh, ma, &ev.home, &ev.away));
+    let stored: Value = conn(app)
+        .ok()
+        .and_then(|c| {
+            c.query_row(
+                "SELECT score, volume, big_dog, big_fav, big_share, drift, tier1 FROM cs2_activity WHERE event_id = ?1",
+                [&ev.id],
+                |r| {
+                    Ok(json!({"score": r.get::<_, Option<f64>>(0)?, "volume": r.get::<_, Option<f64>>(1)?, "big_dog": r.get::<_, Option<i64>>(2)?,
+                        "big_fav": r.get::<_, Option<i64>>(3)?, "big_share": r.get::<_, Option<f64>>(4)?, "drift": r.get::<_, Option<f64>>(5)?, "tier1": r.get::<_, i64>(6)? != 0}))
+                },
+            )
+            .ok()
+        })
+        .unwrap_or(Value::Null);
+    let kalshi = kalshi_history(&http, &ev.home, &ev.away, ev.start_ms).await;
+    // Each "Map N Winner" market closes the moment map N is over; the match market when the game is.
+    let pm_ms = |s: &str| -> Option<Ms> {
+        // "2026-11-17 19:04:19.882197+00" (or RFC 3339)
+        let t = s.trim().replacen(' ', "T", 1);
+        let t = if t.ends_with("+00") { format!("{t}:00") } else { t };
+        rfc_ms(&t)
+    };
+    let mut maps: Vec<Value> = Vec::new();
+    let mut match_end: Option<Ms> = None;
+    for m in v["markets"].as_array().into_iter().flatten() {
+        let Some(end) = m["closedTime"].as_str().and_then(pm_ms) else { continue };
+        let kind = m["sportsMarketType"].as_str().unwrap_or("");
+        let title = text(&m["groupItemTitle"]);
+        if kind == "moneyline" {
+            match_end = Some(end);
+        } else if kind == "child_moneyline" {
+            if let Some(n) = title.strip_prefix("Map ").and_then(|r| r.split_whitespace().next()).and_then(|x| x.parse::<i64>().ok()) {
+                maps.push(json!({"map": n, "end_ms": end}));
+            }
+        }
+    }
+    maps.sort_by_key(|m| m["map"].as_i64());
     Ok(json!({"id": ev.id, "slug": ev.slug, "title": ev.title, "home": ev.home, "away": ev.away, "league": ev.league,
-        "start_ms": ev.start_ms, "vrs": [rank(&ev.home), rank(&ev.away)], "price": price, "bets": bets, "by_side": by_side, "settings": s}))
+        "start_ms": ev.start_ms, "vrs": [rank(&ev.home), rank(&ev.away)], "price": price, "bets": bets, "by_side": by_side, "settings": s,
+        "match_id": linked.as_ref().map(|x| x.0), "match_home": linked.as_ref().map(|x| x.1.clone()), "match_away": linked.as_ref().map(|x| x.2.clone()),
+        "pm_swapped": swapped, "stored": stored,
+        "kalshi": kalshi.map(|(t, p)| json!({"event": t, "price": p, "start_ms": kalshi_ticker_ms(&t)})), "maps": maps, "match_end_ms": match_end}))
+}
+
+// ---------------------------------------------------------------- Kalshi history for a game
+
+const KAPI: &str = "https://api.elections.kalshi.com/trade-api/v2";
+const KCS2_SERIES: &str = "KXCS2GAME";
+
+/// Kalshi's CS2 games (open and settled), refreshed every 30 minutes: (event ticker, title).
+static KCS2: LazyLock<Mutex<(Ms, Vec<(String, String)>)>> = LazyLock::new(Default::default);
+
+/// GET with up to three tries: Kalshi answers 429 when the collector's own polling is busy.
+async fn kget(http: &reqwest::Client, url: &str) -> Option<Value> {
+    for attempt in 1..=3u64 {
+        match fetch_json(http.get(url)).await {
+            Ok((v, _)) => return Some(v),
+            Err(_) => tokio::time::sleep(Duration::from_millis(1200 * attempt)).await,
+        }
+    }
+    None
+}
+
+/// One build of the list at a time; a caller arriving mid-build waits for it instead of
+/// starting a second one (Kalshi would rate-limit both).
+static KCS2_BUILD: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+async fn kalshi_cs2_events(http: &reqwest::Client) -> Vec<(String, String)> {
+    let fresh = || {
+        let c = KCS2.lock();
+        (now_ms() - c.0 < 30 * 60_000 && !c.1.is_empty()).then(|| c.1.clone())
+    };
+    if let Some(v) = fresh() {
+        return v;
+    }
+    let _g = KCS2_BUILD.lock().await;
+    if let Some(v) = fresh() {
+        return v;
+    }
+    let mut out = Vec::new();
+    let mut complete = true;
+    for status in ["open", "closed", "settled"] {
+        let mut cursor = String::new();
+        // Settled games, newest first: 15 pages of 200 covers several weeks.
+        for _ in 0..15 {
+            let url = format!("{KAPI}/events?series_ticker={KCS2_SERIES}&status={status}&limit=200{}", if cursor.is_empty() { String::new() } else { format!("&cursor={cursor}") });
+            let Some(v) = kget(http, &url).await else {
+                complete = false;
+                break;
+            };
+            for e in v["events"].as_array().into_iter().flatten() {
+                out.push((text(&e["event_ticker"]), text(&e["title"])));
+            }
+            cursor = text(&v["cursor"]);
+            if cursor.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+    // An incomplete list (Kalshi kept refusing) is only kept for 2 minutes.
+    *KCS2.lock() = (if complete { now_ms() } else { now_ms() - 28 * 60_000 }, out.clone());
+    out
+}
+
+/// Kalshi ticker date "26NOV171845" -> ms (Kalshi writes US Eastern time; good to a few hours).
+fn kalshi_ticker_ms(ticker: &str) -> Option<Ms> {
+    let part = ticker.split('-').nth(1)?;
+    if part.len() < 7 {
+        return None;
+    }
+    let (yy, mon, dd) = (&part[0..2], &part[2..5], &part[5..7]);
+    let m = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"].iter().position(|x| *x == mon)? as u8 + 1;
+    let d = time::Date::from_calendar_date(2000 + yy.parse::<i32>().ok()?, time::Month::try_from(m).ok()?, dd.parse().ok()?).ok()?;
+    let (h, mi) = if part.len() >= 11 { (part[7..9].parse().unwrap_or(12), part[9..11].parse().unwrap_or(0)) } else { (12, 0) };
+    let t = d.with_hms(h, mi, 0).ok()?.assume_utc();
+    // US Eastern: UTC-4 in summer time (2nd Sunday of March to 1st Sunday of November), else UTC-5.
+    let year = d.year();
+    let nth_sunday = |month: time::Month, n: u8| -> Option<time::Date> {
+        let first = time::Date::from_calendar_date(year, month, 1).ok()?;
+        let back = first.weekday().number_days_from_sunday();
+        let first_sun = first + time::Duration::days(((7 - back) % 7) as i64);
+        Some(first_sun + time::Duration::weeks(n as i64 - 1))
+    };
+    let summer = match (nth_sunday(time::Month::March, 2), nth_sunday(time::Month::November, 1)) {
+        (Some(a), Some(b)) => d >= a && d < b,
+        _ => false,
+    };
+    Some((t.unix_timestamp() + if summer { 4 } else { 5 } * 3600) as Ms * 1000)
+}
+
+/// The same game on Kalshi (team names, date within 36 h) and its minute-by-minute price for
+/// `home` (Polymarket's home team): (event ticker, [[ms, chance]]).
+async fn kalshi_history(http: &reqwest::Client, home: &str, away: &str, start_ms: Ms) -> Option<(String, Vec<Value>)> {
+    let (h, a) = (crate::matcher::Names::new(home), crate::matcher::Names::new(away));
+    let events = kalshi_cs2_events(http).await;
+    // Same two teams, nearest in time (within 36 h); a rematch on another day must not win.
+    let mut cands: Vec<(i64, String)> = events
+        .iter()
+        .filter_map(|(t, title)| {
+            let ms = kalshi_ticker_ms(t)?;
+            let diff = (ms - start_ms).abs();
+            let tt = title.split(':').next_back().unwrap_or(title);
+            let (x, y) = tt.split_once(" vs. ").or_else(|| tt.split_once(" vs "))?;
+            let (x, y) = (crate::matcher::Names::new(x.trim()), crate::matcher::Names::new(y.trim()));
+            let same = h.sim(&x).min(a.sim(&y)) >= 0.75 || h.sim(&y).min(a.sim(&x)) >= 0.75;
+            (same && diff <= 36 * 3_600_000).then(|| (diff, t.clone()))
+        })
+        .collect();
+    cands.sort();
+    cands.dedup_by(|x, y| x.1 == y.1);
+    for (_, ticker) in cands.into_iter().take(3) {
+        if let Some(pts) = kalshi_candles(http, &ticker, &h, start_ms).await {
+            return Some((ticker, pts));
+        }
+    }
+    None
+}
+
+/// Minute-by-minute chance of `h` winning from one Kalshi game's candles.
+async fn kalshi_candles(http: &reqwest::Client, ticker: &str, h: &crate::matcher::Names, start_ms: Ms) -> Option<Vec<Value>> {
+    let v = kget(http, &format!("{KAPI}/events/{ticker}?with_nested_markets=true")).await?;
+    let markets = if v["event"]["markets"].is_array() { v["event"]["markets"].clone() } else { v["markets"].clone() };
+    // The market whose Yes is `h` winning.
+    let market = markets.as_array()?.iter().max_by(|m1, m2| {
+        let s = |m: &Value| h.sim(&crate::matcher::Names::new(&text(&m["yes_sub_title"])));
+        s(m1).partial_cmp(&s(m2)).unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    if h.sim(&crate::matcher::Names::new(&text(&market["yes_sub_title"]))) < 0.5 {
+        return None;
+    }
+    let mt = text(&market["ticker"]);
+    let (from, to) = ((start_ms - 24 * 3_600_000) / 1000, (start_ms + 6 * 3_600_000).min(now_ms()) / 1000);
+    let url = format!("{KAPI}/series/{KCS2_SERIES}/markets/{mt}/candlesticks?start_ts={from}&end_ts={to}&period_interval=1");
+    let cv = kget(http, &url).await?;
+    let px = |k: &Value, side: &str| num(&k[side]["close_dollars"]).or_else(|| num(&k[side]["close"]).map(|c| c / 100.0)).filter(|x| *x > 0.0 && *x < 1.0);
+    let pts: Vec<Value> = cv["candlesticks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|k| {
+            let ts = int(&k["end_period_ts"])? * 1000;
+            // Mid of the closing bid and ask; the last trade when the book was one-sided.
+            let p = match (px(k, "yes_bid"), px(k, "yes_ask")) {
+                (Some(b), Some(a)) if a > b && a - b <= 0.25 => (a + b) / 2.0,
+                _ => px(k, "price")?,
+            };
+            Some(json!([ts, p]))
+        })
+        .collect();
+    (!pts.is_empty()).then_some(pts)
 }

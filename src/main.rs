@@ -1,3 +1,4 @@
+mod adaptive;
 mod api;
 mod arb;
 mod arbtrack;
@@ -157,6 +158,7 @@ async fn main() -> anyhow::Result<()> {
     snipe::spawn_warmer(app.clone());
     telegram::spawn(app.clone());
     arbtrack::spawn(app.clone());
+    adaptive::spawn(app.clone());
     suspect::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;

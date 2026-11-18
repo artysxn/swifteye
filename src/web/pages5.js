@@ -115,37 +115,229 @@ SE.pages.suspicious = {
 SE.pages.susgame = {
   title: 'Suspicious game',
   render(el, [id]) {
-    el.innerHTML = P.head('Loading', '', ['Suspicious', '#/suspicious']) + `<div class="empty">${ic('hourglass_empty')}Fetching every trade from Polymarket</div>`;
-    api('/suspicious/event/' + encodeURIComponent(id)).then((d) => {
-      if (!$('#page') || location.hash.indexOf('#/susgame/') !== 0) return;
-      const pts = d.price.filter((p) => p[1] > 0 && p[1] < 1);
-      const W = 1000, H = 260;
-      const t0 = Math.min(d.start_ms, ...pts.map((p) => p[0])), t1 = Math.max(d.start_ms + 1, ...pts.map((p) => p[0]));
-      const x = (t) => ((t - t0) / (t1 - t0)) * W, y = (p) => H - p * H;
-      const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
-      const dots = d.bets.filter((b) => b.match_market && b.side === 'BUY').map((b) => {
-        const home = b.outcome === d.home, p0 = home ? b.price : 1 - b.price;
-        return `<circle cx="${x(b.ts).toFixed(1)}" cy="${y(p0).toFixed(1)}" r="${Math.min(14, 3 + Math.sqrt(b.cash) / 8).toFixed(1)}" fill="${home ? 'var(--up)' : 'var(--down)'}" fill-opacity=".55"><title>${esc(b.outcome)} $${Math.round(b.cash)} at ${Math.round(b.price * 100)}%</title></circle>`;
-      }).join('');
-      const tot = Object.values(d.by_side).reduce((a, b) => a + b, 0);
-      el.innerHTML = P.head(`${esc(d.home)} <span class="faint">v</span> ${esc(d.away)}`, `<a class="btn" target="_blank" rel="noopener" href="https://polymarket.com/event/${encodeURIComponent(d.slug)}">${ic('open_in_new')}Polymarket</a>`, ['Suspicious', '#/suspicious']) +
-        `<p class="muted" style="margin-top:-18px">${esc(d.league)} · ${SE.fmtDateTime(d.start_ms)} · VRS ${d.vrs.map((r) => (r > 0 ? '#' + r : 'unranked')).join(' v ')}</p>` +
-        P.sec('show_chart', `Match price: ${esc(d.home)} to win`, `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;background:var(--bg-2);border-radius:10px">
-            <line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="var(--line-2)" stroke-dasharray="4 4"/>
-            <line x1="${x(d.start_ms)}" x2="${x(d.start_ms)}" y1="0" y2="${H}" stroke="var(--accent)" stroke-dasharray="3 3"><title>Start</title></line>
-            <path d="${line}" fill="none" stroke="var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>${dots}</svg>
-          <div class="faint" style="display:flex;justify-content:space-between;gap:12px;margin-top:6px"><span>${SE.fmtDateTime(t0)}</span><span>Dashed: 50% and the start. Dots: big bets (green ${esc(d.home)}, red ${esc(d.away)}; size = amount).</span><span>${SE.fmtDateTime(t1)}</span></div>`) +
-        P.sec('payments', 'Money bought per side (match market)', Object.entries(d.by_side).map(([k, v]) => `<div class="field" style="grid-template-columns:200px minmax(0,1fr) 120px"><b>${esc(k)}</b><div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden"><b style="display:block;height:100%;width:${tot ? (v / tot * 100).toFixed(1) : 0}%;background:var(--accent)"></b></div><span class="r">$${SE.fmtInt(Math.round(v))}</span></div>`).join('') || '<div class="empty">No trades.</div>') +
-        P.sec('list', `Big bets ($${d.settings.big_bet_usd}+, every market of the game)`, '<div id="gB"></div>');
-      SE.table($('#gB'), [
-        { key: 't', label: 'When', fmt: (b) => `${SE.fmtTime(b.ts)}<div class="faint">${b.ts < d.start_ms ? 'before start' : 'in game'}</div>`, sort: (b) => b.ts },
+    el.innerHTML = P.head('Loading game', '', ['Suspicious', '#/suspicious']) + `<div class="empty">${ic('hourglass_empty')}Fetching every trade from Polymarket</div>`;
+    let chart = null;
+    const cssColor = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim() || '#888';
+    const pct = (v) => (v == null ? '' : (v * 100).toFixed(0) + '%');
+    const money = (x) => (x == null ? '-' : x >= 1e6 ? '$' + (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? '$' + (x / 1e3).toFixed(x >= 1e4 ? 0 : 1) + 'k' : '$' + Math.round(x));
+    (async () => {
+      let d;
+      try { d = await api('/suspicious/event/' + encodeURIComponent(id)); }
+      catch (e) { el.innerHTML = P.head('Game', '', ['Suspicious', '#/suspicious']) + `<div class="empty err">${ic('error')}${esc(e.message)}</div>`; SE.tidyHead(el); return; }
+      if (location.hash.indexOf('#/susgame/') !== 0) return;
+      const st = d.stored || {};
+      const a = d.settings.alert_score;
+      const vr = (r) => (r > 0 ? '#' + r : 'unranked');
+      el.innerHTML = P.head(`${esc(d.home)} <span class="faint">v</span> ${esc(d.away)}`,
+        `<a class="btn" target="_blank" rel="noopener" href="https://polymarket.com/event/${encodeURIComponent(d.slug)}">${ic('open_in_new')}Polymarket</a>${d.match_id ? `<a class="btn" href="#/match/${d.match_id}">${ic('sports_esports')}Match page</a>` : ''}`,
+        ['Suspicious', '#/suspicious']) +
+        `<p class="page-sub">${esc(d.league)} · ${d.start_ms > Date.now() ? 'starts' : 'started'} ${SE.fmtDateTime(d.start_ms)} · VRS ${vr(d.vrs[0])} v ${vr(d.vrs[1])}</p>` +
+        P.stats(
+          P.stat('gS', 'local_fire_department', 'Score', 'Average percentile against finished lower-tier games (0-100).', true),
+          P.stat('gV', 'payments', 'Traded', 'Money traded on every Polymarket market of the game.'),
+          P.stat('gD', 'south_east', 'Big underdog bets', `Bets of $${d.settings.big_bet_usd}+ bought below ${Math.round(d.settings.underdog_below * 100)}%.`),
+          P.stat('gF', 'north_east', 'Big favourite bets', `Bets of $${d.settings.big_bet_usd}+ bought at 50% or more.`),
+          P.stat('gB', 'pie_chart', 'Share in big bets', 'Share of all the money that came in big bets.')) +
+        P.sec('monitoring', `${esc(d.match_home || d.home)} to win`, '<div class="chart" id="gC" style="height:380px"></div><div class="legend" id="gL"></div>', '<div id="gScale"></div>',
+          'Every source on one scale: Polymarket from each trade, Kalshi from its own minute-by-minute history, bookmakers from what Swifteye recorded. Dots are big bets, placed at their price. Drag to zoom, double-click to reset, click a legend entry to hide it.') +
+        `<p class="note" style="margin-top:10px">${d.kalshi ? `Kalshi from its own history (${esc(d.kalshi.event)}). ` : 'Kalshi does not list this game. '}${d.match_id ? '' : 'Bookmaker prices only exist for games played since Swifteye started recording (17 Nov); none are linked to this game. '}The game ${d.start_ms > Date.now() ? 'starts' : 'started'} at ${SE.fmtTime(d.start_ms).slice(0, 5)}. Map lines: map 1 at the start time; each later map right after the previous one ended (its Polymarket market closed then, a short break later). Opens on the six hours before the start; double-click the chart for the whole history.</p>` +
+        `<div class="grid g-2" style="margin-top:40px">${P.sec('balance', 'Money bought per side', '<div id="gM"></div>', '', 'Match market only: dollars spent buying each team.')}${P.sec('schedule', 'Before and during the game', '<div id="gT"></div>', '', 'Big bets placed before the start and once it was under way.')}</div>` +
+        P.sec('list', `Big bets ($${d.settings.big_bet_usd}+)`, '<div id="gBets"></div>', '', 'Fills of one wallet on one outcome within 60 seconds count as one bet. Every market of the game.');
+      SE.tidyHead(el);
+      SE.seg($('#gScale'), [['prob', 'Win %'], ['odds', 'Decimal']], SE.pref('chartOdds'), (v) => { SE.setPref('chartOdds', v); SE.go('#/susgame/' + id); window.dispatchEvent(new HashChangeEvent('hashchange')); });
+      P.set('gS', st.tier1 ? 'Tier 1' : st.score == null ? '-' : `<span class="${st.score >= a ? 'neg' : ''}">${Math.round(st.score)}</span>`, st.score >= a ? 'flagged' : `alert at ${a}`);
+      P.set('gV', money(st.volume ?? Object.values(d.by_side).reduce((x, y) => x + y, 0)), d.price.length ? SE.fmtInt(d.price.length) + ' match trades' : '');
+      P.set('gD', st.big_dog ?? '-', '');
+      P.set('gF', st.big_fav ?? '-', '');
+      P.set('gB', st.big_share == null ? '-' : Math.round(st.big_share * 100) + '%', st.drift != null ? `price drift ${Math.round(st.drift * 100)} pts` : '');
+
+      // ---- chart: every source as home-win probability
+      const lists = [], series = [];
+      let books = [];
+      if (d.match_id) {
+        const ch = (await api(`/matches/${d.match_id}/changes?market=1x2&outcome=home&limit=50000`).catch(() => ({ changes: [] }))).changes || [];
+        const by = new Map();
+        for (const c of ch) {
+          if (c.book === 'polymarket' || c.outcome !== 'home' || (c.book === 'kalshi' && d.kalshi)) continue;
+          if (!by.has(c.book)) by.set(c.book, []);
+          by.get(c.book).push([c.ts_ms, c.new_price > 1 ? 1 / c.new_price : null]);
+        }
+        books = [...by.keys()].sort((x, y) => (x === 'kalshi' ? -1 : y === 'kalshi' ? 1 : SE.bookName(x).localeCompare(SE.bookName(y))));
+        for (const b of books) { lists.push(by.get(b)); series.push({ label: SE.bookName(b), book: b, color: SE.bookColor(b), width: b === 'kalshi' ? 2.2 : 1.3 }); }
+      }
+      const flip = (p) => (d.pm_swapped ? 1 - p : p);
+      const pmPts = d.price.filter((p) => p[1] > 0 && p[1] < 1).map((p) => [p[0], flip(p[1])]);
+      if (d.kalshi?.price?.length) { lists.unshift(d.kalshi.price.map((p) => [p[0], flip(p[1])])); series.unshift({ label: 'Kalshi', book: 'kalshi', color: SE.bookColor('kalshi'), width: 2.2 }); }
+      if (pmPts.length) { lists.unshift(pmPts); series.unshift({ label: 'Polymarket', book: 'polymarket', color: SE.bookColor('polymarket'), width: 2.6, linear: true }); }
+      // Big bets as dots: buying the home side at p is home at p; buying the other side at p is home at 1 - p.
+      const dots = { home: [], away: [] };
+      for (const b of d.bets) if (b.match_market && b.side === 'BUY') (b.outcome === d.home ? dots.home : dots.away).push([b.ts, flip(b.outcome === d.home ? b.price : 1 - b.price)]);
+      const xsAll = [...new Set([...lists.flatMap((l) => l.map((p) => p[0])), ...dots.home.map((p) => p[0]), ...dots.away.map((p) => p[0])])].sort((x, y) => x - y);
+      if (xsAll.length) {
+        const al = SE.alignSeries(lists.length ? lists : [[]]);
+        // Re-align line series onto the full time axis (dots add timestamps of their own).
+        const pos = new Map(al.xs.map((t, i) => [t, i]));
+        const values = series.map((_, k) => { let last = null; return xsAll.map((t) => { const i = pos.get(t); if (i != null) last = al.values[k][i]; return last; }); });
+        const sparse = (pts) => { const m = new Map(pts.map((p) => [p[0], p[1]])); return xsAll.map((t) => (m.has(t) ? m.get(t) : null)); };
+        const all = series.map((s, k) => ({ ...s, values: values[k] }));
+        if (dots.home.length) all.push({ label: `Big bets: ${d.home}`, color: cssColor('--up'), points: true, values: sparse(dots.home) });
+        if (dots.away.length) all.push({ label: `Big bets: ${d.away}`, color: cssColor('--down'), points: true, values: sparse(dots.away) });
+        // Decimal odds: 1 / chance. Above 20.00 (under a 5% chance, the dying minutes of a game)
+        // the line is cut so the rest of the chart stays readable.
+        const dec = SE.pref('chartOdds') === 'odds';
+        // Map markers: map 1 at the scheduled start (Polymarket has no real start time); map N+1
+        // right after map N ended (its "Map N Winner" market closed then, a short break later).
+        const ends = (d.maps || []).filter((m) => m.end_ms).sort((x, y) => x.map - y.map);
+        // Kalshi lists the start time it trades to; Polymarket's is often the scheduled slot,
+        // which can be an hour early. Prefer Kalshi's when the game is on Kalshi.
+        const k0 = d.kalshi?.start_ms;
+        const marks = [k0 ? { x: k0, label: 'Map 1 (start, Kalshi)' } : { x: d.start_ms, label: 'Map 1 (scheduled start)' }];
+        for (const m of ends) if (!d.match_end_ms || m.end_ms < d.match_end_ms - 60000) marks.push({ x: m.end_ms, label: `Map ${m.map + 1} (map ${m.map} over)` });
+        if (d.match_end_ms) marks.push({ x: d.match_end_ms, label: 'Final', color: cssColor('--accent') });
+        if (dec) for (const sr of all) sr.values = sr.values.map((v) => (v == null || v < 0.05 ? null : 1 / v));
+        chart = SE.chartKeep($('#gC'), null, xsAll, all, dec ? { yFmt: (v) => (v == null ? '' : v.toFixed(2)), marks } : { yFmt: pct, yRange: [0, 1], marks }, $('#gL'));
+        // Open on the game: six hours before the start to the last price (double-click shows it all).
+        const lo = Math.max(xsAll[0], d.start_ms - 6 * 3600000), hi = Math.max(xsAll[xsAll.length - 1], d.match_end_ms || 0);
+        if (chart && hi > lo) chart.setScale('x', { min: lo, max: hi });
+      }
+      if (!chart) $('#gC').innerHTML = `<div class="empty">${ic('show_chart')}No prices recorded for this game.</div>`;
+
+      // ---- money per side, before / during
+      const tot = Object.values(d.by_side).reduce((x, y) => x + y, 0);
+      $('#gM').innerHTML = Object.keys(d.by_side).length ? Object.entries(d.by_side).sort((x, y) => y[1] - x[1]).map(([k, v]) =>
+        `<div class="bar-row"><span class="bar-label">${esc(k)}</span><div class="bar-track"><b style="width:${tot ? (v / tot * 100).toFixed(1) : 0}%"></b></div><span class="bar-val">${money(v)} <span class="faint">${tot ? Math.round(v / tot * 100) : 0}%</span></span></div>`).join('') : '<div class="empty">No trades on the match market.</div>';
+      const pre = d.bets.filter((b) => b.ts < d.start_ms), live = d.bets.filter((b) => b.ts >= d.start_ms);
+      const sum = (l) => l.reduce((x, b) => x + b.cash, 0);
+      $('#gT').innerHTML = `<div class="bar-row"><span class="bar-label">Before the start</span><div class="bar-track"><b style="width:${d.bets.length ? (sum(pre) / Math.max(1, sum(d.bets)) * 100).toFixed(1) : 0}%"></b></div><span class="bar-val">${pre.length} bets · ${money(sum(pre))}</span></div>
+        <div class="bar-row"><span class="bar-label">During the game</span><div class="bar-track"><b style="width:${d.bets.length ? (sum(live) / Math.max(1, sum(d.bets)) * 100).toFixed(1) : 0}%"></b></div><span class="bar-val">${live.length} bets · ${money(sum(live))}</span></div>`;
+      SE.table($('#gBets'), [
+        { key: 't', label: 'When', fmt: (b) => `${SE.fmtTime(b.ts).slice(0, 8)}<div class="faint">${b.ts < d.start_ms ? 'before start' : 'in game'}</div>`, sort: (b) => b.ts },
         { key: 'm', label: 'Market', fmt: (b) => esc(b.market) },
-        { key: 'o', label: 'Outcome', w: 170, fmt: (b) => `<span class="chip ${b.side === 'BUY' ? 'ok' : 'bad'}">${b.side === 'BUY' ? 'Buy' : 'Sell'}</span> ${esc(b.outcome)}` },
+        { key: 'o', label: 'Outcome', w: 200, fmt: (b) => `<span class="chip ${b.side === 'BUY' ? 'ok' : 'bad'}">${b.side === 'BUY' ? 'Buy' : 'Sell'}</span> ${esc(b.outcome)}`, sort: (b) => b.outcome },
         { key: 'p', label: 'Price', cls: 'r', w: 80, fmt: (b) => Math.round(b.price * 100) + '%', sort: (b) => b.price },
         { key: 'c', label: 'Amount', cls: 'r', w: 100, fmt: (b) => '$' + SE.fmtInt(Math.round(b.cash)), sort: (b) => b.cash },
-      ], { sort: 't', dir: 1, empty: 'No big bets.' }).set(d.bets);
-    }).catch((e) => { el.innerHTML = P.head('Suspicious game', '', ['Suspicious', '#/suspicious']) + `<div class="empty err">${ic('error')}${esc(e.message)}</div>`; });
+      ], { sort: 'c', empty: 'No big bets.' }).set(d.bets);
+    })();
+    return () => SE.destroyChart(chart);
   },
+};
+
+// ================================================================ Snipe window: adaptive paper bot
+SE.snipeBot = (el) => {
+  let chart = null, lastBank = null, bankSet = false;
+  const money = (x) => (x == null ? '-' : (x < 0 ? '-$' : '$') + Math.abs(x).toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) < 100 ? 2 : 0 }));
+  const pnl = (x) => (x == null ? '-' : `<b class="${x > 0 ? 'pos' : x < 0 ? 'neg' : ''}">${x > 0 ? '+' : ''}${money(x)}</b>`);
+  const pct = (x, d = 1) => (x == null ? '-' : (x > 0 ? '+' : '') + (x * 100).toFixed(d) + '%');
+  const give = (s) => (s < 60 ? s + ' s' : s / 60 + ' min');
+  const utc = (ms) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, '0')} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${String(d.getUTCHours()).padStart(2, '0')}:00 UTC`; };
+  const RULES = [
+    ['min_books', 'Bookmakers that moved', (v) => `${v}+ independent`],
+    ['max_followed', 'Market had followed', (v) => `at most ${Math.round(v * 100)}%`],
+    ['min_edge', 'Expected gain', (v) => `≥ ${Math.round(v * 100)}¢ a contract`],
+    ['max_spread', 'Market spread', (v) => `≤ ${Math.round(v * 100)}¢`],
+    ['min_move', 'Bookmaker move', (v) => `≥ ${Math.round(v * 100)} points`],
+    ['catch', 'Sell when caught up', (v) => `${Math.round(v * 100)}% of the move`],
+    ['give_up_s', 'Give up after', give],
+    ['skip_after_pause', 'Right after a market pause', (v) => (v ? 'skip the move' : 'trade it')],
+    ['walk_book', 'Order size', (v) => (v === false ? 'best price only' : 'up to 2¢ past the best price')],
+  ];
+  const rulesHtml = (p, def) => `<div class="rules">${RULES.map(([k, label, f]) => `<div class="rule ${p[k] !== def[k] ? 'changed' : ''}" ${p[k] !== def[k] ? `data-tip="${SE.esc('Default: ' + f(def[k]))}"` : ''}><span>${label}</span><b>${f(p[k])}</b></div>`).join('')}</div>`;
+  const short = (p) => `${p.min_books}+ books · ≤${Math.round(p.max_followed * 100)}% followed · ≥${Math.round(p.min_edge * 100)}¢ gain · ≤${Math.round(p.max_spread * 100)}¢ spread · ≥${Math.round(p.min_move * 100)} pts · sell ${Math.round(p.catch * 100)}% · ${give(p.give_up_s)}${p.skip_after_pause ? ' · skips pauses' : ''}${p.walk_book === false ? ' · best price only' : ''}`;
+  const st = (s) => (s && s.trades ? `${s.trades} trades, ${pct(s.roi)} a trade` : 'no trades');
+  const bookTest = (c, b) => {
+    const t = c.book_test;
+    if (!t || !t.stake) return '';
+    const one = (s) => (s && s.trades ? `${s.trades} trades, ${pnl(s.pnl)} (${pct(s.mean_return)} of the stake a trade)` : 'no trades yet');
+    return `<p class="note"><b>Order size</b> at a ${money(t.stake)} stake, on these rules and the ${(b.depth_known || 0).toLocaleString('en-US')} moves with a recorded order book: best price only ${one(t.best_price_only)}; up to 2¢ past it ${one(t.walk_2c)}.</p>`;
+  };
+
+  el.innerHTML = `<div class="bank-bar"><label data-tip="Each market (Polymarket, Kalshi) starts with this paper balance.">Starting balance <span class="bank-in">$<input class="input" id="bStart" type="number" min="100" step="100"></span></label><label data-tip="Every trade stakes this share of the balance at that moment (start plus closed P&amp;L), at most the cash not tied up in open trades.">Stake per trade <span class="bank-in"><input class="input" id="bPct" type="number" min="0.1" max="100" step="0.1">% of the balance</span></label><button class="btn" id="bSave">${ic('save')}Save</button><span class="faint">Saving re-runs the whole history with the new money (a few minutes).</span></div>` +
+    `<div id="bStatus" class="page-sub" style="margin-top:0"></div><div id="bBases"></div>` +
+    P.sec('show_chart', 'Honest record: balance, each pick on the 4 hours after it', '<div class="chart" id="bChart" style="height:300px"></div><div class="legend" id="bLeg"></div>', '',
+      'Every 4 hours the bot picks its rules from the data so far, then trades the next 4 hours with them. Only those unseen hours count here. Dashed: the fixed default rules on the same hours, with their own balance.') +
+    `<details class="fold" style="margin-top:26px"><summary>${ic('help')}How the paper bot chooses its rules</summary><div class="fold-body"><p class="note" style="margin:0">Every 4 hours (00, 04, 08, 12, 16 and 20 UTC) it tries 20,736 rule combinations per market on every finished trade so far. Measured facts are never tuned: reaction 1 s, a confirming check 0.5 s later, the order landing 0.25 s after that, 1¢ worse on every buy and sale, Kalshi's fee and the real order book. Each trade stakes the share of the balance set above; when the order book was recorded, the order only fills what rested there (before that, it fills in full). One of the tuned rules is the order size: buy only what rests at the best price, or also what rests up to 2¢ worse to fill more of the stake. Rules are scored on the stake the bot would place, so an order that fills only part of it counts for less. Each combination is scored by its average return minus twice its uncertainty, needs 30+ trades to count, and is judged together with its neighbours so a lucky spike cannot win. A candidate must also be profitable, and at least as good as the current rules, on the most recent 30% of the data before the pick. It never adopts rules whose conservative estimate is a loss: with nothing convincingly profitable it keeps the current rules. The rules only change when the new pick is clearly better. When the method changes, the whole history is recomputed from the first data, so the record always uses one method. If the last 24 hours of unseen-hours trading lost money over 8+ trades, it falls back to the default rules until the next pick. Paper money only.</p></div></details>` +
+    P.sec('history', 'Re-choices', '<div id="bHist"></div>') +
+    P.sec('receipt_long', 'Paper trades', '<div id="bTr"></div>', '', 'Trades of the rules that were active at the time.');
+
+  async function load() {
+    let d;
+    try { d = await api('/adaptive'); } catch (e) { $('#bStatus').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+    lastBank = d.bank;
+    if (!bankSet && d.bank && $('#bStart')) { bankSet = true; $('#bStart').value = d.bank.start; $('#bPct').value = +(d.bank.pct * 100).toFixed(2); }
+    if (!$('#bBases')) return;
+    const ready = d.bases.some((b) => b.current);
+    $('#bStatus').innerHTML = ready
+      ? `Rules re-chosen every 4 hours. Last ${utc(d.bases.map((b) => b.current?.ts || 0).reduce((a, b) => Math.max(a, b), 0))}, next ${utc(d.next_run_ms)}.${d.status !== 'ready' ? ` <span class="faint">${esc(d.status)}</span>` : ''}`
+      : `<span class="muted">${esc(d.status || 'Starting')}. The first pick needs 8 hours of data${d.first_run_ms ? `; due ${utc(d.first_run_ms)}` : ''}.</span>`;
+    $('#bBases').innerHTML = d.bases.map((b) => {
+      const c = b.current, r = b.record, dr = b.defaults_record;
+      const chip = !c ? '' : c.fallback ? '<span class="chip bad" data-tip="The last 24 hours of the honest record lost money, so it trades the default rules until the next pick.">Safety switch: default rules</span>' : c.switched ? '<span class="chip accent">New rules at the last pick</span>' : '<span class="chip">Rules kept at the last pick</span>';
+      const ins = c?.insample?.stats, pt = c?.pause_test;
+      return `<section class="sec bot-base"><div class="sec-head"><h2>${SE.book(b.base)}</h2><div class="tools">${chip}</div></div>` +
+        P.stats(
+          `<div class="stat key"><div class="stat-label">${ic('account_balance_wallet')}Paper balance</div><div class="stat-value">${money(b.balance)}</div><div class="stat-foot">${pnl(r.pnl)} on ${r.trades} trades since the first pick</div></div>`,
+          `<div class="stat"><div class="stat-label">${ic('trending_up')}Return per trade</div><div class="stat-value">${pct(r.roi, 2)}</div><div class="stat-foot">on ${money(r.staked)} staked</div></div>`,
+          `<div class="stat"><div class="stat-label">${ic('check_circle')}Win rate</div><div class="stat-value">${r.trades ? Math.round((r.wins / r.trades) * 100) + '%' : '-'}</div><div class="stat-foot">${r.wins} of ${r.trades}</div></div>`,
+          `<div class="stat" data-tip="The fixed default rules traded on exactly the same hours."><div class="stat-label">${ic('rule')}Default rules, same hours</div><div class="stat-value">${money(b.balance_defaults)}</div><div class="stat-foot">${pnl(dr.pnl)}, ${st(dr)}</div></div>`) +
+        (c ? `<div class="bot-rules"><div class="note" style="margin:18px 0 10px">Trading now${c.fallback ? ' (defaults, safety switch)' : ''}. Highlighted: changed from the default.</div>${rulesHtml(c.active, b.default)}
+          <p class="note" style="margin-top:12px">Picked ${utc(c.ts)} at a ${money(c.insample?.stake)} stake (${money(c.insample?.balance)} balance) from ${ins?.trades ?? 0} finished trades: ${pct(ins?.mean_return)} a trade on average, ${pct(ins?.conservative)} on the conservative estimate. ${c.candidates.toLocaleString('en-US')} moves measured.</p>
+          <p class="note"><b>On the entire sample</b> (a backtest of all data so far, not the honest record): these rules ${st(b.whole_sample?.current)}, ending at ${money(b.whole_sample?.current?.balance)}; the default rules ${st(b.whole_sample?.defaults)}, ending at ${money(b.whole_sample?.defaults?.balance)}.</p>
+          ${bookTest(c, b)}
+          <p class="note"><b>Moves right after a market pause</b> (the bookmaker suspended, then reopened at a new price), on these rules: ${st(pt?.pause_moves_alone)}. With them: ${st(pt?.with_pause_moves)}. Skipping them: ${st(pt?.skipping_them)}.</p></div>`
+          : '<div class="empty">No pick yet.</div>') +
+        '</section>';
+    }).join('');
+
+    // ---- chart: walk-forward P&L, adaptive vs defaults
+    const colour = { polymarket: '#7aa7ff', kalshi: '#5ff0a8' };
+    const lists = [], series = [];
+    for (const b of d.bases) {
+      if (b.curve.length) { lists.push(b.curve); series.push({ label: `${SE.bookName(b.base)}: paper bot`, book: b.base, color: colour[b.base], width: 2.2, linear: true }); }
+      if (b.curve_defaults.length) { lists.push(b.curve_defaults); series.push({ label: `${SE.bookName(b.base)}: default rules`, color: colour[b.base], width: 1.3, dash: [5, 4], linear: true }); }
+    }
+    SE.destroyChart(chart);
+    chart = null;
+    if (lists.length) {
+      const al = SE.alignSeries(lists);
+      const marks = d.bases.flatMap((b) => b.windows.filter((w) => w.run.switched).map((w) => ({ x: w.from, label: `${SE.bookName(b.base)}: new rules` })));
+      chart = SE.chart($('#bChart'), al.xs, series.map((s, i) => ({ ...s, values: al.values[i] })), { yFmt: (v) => (v == null ? '' : money(v)), marks });
+      SE.legend($('#bLeg'), series, chart);
+    } else $('#bChart').innerHTML = `<div class="empty">${ic('show_chart')}No unseen-hours trades yet.</div>`;
+
+    // ---- re-choices
+    const hist = d.bases.flatMap((b) => b.windows.map((w) => ({ ...w, base: b.base }))).sort((a, b) => b.from - a.from || a.base.localeCompare(b.base));
+    SE.table($('#bHist'), [
+      { key: 't', label: 'When', w: 140, fmt: (w) => utc(w.from), sort: (w) => w.from },
+      { key: 'b', label: 'Market', w: 130, fmt: (w) => SE.book(w.base, 'sm') },
+      { key: 'r', label: 'Rules picked', cls: 'match', fmt: (w) => `<span class="${w.run.switched ? '' : 'muted'}">${esc(short(w.run.active))}</span>${w.run.fallback ? ' <span class="chip bad">defaults</span>' : w.run.switched ? ' <span class="chip accent">new</span>' : ''}` },
+      { key: 'i', label: 'Picked from', w: 170, tip: 'Finished trades before the pick and their average return.', fmt: (w) => `<span class="muted">${st(w.run.insample?.stats)}</span>` },
+      { key: 'a', label: 'Next 4 h', cls: 'r', w: 130, tip: 'What these rules then did on the 4 hours they had not seen.', fmt: (w) => `${pnl(w.adaptive.pnl)}<div class="faint">${w.adaptive.trades} trades</div>`, sort: (w) => w.adaptive.pnl },
+      { key: 'd', label: 'Defaults, same 4 h', cls: 'r', w: 150, fmt: (w) => `${pnl(w.defaults.pnl)}<div class="faint">${w.defaults.trades} trades</div>`, sort: (w) => w.defaults.pnl },
+    ], { sort: 't', empty: 'No re-choices yet.' }).set(hist);
+
+    // ---- trades
+    const trades = d.bases.flatMap((b) => b.recent).sort((a, b) => b.exit_ts - a.exit_ts);
+    SE.table($('#bTr'), [
+      { key: 't', label: 'When', w: 130, fmt: (t) => `<span class="muted">${SE.fmtDateTime(t.ts)}</span>`, sort: (t) => t.ts },
+      { key: 'b', label: 'Market', w: 120, fmt: (t) => SE.book(t.base, 'sm') },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (t) => P.matchCell(t.home, t.away, '', t.sport, t.match_id) },
+      { key: 'o', label: 'Bet', w: 130, fmt: (t) => `${t.dir > 0 ? 'Yes' : 'No'} <b>${esc(SE.outcomeLong ? SE.outcomeLong(t.outcome) : t.outcome)}</b>${t.after_pause ? ' <span class="chip" data-tip="Right after a market pause">pause</span>' : ''}` },
+      { key: 's', label: 'Stake', cls: 'r', w: 100, tip: 'Dollars actually spent; the share of the intended stake that filled is shown when the order book was recorded.', fmt: (t) => `${money(t.spent)}${t.filled != null && t.filled < 0.999 ? `<div class="faint">${Math.round(t.filled * 100)}% filled</div>` : ''}`, sort: (t) => t.spent },
+      { key: 'e', label: 'Entry → exit', cls: 'r', w: 130, fmt: (t) => `${(t.entry * 100).toFixed(1)}¢ → ${(t.exit * 100).toFixed(1)}¢` },
+      { key: 'x', label: 'Exit', w: 100, fmt: (t) => `<span class="muted">${esc(t.reason)}</span>` },
+      { key: 'p', label: 'P&amp;L', cls: 'r', w: 100, fmt: (t) => pnl(t.pnl), sort: (t) => t.pnl },
+    ], { sort: 't', empty: 'No paper trades yet.' }).set(trades);
+  }
+  $('#bSave').addEventListener('click', async () => {
+    const start = +$('#bStart').value, share = +$('#bPct').value / 100;
+    try {
+      const r = await api('/adaptive/settings', { body: { start, pct: share } });
+      SE.toast(r.recomputing ? 'Saved. Re-running the history with the new balance' : 'Saved');
+      load();
+    } catch (e) { SE.toast(e.message, 5000); }
+  });
+  load();
+  SE.every(60000, load);
 };
 
 // ================================================================ Data

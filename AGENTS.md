@@ -72,6 +72,13 @@ Prices are decimal odds. Handicap `line` is always the HOME team's handicap.
   Polymarket top of book, as probabilities 0..1.
 - Polymarket rows in `changes` use `book='polymarket'`, with price = 1/mid.
   A spread over 0.25 is stored as null.
+- `kalshi_quotes(event, outcome, bid, ask, est)` keeps **Kalshi's own home/away** (event title
+  order), unlike every other table. Readers flip it with `matcher::names_swapped` (book_events
+  names vs matches names), as `snipe::KalshiQuotes` does. Reading it by the match's outcome
+  without that flip prices the other team (this cost the paper sim ~$330 before 2026-11-17).
+- An `open` row after earlier rows for the same (book, outcome) = a gap in recording (restart,
+  or the event dropped out of the feed). `lag::load_series` returns these as breaks; `jumps()`
+  ignores moves across them and the sim skips such triggers (`data_gap`).
 
 ## 5. API reference
 
@@ -208,3 +215,112 @@ backfill from Kalshi's 1-minute candles, run at startup).
   many points it still had to move). Same parameters as `/lag`.
 - Other new endpoints: `/quotes` (every current price), `/info`, `/control/books/{name}`,
   `/pm/settings`, `/pm/account` (Polymarket Data API v2 + signed CLOB reads; never trades).
+
+## 11. Telegram, Arbitrage Scout, market size (2026-11-17)
+
+- `src/telegram.rs`: bot inside the collector. Settings + **token** in `<db dir>/telegram.json`
+  (gitignored, never put the token in source: the repo is public). Linking: page link
+  `t.me/<bot>?start=<link_code>`, or /start from the handle saved on the page. Only the linked
+  chat gets alerts/answers. Alerts: odds moves (from the `live` broadcast, watched matches = bell,
+  batched every 4 s, per-line cooldown), arbitrage (scan every 30 s, re-sent after 1 h or +1 pt),
+  closed paper-bot trades (default Snipe sim, every 60 s). API: `GET/POST /telegram`,
+  `POST /telegram/test`, `GET /telegram/watch`, `POST /telegram/watch/{id} {on}`.
+- `src/arb.rs` + `GET /arbs?min_profit=&stake=`: pre-match only; bookmaker prices from memory
+  (event seen < 5 min), Polymarket/Kalshi legs at the recorded best ask (No = 1 - Yes bid),
+  Kalshi fee included. 1X2/winner (incl. two-leg Yes + prediction-market No), totals/handicaps/BTTS
+  at equal lines. No depth, limits or rules checks; warnings say so.
+- `src/predmeta.rs` + `GET /pred/meta` (20 s cache): per match, Polymarket/Kalshi liquidity,
+  volume, 24 h volume (from discovery; Kalshi liquidity = open interest x last price when its
+  liquidity field is 0), price moves in the last hour, cheapest outcome. Matches page tier bar.
+- Web: `pages4.js` (Telegram + Arbitrage pages, `SE.bell`, `SE.tier`).
+- `src/arbtrack.rs`: live arbitrage tracker, scan every 5 s (near misses to -3% kept for the page).
+  Opportunity = match + market + line; rows in `arb_history` (first/last/end ms, end_reason
+  gone|kickoff|restart, censored = already open at startup). Lifetime stats use only `gone` and
+  uncensored rows (14 days). "Est. left" = median lifetime of past ones that outlived the current
+  age, minus the age (needs 5+). `/arbs` serves the tracker's latest scan; `/arbs/history`.
+- Order-book depth (2026-11-18): `pm_quotes` and `kalshi_quotes` have bid_size, ask_size,
+  bid_depth, ask_depth (contracts; depth = within 2c of the best price). Polymarket keeps the
+  full book per token from `book` + `price_change` levels; Kalshi from the keyed WS
+  `orderbook_delta` channel (Yes ask = 1 - No bid). Size-only changes are written at most every
+  2 s per contract. Rows before this have NULLs = depth unknown.
+- Snipe sim: one position per move (same match within 2 min, best edge kept: `same_move`);
+  with known depth the stake fills only what rested within 2c (`fill_buy`), exits walk the book
+  (`fill_sell`, 5c penalty beyond 2c), under $10 fillable = `book_thin`. Trades carry `filled`
+  (null = depth not recorded); summaries have `by_depth`.
+- Snipe exit (2026-11-18): "caught up" is judged on the price we would sell at (bid for Yes,
+  ask for No) with half the entry spread allowed (`caught_up`), not on the mid: a blown-out
+  spread used to trigger a sale far below target.
+
+## 12. Suspicious matches + site search (2026-11-18)
+
+- `src/suspect.rs`, page `#/suspicious` (pages5.js), Telegram alert type `suspicious`
+  (`activity` / `lines` switches), thresholds in `<db dir>/suspicious.json`
+  (`GET /suspicious?days=`, `POST /suspicious/settings`).
+- A. Heavily bet lower-tier CS2 games: Polymarket Gamma tag 100780 (counter-strike-2); trades from
+  Data API **v2** `/v2/trades?condition=<conditionId>&limit=1000` (+`cursor`; v1 is retired).
+  Fills of one wallet+market+outcome+side within 60 s = one bet. Measures: money traded, big
+  underdog bets (>= $200 below 40%), big favourite bets (>= $200 at 50%+), big-bet share, price
+  drift first trade -> start. Score = mean percentile vs finished lower-tier games of the last
+  14 days (drift half weight). Table `cs2_activity`; finished games stored final once.
+  Tier 1 = VRS top 20 or both top 30: Valve's `standings_global_*.md` from GitHub, synced every
+  ~12 h; team names matched by key + `ALIASES` + unique prefix; `retier()` re-ranks stored games.
+- B. Pre-match line moves (all sports, bookmakers only): per independent platform, first price vs
+  now (margin removed); flag when the median platform moved a side >= 8 pts and 2+ platforms
+  agree; table `line_moves`. Runs every 60 s on its own loop (the CS2 backfill is slow).
+- Search: `GET /search?q=` (matches + leagues from the DB) and the sidebar box (`/` focuses).
+
+## 13. Data page + merging machines (2026-11-18)
+
+- `src/data.rs`, page `#/data` (pages5.js). `GET /data` (tables: rows, bytes from `dbstat` incl.
+  indexes, time span; cached 10 min, `?fresh=true`), `GET /data/scan` (.db files in the db folder,
+  `import/` and folders saved in `<db dir>/data.json`), `POST /data/export` (VACUUM INTO
+  `export/swifteye-<host>-<stamp>.db`), `POST /data/merge {path}`, `GET /data/job`.
+- Merge: foreign match ids mapped by shared book event -> Sportradar id -> sport + kick-off ±45 min
+  + names (Names sim >= 0.75); otherwise a new id from the live matcher (`alloc_id`, so no clash).
+  Price tables (`changes`, `pm_quotes`, `kalshi_quotes` est=0): a foreign row is skipped when this
+  db has a row for the same book event (PM event / Kalshi contract) within ±1 minute; batches of
+  20k rows with short pauses (the live writer drops a batch after a 5 s lock wait). Idempotent.
+  Recorded in table `merges`. Tested on two real-data slices (overlap skipped, new half-hour added,
+  second merge added 0).
+
+## 14. Page header + design notes (2026-11-18)
+
+- `P.head(title, tools, back)` renders a title row (`.page-head`: title + `.ph-actions`) and, when there
+  are tools, a `.toolbar` row. `SE.tidyHead(el)` (run by the router after every render; call it
+  yourself after an async re-render) moves buttons, `a.btn`, chips and plain status spans up into
+  `.ph-actions`; filters (search, selects, segs, labelled inputs) stay in the quiet toolbar.
+- Snipe window: Setup lives in a `.panel` behind the Settings button; explanations in `<details class="fold">`.
+- Suspicious game page (`#/susgame/<event>`): one uPlot chart of home-win probability from every
+  source (linked match's 1X2 changes + Polymarket trades, flipped when `pm_swapped`), big bets as
+  point series; opens zoomed to start-6h..last trade.
+- Game page extras: Kalshi history for any CS2 game Kalshi listed (KXCS2GAME, matched by names + nearest
+  date; list cached 30 min, built at start; `kget` retries 429s), and map markers: each Polymarket
+  `Map N Winner` market's `closedTime` = map N over (map N+1 starts after a short break); map 1 = Kalshi's
+  ticker start time when known (Polymarket's `startTime` is often the scheduled slot, ~1 h early), else
+  Polymarket's. `SE.chart` takes `opts.marks = [{ x, label, color }]`.
+- Snipe sim (2026-11-18 review): `book_prob` skips suspension rows (a goal = suspend then reopen; the move
+  is measured from the price before the suspension, as rank.rs does). This took no_book_price from ~900 to
+  ~20 skips and added the goal-type trades (they lost so far). `no_data` split into `no_book_price` /
+  `no_market_price`. ROI and per-trade return divide by dollars actually spent (`staked`; partial fills).
+
+## 15. Snipe paper bot: adaptive rules (2026-11-18)
+
+- `src/adaptive.rs`, `GET /adaptive`, Snipe window tab 'Paper bot' (`SE.snipeBot` in pages5.js); Telegram paper
+  alerts now come from it (`adaptive::closed_since`). Candidate table of every move (both tests, all
+  exits) built in 4-hour chunks from the raw data; re-chooses rules at 00/04/08/12/16/20 UTC per market
+  over a 10,368-rule grid incl. `skip_after_pause`. Facts (reaction, confirm, fill, slippage, fees, depth)
+  are fixed. Method v3: 30+ trades, mean - 2 SE, plateau, validation on the last 30% before the pick,
+  never adopt a negative conservative score, 0.3-pt switch margin, 24-h safety fallback to defaults.
+  Runs in table `adaptive_runs` carry `version`; a new `VERSION` deletes them and recomputes the whole
+  walk-forward history. v1/v2 lessons: first pick on 22 trades lost $1,000; v2 switched to a negative
+  candidate when the current rules had too few trades. Simulator tab has an 'All' range (since=0).
+- v4 (2026-11-18): paper balance per market (`<db dir>/paperbot.json` {start, pct}, default $10,000 / 1%;
+  `POST /adaptive/settings`; a change deletes the runs and recomputes, `KICK` wakes the loop). Each trade
+  stakes pct x (start + closed P&L), capped by free cash (`simulate`). Candidates store price + book depth
+  (`buy`, `Exit.sell`) and are priced at any stake by `fill()`. New grid dimension `walk_book` (best price
+  only vs up to 2c worse), 20,736 rules; scoring is return on the INTENDED stake (partial fills count for
+  less), judged at the stake the balance gives at pick time. `book_test` on each run compares the two order
+  sizes on moves with recorded depth.
+- Hold-to-result checked against OFFICIAL results (Gamma resolved prices, Kalshi `result`), 2026-11-18:
+  no edge (208 one-per-game Polymarket bets won 111 vs 111.2 priced in). An earlier +$19.5k "hold" figure
+  came from guessing winners from the last quote and was wrong. The edge is the short lag only.
