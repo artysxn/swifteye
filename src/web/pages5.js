@@ -252,12 +252,16 @@ SE.snipeBot = (el) => {
   };
 
   el.innerHTML = `<div class="bank-bar"><label data-tip="Each market (Polymarket, Kalshi) starts with this paper balance.">Starting balance <span class="bank-in">$<input class="input" id="bStart" type="number" min="100" step="100"></span></label><label data-tip="Every trade stakes this share of the balance at that moment (start plus closed P&amp;L), at most the cash not tied up in open trades.">Stake per trade <span class="bank-in"><input class="input" id="bPct" type="number" min="0.1" max="100" step="0.1">% of the balance</span></label><button class="btn" id="bSave">${ic('save')}Save</button><span class="faint">Saving re-runs the whole history with the new money (a few minutes).</span></div>` +
-    `<div id="bStatus" class="page-sub" style="margin-top:0"></div><div id="bBases"></div>` +
-    P.sec('show_chart', 'Honest record: balance, each pick on the 4 hours after it', '<div class="chart" id="bChart" style="height:300px"></div><div class="legend" id="bLeg"></div>', '',
-      'Every 4 hours the bot picks its rules from the data so far, then trades the next 4 hours with them. Only those unseen hours count here. Dashed: the fixed default rules on the same hours, with their own balance.') +
-    `<details class="fold" style="margin-top:26px"><summary>${ic('help')}How the paper bot chooses its rules</summary><div class="fold-body"><p class="note" style="margin:0">Every 4 hours (00, 04, 08, 12, 16 and 20 UTC) it tries 20,736 rule combinations per market on every finished trade so far. Measured facts are never tuned: reaction 1 s, a confirming check 0.5 s later, the order landing 0.25 s after that, 1¢ worse on every buy and sale, Kalshi's fee and the real order book. Each trade stakes the share of the balance set above; when the order book was recorded, the order only fills what rested there (before that, it fills in full). One of the tuned rules is the order size: buy only what rests at the best price, or also what rests up to 2¢ worse to fill more of the stake. Rules are scored on the stake the bot would place, so an order that fills only part of it counts for less. Each combination is scored by its average return minus twice its uncertainty, needs 30+ trades to count, and is judged together with its neighbours so a lucky spike cannot win. A candidate must also be profitable, and at least as good as the current rules, on the most recent 30% of the data before the pick. It never adopts rules whose conservative estimate is a loss: with nothing convincingly profitable it keeps the current rules. The rules only change when the new pick is clearly better. When the method changes, the whole history is recomputed from the first data, so the record always uses one method. If the last 24 hours of unseen-hours trading lost money over 8+ trades, it falls back to the default rules until the next pick. Paper money only.</p></div></details>` +
+    `<div id="bStatus" class="page-sub" style="margin-top:0"></div>` +
+    P.sec('account_balance_wallet', 'Open positions', '<div id="bPos"></div>', '', 'Paper positions not yet paid out: Polymarket × Kalshi arbitrage (auto or sent with Order) until the game ends. Snipe trades open and close within minutes and show under Paper trades.') +
+    `<div id="bBases"></div>` +
+    P.sec('show_chart', 'Backtest: the current rules on every move recorded', '<div class="chart" id="bChart" style="height:320px"></div><div class="legend" id="bLeg"></div>', '',
+      'Every 4 hours the bot re-picks its rules from all the data, then replays the whole dataset with them from the starting balance. Dashed: the default rules replayed the same way. In-sample: the rules were chosen on this same data, so it flatters them. Scroll to zoom, Shift + scroll to move, drag to zoom into a range, double-click to reset.') +
+    `<details class="fold" style="margin-top:26px"><summary>${ic('help')}How the paper bot chooses its rules</summary><div class="fold-body"><p class="note" style="margin:0">Every 4 hours (00, 04, 08, 12, 16 and 20 UTC) it tries 25,920 rule combinations per market on every finished trade so far. Measured facts are never tuned: reaction 1 s, a confirming check 0.5 s later, the order landing 0.25 s after that, 1¢ worse on every buy and sale, Kalshi's fee and the real order book. Each trade stakes the share of the balance set above; when the order book was recorded, the order only fills what rested there (before that, it fills in full). One of the tuned rules is the order size: buy only what rests at the best price, or also what rests up to 2¢ worse to fill more of the stake. Rules are scored on the stake the bot would place, so an order that fills only part of it counts for less. Each combination is scored by its average return minus twice its uncertainty, needs 30+ trades to count, and is judged together with its neighbours so a lucky spike cannot win. A candidate must also be profitable, and at least as good as the current rules, on the most recent 30% of the data before the pick. It never adopts rules whose conservative estimate is a loss: with nothing convincingly profitable it keeps the current rules. The rules only change when the new pick is clearly better. When the method changes, the whole history is recomputed from the first data, so the record always uses one method. If the last 24 hours of unseen-hours trading lost money over 8+ trades, it falls back to the default rules until the next pick. Paper money only.</p></div></details>` +
     P.sec('history', 'Re-choices', '<div id="bHist"></div>') +
-    P.sec('receipt_long', 'Paper trades', '<div id="bTr"></div>', '', 'Trades of the rules that were active at the time.');
+    P.sec('receipt_long', 'Paper trades', '<div id="bTr"></div>', '', 'The current rules replayed over the whole dataset, newest first.') +
+    P.sec('balance', 'Polymarket × Kalshi arbitrage (paper)', '<div id="bArbS"></div><div id="bArb"></div>', '',
+      'Every 2 seconds: Yes on one venue plus No on the other for the same outcome. One of the two always pays, so a combined cost under $1 after Kalshi\'s fee is a locked profit. Stakes 12.5% of the starting balance; only games that pay out within 6 hours; at most 4 waiting for payout at once. Needs 1%+, fresh quotes on both, recorded order-book size on both legs (the buy is capped to it), $10+ fillable, and no gap in both directions at once (that is a data error). Not checked: that both venues settle the market the same way, and that both orders fill before the book moves.');
 
   async function load() {
     let d;
@@ -265,6 +269,15 @@ SE.snipeBot = (el) => {
     lastBank = d.bank;
     if (!bankSet && d.bank && $('#bStart')) { bankSet = true; $('#bStart').value = d.bank.start; $('#bPct').value = +(d.bank.pct * 100).toFixed(2); }
     if (!$('#bBases')) return;
+    if (d.building) {
+      $('#bStatus').innerHTML = `<span class="muted">Rebuilding after a restart: measured ${d.blocks_done} of ${d.blocks_total} four-hour blocks of data. The backtest appears once every block is in (a few minutes).</span>`;
+      $('#bBases').innerHTML = '';
+      SE.destroyChart(chart); chart = null;
+      $('#bChart').innerHTML = `<div class="empty">${ic('hourglass_top')}Rebuilding: ${d.blocks_done} of ${d.blocks_total} blocks</div>`;
+      $('#bLeg').innerHTML = '';
+      setTimeout(load, 10000);
+      return;
+    }
     const ready = d.bases.some((b) => b.current);
     $('#bStatus').innerHTML = ready
       ? `Rules re-chosen every 4 hours. Last ${utc(d.bases.map((b) => b.current?.ts || 0).reduce((a, b) => Math.max(a, b), 0))}, next ${utc(d.next_run_ms)}.${d.status !== 'ready' ? ` <span class="faint">${esc(d.status)}</span>` : ''}`
@@ -275,13 +288,12 @@ SE.snipeBot = (el) => {
       const ins = c?.insample?.stats, pt = c?.pause_test;
       return `<section class="sec bot-base"><div class="sec-head"><h2>${SE.book(b.base)}</h2><div class="tools">${chip}</div></div>` +
         P.stats(
-          `<div class="stat key"><div class="stat-label">${ic('account_balance_wallet')}Paper balance</div><div class="stat-value">${money(b.balance)}</div><div class="stat-foot">${pnl(r.pnl)} on ${r.trades} trades since the first pick</div></div>`,
+          `<div class="stat key"><div class="stat-label">${ic('account_balance_wallet')}Paper balance</div><div class="stat-value">${money(b.balance)}</div><div class="stat-foot">${pnl(r.pnl)} on ${r.trades} trades, whole dataset</div></div>`,
           `<div class="stat"><div class="stat-label">${ic('trending_up')}Return per trade</div><div class="stat-value">${pct(r.roi, 2)}</div><div class="stat-foot">on ${money(r.staked)} staked</div></div>`,
           `<div class="stat"><div class="stat-label">${ic('check_circle')}Win rate</div><div class="stat-value">${r.trades ? Math.round((r.wins / r.trades) * 100) + '%' : '-'}</div><div class="stat-foot">${r.wins} of ${r.trades}</div></div>`,
-          `<div class="stat" data-tip="The fixed default rules traded on exactly the same hours."><div class="stat-label">${ic('rule')}Default rules, same hours</div><div class="stat-value">${money(b.balance_defaults)}</div><div class="stat-foot">${pnl(dr.pnl)}, ${st(dr)}</div></div>`) +
-        (c ? `<div class="bot-rules"><div class="note" style="margin:18px 0 10px">Trading now${c.fallback ? ' (defaults, safety switch)' : ''}. Highlighted: changed from the default.</div>${rulesHtml(c.active, b.default)}
+          `<div class="stat" data-tip="The default rules replayed over the same whole dataset."><div class="stat-label">${ic('rule')}Default rules, whole dataset</div><div class="stat-value">${money(b.balance_defaults)}</div><div class="stat-foot">${pnl(dr.pnl)}, ${st(dr)}</div></div>`) +
+        (c ? `<div class="bot-rules"><div class="note" style="margin:18px 0 10px">Current rules${c.fallback ? ' (defaults, safety switch)' : ''}, used for the backtest above. Highlighted: changed from the default.</div>${rulesHtml(c.active, b.default)}
           <p class="note" style="margin-top:12px">Picked ${utc(c.ts)} at a ${money(c.insample?.stake)} stake (${money(c.insample?.balance)} balance) from ${ins?.trades ?? 0} finished trades: ${pct(ins?.mean_return)} a trade on average, ${pct(ins?.conservative)} on the conservative estimate. ${c.candidates.toLocaleString('en-US')} moves measured.</p>
-          <p class="note"><b>On the entire sample</b> (a backtest of all data so far, not the honest record): these rules ${st(b.whole_sample?.current)}, ending at ${money(b.whole_sample?.current?.balance)}; the default rules ${st(b.whole_sample?.defaults)}, ending at ${money(b.whole_sample?.defaults?.balance)}.</p>
           ${bookTest(c, b)}
           <p class="note"><b>Moves right after a market pause</b> (the bookmaker suspended, then reopened at a new price), on these rules: ${st(pt?.pause_moves_alone)}. With them: ${st(pt?.with_pause_moves)}. Skipping them: ${st(pt?.skipping_them)}.</p></div>`
           : '<div class="empty">No pick yet.</div>') +
@@ -295,14 +307,10 @@ SE.snipeBot = (el) => {
       if (b.curve.length) { lists.push(b.curve); series.push({ label: `${SE.bookName(b.base)}: paper bot`, book: b.base, color: colour[b.base], width: 2.2, linear: true }); }
       if (b.curve_defaults.length) { lists.push(b.curve_defaults); series.push({ label: `${SE.bookName(b.base)}: default rules`, color: colour[b.base], width: 1.3, dash: [5, 4], linear: true }); }
     }
-    SE.destroyChart(chart);
-    chart = null;
     if (lists.length) {
       const al = SE.alignSeries(lists);
-      const marks = d.bases.flatMap((b) => b.windows.filter((w) => w.run.switched).map((w) => ({ x: w.from, label: `${SE.bookName(b.base)}: new rules` })));
-      chart = SE.chart($('#bChart'), al.xs, series.map((s, i) => ({ ...s, values: al.values[i] })), { yFmt: (v) => (v == null ? '' : money(v)), marks });
-      SE.legend($('#bLeg'), series, chart);
-    } else $('#bChart').innerHTML = `<div class="empty">${ic('show_chart')}No unseen-hours trades yet.</div>`;
+      chart = SE.chartKeep($('#bChart'), chart, al.xs, series.map((s, i) => ({ ...s, values: al.values[i] })), { yFmt: (v) => (v == null ? '' : money(v)) }, $('#bLeg'));
+    } else { SE.destroyChart(chart); chart = null; $('#bChart').innerHTML = `<div class="empty">${ic('show_chart')}No trades yet.</div>`; }
 
     // ---- re-choices
     const hist = d.bases.flatMap((b) => b.windows.map((w) => ({ ...w, base: b.base }))).sort((a, b) => b.from - a.from || a.base.localeCompare(b.base));
@@ -311,8 +319,7 @@ SE.snipeBot = (el) => {
       { key: 'b', label: 'Market', w: 130, fmt: (w) => SE.book(w.base, 'sm') },
       { key: 'r', label: 'Rules picked', cls: 'match', fmt: (w) => `<span class="${w.run.switched ? '' : 'muted'}">${esc(short(w.run.active))}</span>${w.run.fallback ? ' <span class="chip bad">defaults</span>' : w.run.switched ? ' <span class="chip accent">new</span>' : ''}` },
       { key: 'i', label: 'Picked from', w: 170, tip: 'Finished trades before the pick and their average return.', fmt: (w) => `<span class="muted">${st(w.run.insample?.stats)}</span>` },
-      { key: 'a', label: 'Next 4 h', cls: 'r', w: 130, tip: 'What these rules then did on the 4 hours they had not seen.', fmt: (w) => `${pnl(w.adaptive.pnl)}<div class="faint">${w.adaptive.trades} trades</div>`, sort: (w) => w.adaptive.pnl },
-      { key: 'd', label: 'Defaults, same 4 h', cls: 'r', w: 150, fmt: (w) => `${pnl(w.defaults.pnl)}<div class="faint">${w.defaults.trades} trades</div>`, sort: (w) => w.defaults.pnl },
+      { key: 'a', label: 'Whole dataset', cls: 'r', w: 150, tip: 'These rules replayed over every move recorded, from the starting balance.', fmt: (w) => `${pnl(w.whole.pnl)}<div class="faint">${w.whole.trades} trades, ${money(w.whole.balance)}</div>`, sort: (w) => w.whole.pnl },
     ], { sort: 't', empty: 'No re-choices yet.' }).set(hist);
 
     // ---- trades
@@ -328,6 +335,49 @@ SE.snipeBot = (el) => {
       { key: 'p', label: 'P&amp;L', cls: 'r', w: 100, fmt: (t) => pnl(t.pnl), sort: (t) => t.pnl },
     ], { sort: 't', empty: 'No paper trades yet.' }).set(trades);
   }
+  async function loadArb() {
+    let a;
+    try { a = await api('/predarb'); } catch { return; }
+    if (!$('#bArbS')) return;
+    const rej = Object.entries(a.rejected || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', ');
+    $('#bArbS').innerHTML = `<p class="note" style="margin-top:0">${a.trades} paper arbitrages (${a.open} of ${a.max_open} waiting for payout), ${money(a.staked)} staked, <b class="${a.locked_profit > 0 ? 'pos' : ''}">${money(a.locked_profit)} locked</b>. Watching ${a.watching} games listed on both. Gaps seen since start ${a.raw_gaps}${rej ? `; rejected: ${esc(rej)}` : ''}.</p>`;
+    const now = Date.now();
+    const open = (a.recent || []).filter((p) => (p.payout_ms || 0) > now);
+    SE.table($('#bPos'), [
+      { key: 't', label: 'Opened', w: 130, fmt: (p) => `<span class="muted">${SE.fmtDateTime(p.ts)}</span>${p.manual ? ' <span class="chip">Order</span>' : ''}`, sort: (p) => p.ts },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (p) => P.matchCell(p.home, p.away, '', p.sport, p.match_id) },
+      { key: 'l', label: 'Holding', w: 260, fmt: (p) => `${Math.round(p.contracts)} × Yes ${esc(p.outcome)} at ${(p.yes * 100).toFixed(1)}¢ on ${SE.bookName(p.yes_on)}<div class="faint">${Math.round(p.contracts)} × No at ${(p.no * 100).toFixed(1)}¢ on ${SE.bookName(p.yes_on === 'kalshi' ? 'polymarket' : 'kalshi')}</div>` },
+      { key: 's', label: 'Staked', cls: 'r', w: 90, fmt: (p) => money(p.cost) },
+      { key: 'p', label: 'Locked profit', cls: 'r', w: 120, fmt: (p) => `${pnl(p.profit)}<div class="faint">${pct(p.profit / p.cost)}</div>` },
+      { key: 'x', label: 'Pays out', w: 130, fmt: (p) => `<span class="muted">~${SE.fmtDateTime(p.payout_ms)}</span>`, sort: (p) => p.payout_ms },
+      { key: 'sell', label: '', w: 90, fmt: (p) => `<button class="btn sm" data-sell="${p.ts}/${p.match_id}" data-tip="Sell both legs now at the latest bids instead of waiting for the payout.">${ic('sell')}Sell</button>` },
+    ], { sort: 'x', empty: 'No open positions.' }).set(open);
+    if (!$('#bPos').dataset.wired) {
+      $('#bPos').dataset.wired = '1';
+      $('#bPos').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-sell]');
+        if (!b) return;
+        e.stopPropagation();
+        b.disabled = true;
+        try {
+          const r = await api('/predarb/sell/' + b.dataset.sell, { method: 'POST' });
+          if (r.ok) SE.toast(`Sold for ${money(r.position.close_value)}: ${r.position.pnl >= 0 ? '+' : '-'}${money(Math.abs(r.position.pnl))}`, 6000);
+          else SE.toast(r.error, 6000);
+        } catch (err) { SE.toast(err.message, 6000); }
+        loadArb();
+      }, true);
+    }
+    SE.table($('#bArb'), [
+      { key: 't', label: 'When', w: 130, fmt: (t) => `<span class="muted">${SE.fmtDateTime(t.ts)}</span>`, sort: (t) => t.ts },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (t) => P.matchCell(t.home, t.away, '', t.sport, t.match_id) + (t.live ? ' <span class="chip">live</span>' : '') },
+      { key: 'o', label: 'Outcome', w: 90, fmt: (t) => esc(t.outcome) },
+      { key: 'l', label: 'Legs', w: 230, fmt: (t) => `Yes ${(t.yes * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on)} + No ${(t.no * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on === 'kalshi' ? 'polymarket' : 'kalshi')}` },
+      { key: 's', label: 'Staked', cls: 'r', w: 90, fmt: (t) => money(t.cost) },
+      { key: 'p', label: 'Result', cls: 'r', w: 120, fmt: (t) => (t.closed_ms ? `${pnl(t.pnl)}<div class="faint">sold early</div>` : `${pnl(t.profit)}<div class="faint">${pct(t.profit / t.cost)} locked</div>`), sort: (t) => t.pnl ?? t.profit },
+    ], { sort: 't', empty: 'No arbitrage taken yet.' }).set(a.recent);
+  }
+  loadArb();
+  SE.every(15000, loadArb);
   $('#bSave').addEventListener('click', async () => {
     const start = +$('#bStart').value, share = +$('#bPct').value / 100;
     try {
@@ -346,6 +396,7 @@ SE.pages.data = {
   render(el) {
     el.innerHTML = P.head('Data', `<span class="muted" id="dAt"></span><button class="btn" id="dRe">${ic('refresh')}Recount</button>`) +
       P.stats(P.stat('dT', 'hard_drive', 'On disk', 'The database plus its write-ahead log.', true), P.stat('dC', 'swap_vert', 'Price changes'), P.stat('dP', 'candlestick_chart', 'Prediction-market quotes', 'Polymarket and Kalshi top-of-book rows.'), P.stat('dS', 'date_range', 'Recorded span')) +
+      '<p class="note" id="dClean" style="margin-top:12px"></p>' +
       P.sec('table_chart', 'Tables', '<div id="dTab"></div>', '', "Size includes each table's indexes. Click a table to see its rows.") +
       P.sec('data_object', 'Raw rows', `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><div id="dSel"></div><input class="input mono" id="dW" placeholder="Filter, e.g. book = 'unibet' AND match_id = 739" style="flex:1;min-width:260px"><button class="btn" id="dPrev">${ic('chevron_left')}Newer</button><button class="btn" id="dNext">Older${ic('chevron_right')}</button><span class="muted" id="dPg"></span></div><div id="dRaw"></div>`) +
       P.sec('merge', "Merge another machine's data", '<div id="dJob"></div><div id="dFiles"></div>', `<button class="btn" id="dScan">${ic('search')}Scan again</button><button class="btn primary" id="dExp">${ic('ios_share')}Export a snapshot</button>`,
@@ -360,6 +411,10 @@ SE.pages.data = {
       stats = await api('/data' + (fresh ? '?fresh=true' : ''));
       if (!$('#dAt')) return;
       $('#dAt').textContent = 'Counted ' + SE.fmtAgo(stats.computed_ms) + ' · ' + stats.host;
+      const cl = stats.cleanup, last = cl?.last;
+      $('#dClean').innerHTML = cl ? `<b>Cleanup</b> every 4 hours: deletes the price history of games never listed on Polymarket or Kalshi, 3 hours after the last source listed them. ` +
+        (last?.error ? `<span class="err">Last run failed: ${esc(last.error)}</span> ` : last?.finished_ms ? `Last run ${SE.fmtAgo(last.finished_ms)}: ${SE.fmtInt(last.rows)} rows of ${SE.fmtInt(last.games)} games deleted. ` : 'First run 2 minutes after start. ') +
+        `Next ${SE.fmtDateTime(cl.next_ms)}.` : '';
       const total = stats.files.filter((f) => ['Database', 'Write-ahead log', 'Shared memory'].includes(f.name)).reduce((a, f) => a + f.bytes, 0);
       const T = Object.fromEntries(stats.tables.map((t) => [t.table, t]));
       P.set('dT', SE.fmtBytes(total), esc(stats.db_path));

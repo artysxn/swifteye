@@ -91,6 +91,8 @@ pub fn stats(app: &App, fresh: bool) -> Result<Value> {
     if !fresh {
         if let Some((t, v)) = STATS.lock().clone() {
             if now_ms() - t < 600_000 {
+                let mut v = v;
+                v["cleanup"] = crate::prune::status();
                 return Ok(v);
             }
         }
@@ -170,6 +172,8 @@ pub fn stats(app: &App, fresh: bool) -> Result<Value> {
         .unwrap_or_default();
     let v = json!({"computed_ms": now_ms(), "db_path": canon(&db), "host": host(), "tables": rows, "files": files, "merges": merges});
     *STATS.lock() = Some((now_ms(), v.clone()));
+    let mut v = v;
+    v["cleanup"] = crate::prune::status();
     Ok(v)
 }
 

@@ -321,6 +321,20 @@ backfill from Kalshi's 1-minute candles, run at startup).
   only vs up to 2c worse), 20,736 rules; scoring is return on the INTENDED stake (partial fills count for
   less), judged at the stake the balance gives at pick time. `book_test` on each run compares the two order
   sizes on moves with recorded depth.
+- v5 (2026-11-18, research via `GET /adaptive/dump?reaction=&confirm=`, every move re-measured with other
+  delays): faster reaction (0.25-0.5 s, no confirm) gives FEWER trades at similar return (a 2nd book needs
+  time to move); 2.5 s gives more, 4 s hurts Polymarket. Winners: 2+ books, spread <= 2c, >= 4c expected gain,
+  >= 7 pt move (PM), sell fully caught up, long give-up; after-pause moves lose on Kalshi. Grid gained give-up
+  1800 s (EXIT_HORIZON 35 min); defaults changed to the strict rules (chosen on ALL data then: records that
+  replay the past with them are in-sample); plateau now averages eligible neighbours only (ineligible ones
+  used to pull every plateau below 0, so Kalshi could never switch).
+- Cleanup (`src/prune.rs`, 2026-11-18): every 4 h at 00/04/08/12/16/20 UTC +10 min (and 2 min after start)
+  deletes `changes` rows of games never linked to Polymarket or Kalshi and unlisted everywhere for 3 h;
+  keeps Kalshi-only games (the bot trades Kalshi) and games in `line_moves`; keeps `matches`/`book_events`.
+  Batches of 20k rows with pauses (never blocks the writer). No VACUUM: freed pages get reused. Status on the
+  Data page (`/data` -> `cleanup`). Measured when built: off-mission games were 80% of GAMES but only ~2.6% of
+  `changes` rows (~35 MB); the bulk is Polymarket 1x2 rows in `changes` (4.2M, duplicating pm_quotes as
+  1/mid), bookmaker 1x2 (2.8M) and bookmaker totals/handicaps/BTTS (2.1M).
 - Hold-to-result checked against OFFICIAL results (Gamma resolved prices, Kalshi `result`), 2026-11-18:
   no edge (208 one-per-game Polymarket bets won 111 vs 111.2 priced in). An earlier +$19.5k "hold" figure
   came from guessing winners from the last quote and was wrong. The edge is the short lag only.

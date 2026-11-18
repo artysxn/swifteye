@@ -72,13 +72,13 @@ const PM_FEE: f64 = 0.0;
 // ---- schedule
 pub const EVERY_MS: Ms = 4 * 3_600_000;
 const FIRST_AFTER_MS: Ms = 8 * 3_600_000;
-const EXIT_HORIZON_MS: Ms = 20 * 60_000;
+const EXIT_HORIZON_MS: Ms = 35 * 60_000;
 const REBUILD_MS: Ms = 5 * 60_000;
 const PAUSE_WINDOW_MS: Ms = 120_000;
 
 // ---- choosing
 /// Method version: stored with every run; a change recomputes the history.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 const MIN_N: usize = 30;
 /// Standard errors subtracted from the average return.
 const SE_K: f64 = 2.0;
@@ -99,12 +99,12 @@ const EDGE: [f64; 4] = [0.0, 0.01, 0.02, 0.04];
 const SPREAD: [f64; 3] = [0.02, 0.04, 0.06];
 const MOVE: [f64; 3] = [0.04, 0.07, 0.10];
 const CATCH: [f64; 3] = [0.50, 0.75, 1.00];
-const GIVE: [i64; 4] = [60, 120, 300, 900];
+const GIVE: [i64; 5] = [60, 120, 300, 900, 1800];
 const PAUSE: [bool; 2] = [false, true];
 /// Order size: false = only what rests at the best price; true = also what rests up to 2c worse.
 const WALK: [bool; 2] = [false, true];
 const ND: usize = 9;
-const DIMS: [usize; ND] = [3, 4, 4, 3, 3, 3, 4, 2, 2];
+const DIMS: [usize; ND] = [3, 4, 4, 3, 3, 3, 5, 2, 2];
 type Idx = [usize; ND];
 
 fn yes() -> bool {
@@ -157,7 +157,10 @@ fn idx_of(p: &Policy) -> Idx {
 
 /// The fixed default rules (the Snipe window's gates).
 fn default_idx(base: &str) -> Idx {
-    if base == PM { [1, 1, 1, 0, 0, 1, 2, 0, 1] } else { [1, 2, 2, 1, 0, 1, 2, 0, 1] }
+    // Chosen 18 Nov from ~19 h of merged PC + Mac data (stricter, patient): Polymarket 2+ books,
+    // <=50% followed, >=4c gain, <=2c spread, >=7 pt move, sell fully caught up, give up 15 min;
+    // Kalshi 1+ book, <=25% followed, >=4c gain, <=2c spread, sell at 50%, 15 min, skip pauses.
+    if base == PM { [1, 3, 3, 0, 1, 2, 3, 0, 1] } else { [0, 2, 3, 0, 0, 0, 3, 1, 1] }
 }
 
 fn flat(i: &Idx) -> usize {
@@ -173,7 +176,7 @@ fn unflat(mut f: usize) -> Idx {
     i
 }
 
-const GRID: usize = 3 * 4 * 4 * 3 * 3 * 3 * 4 * 2 * 2;
+const GRID: usize = 3 * 4 * 4 * 3 * 3 * 3 * 5 * 2 * 2;
 
 // ---------------------------------------------------------------- money
 
@@ -190,6 +193,11 @@ impl Default for Bank {
     fn default() -> Self {
         Bank { start: 10_000.0, pct: 0.01 }
     }
+}
+
+/// The current paper balance settings.
+pub fn bank() -> Bank {
+    ST.lock().bank
 }
 
 fn bank_path(app: &App) -> PathBuf {
@@ -267,7 +275,7 @@ struct Cand {
     buy: Option<(f64, f64)>,
     pause: bool,
     /// [catch][give-up]; None = not known yet.
-    exits: [[Option<Exit>; 4]; 3],
+    exits: [[Option<Exit>; 5]; 3],
 }
 
 fn fee(pm: bool, n: f64, p: f64) -> f64 {
@@ -316,11 +324,11 @@ fn after_pause(c: &Connection, book: &str, match_id: i64, outcome: &str, t0: Ms)
 
 /// One move measured exactly as the simulator does, with only what is known at each moment.
 /// None when no rule in the grid could take it (or prices are missing).
-fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms, base: &str, now: Ms) -> Option<Cand> {
+fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms, base: &str, now: Ms, tm: (Ms, Ms)) -> Option<Cand> {
     let pm = base == PM;
     let (mid, o) = (e.match_id, e.outcome.as_str());
     let dir = e.direction as f64;
-    let (td, td2) = (t0 + REACTION, t0 + REACTION + CONFIRM);
+    let (td, td2) = (t0 + tm.0, t0 + tm.0 + tm.1);
     let tf = td2 + FILL;
     let b_pre = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS)?;
     let (b1, b2) = (snipe::book_prob(c, tb, mid, o, td)?, snipe::book_prob(c, tb, mid, o, td2)?);
@@ -372,7 +380,7 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     }
     // Every sale: catch-up judged on the price we would sell at; else the give-up time.
     let path = q.path(mid, o, tf, tf + GIVE[GIVE.len() - 1] * 1000);
-    let mut exits = [[None; 4]; 3];
+    let mut exits = [[None; 5]; 3];
     for (ci, &k) in CATCH.iter().enumerate() {
         for (gi, &g) in GIVE.iter().enumerate() {
             let give = tf + g * 1000;
@@ -420,6 +428,10 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
 
 /// Every move in [start, end) for both markets.
 fn build_chunk(db: &std::path::Path, start: Ms, end: Ms, now: Ms) -> anyhow::Result<[Vec<Cand>; 2]> {
+    build_chunk_with(db, start, end, now, (REACTION, CONFIRM))
+}
+
+fn build_chunk_with(db: &std::path::Path, start: Ms, end: Ms, now: Ms, tm: (Ms, Ms)) -> anyhow::Result<[Vec<Cand>; 2]> {
     let p = crate::lag::Params {
         since: start,
         until: end,
@@ -442,7 +454,7 @@ fn build_chunk(db: &std::path::Path, start: Ms, end: Ms, now: Ms) -> anyhow::Res
                 continue;
             }
             let (Some(tb), Some(t0)) = (e.first_book.clone(), e.first_book_ms) else { continue };
-            if let Some(cd) = make_cand(&c, &mut *q, e, &tb, t0, base, now) {
+            if let Some(cd) = make_cand(&c, &mut *q, e, &tb, t0, base, now, tm) {
                 out[bi].push(cd);
             }
         }
@@ -544,16 +556,16 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
 }
 
 /// Every candidate's result at one stake: [order size][catch][give-up] = (P&L, dollars spent).
-type Priced = [[[Option<(f64, f64)>; 4]; 3]; 2];
+type Priced = [[[Option<(f64, f64)>; 5]; 3]; 2];
 
 fn price_all(cands: &[&Cand], stake: f64) -> Vec<Priced> {
     cands
         .iter()
         .map(|c| {
-            let mut p: Priced = [[[None; 4]; 3]; 2];
+            let mut p: Priced = [[[None; 5]; 3]; 2];
             for (w, &walk) in WALK.iter().enumerate() {
                 for ci in 0..3 {
-                    for gi in 0..4 {
+                    for gi in 0..GIVE.len() {
                         if let Some(x) = &c.exits[ci][gi] {
                             p[w][ci][gi] = fill(c, x, stake, walk).map(|f| (f.pnl, f.spent));
                         }
@@ -598,14 +610,17 @@ fn choose(cands: &[&Cand], pr: &[Priced], stake: f64, t: Ms, prev: Option<Idx>, 
     let plateau = |f: usize| {
         let i = unflat(f);
         let (mut sum, mut k) = (lower[f].0, 1.0);
+        let ok = |g: usize| lower[g].1 >= MIN_N;
         for d in 0..ND {
             for step in [-1i64, 1] {
                 let v = i[d] as i64 + step;
                 if v >= 0 && (v as usize) < DIMS[d] {
                     let mut j = i;
                     j[d] = v as usize;
-                    sum += lower[flat(&j)].0;
-                    k += 1.0;
+                    if ok(flat(&j)) {
+                        sum += lower[flat(&j)].0;
+                        k += 1.0;
+                    }
                 }
             }
         }
@@ -732,6 +747,8 @@ struct State {
     error: Option<String>,
     data_from: Option<Ms>,
     bank: Bank,
+    /// Every block measured once since start (until then the page shows progress, not a partial backtest).
+    warm: bool,
 }
 
 static ST: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
@@ -924,7 +941,9 @@ fn step(app: &App) -> anyhow::Result<()> {
         }
         t += EVERY_MS;
     }
-    ST.lock().status = "ready".into();
+    let mut st = ST.lock();
+    st.status = "ready".into();
+    st.warm = true;
     Ok(())
 }
 
@@ -949,75 +968,64 @@ fn balance_curve(from: Ms, start: f64, trades: &[(Ms, f64)]) -> Vec<Value> {
     std::iter::once(json!([from, start])).chain(v.into_iter().map(|(t, p)| { bal += p; json!([t, bal]) })).collect()
 }
 
-struct Record {
-    windows: Vec<Value>,
-    trades: Vec<Value>,
-    curve: Vec<Value>,
-    curve_defaults: Vec<Value>,
-    tot: Stats,
-    tot_def: Stats,
+/// One set of rules replayed over every move recorded, with a fresh paper balance.
+fn backtest(cands: &[&Cand], p: &Policy, now: Ms, bank: &Bank, base: &str) -> (Vec<Value>, Stats, Vec<Value>) {
+    let (taken, s) = simulate(cands, &[(*p, 0, now + 1)], now, bank);
+    let from = cands.first().map(|c| c.tf).unwrap_or(now);
+    let curve = if taken.is_empty() { Vec::new() } else { balance_curve(from, bank.start, &taken.iter().map(|x| (x.x.ts, x.f.pnl)).collect::<Vec<_>>()) };
+    let mut trades: Vec<Value> = taken.iter().map(|x| trade_json(base, x)).collect();
+    trades.sort_by_key(|t| t["exit_ts"].as_i64());
+    (trades, s, curve)
 }
 
-/// Walk-forward with the paper balance: each run's active rules on the hours until the next run
-/// (sales known now); the default rules on the same hours with their own balance.
-fn record(base: &str, bi: usize, chunks: &[[Arc<Vec<Cand>>; 2]], runs: &[Run], now: Ms, bank: &Bank) -> Record {
-    let cands = all_cands(chunks, bi);
-    let rs: Vec<&Run> = runs.iter().filter(|r| r.base == base).collect();
-    let (a, tot) = simulate(&cands, &segments(&rs, now + 1, |r| r.active), now, bank);
-    let (d, tot_def) = simulate(&cands, &segments(&rs, now + 1, |_| policy(&default_idx(base))), now, bank);
-    let (mut wa, mut wd) = (vec![Stats::default(); rs.len()], vec![Stats::default(); rs.len()]);
-    for x in &a {
-        wa[x.seg].add(x.f.pnl, x.f.spent, x.stake);
-    }
-    for x in &d {
-        wd[x.seg].add(x.f.pnl, x.f.spent, x.stake);
-    }
-    let windows = rs
-        .iter()
-        .enumerate()
-        .map(|(k, r)| {
-            let end = rs.get(k + 1).map(|n| n.ts).unwrap_or(now + 1);
-            json!({"run": r, "from": r.ts, "to": end.min(now), "adaptive": wa[k].json(), "defaults": wd[k].json()})
-        })
-        .collect();
-    let from = rs.first().map(|r| r.ts).unwrap_or(now);
-    let curve = balance_curve(from, bank.start, &a.iter().map(|x| (x.x.ts, x.f.pnl)).collect::<Vec<_>>());
-    let curve_defaults = balance_curve(from, bank.start, &d.iter().map(|x| (x.x.ts, x.f.pnl)).collect::<Vec<_>>());
-    let trades = a.iter().map(|x| trade_json(base, x)).collect();
-    Record { windows, trades, curve: if a.is_empty() { Vec::new() } else { curve }, curve_defaults: if d.is_empty() { Vec::new() } else { curve_defaults }, tot, tot_def }
-}
-
+/// The paper bot as a backtest: the rules picked last (from every finished trade so far) replayed
+/// over the WHOLE dataset; each re-pick re-runs it. The default rules replayed the same way for
+/// comparison. Each run in the history also shows its rules over the whole dataset.
 pub fn view(_app: &App) -> Value {
     let now = now_ms();
     let chunks = snapshot();
-    let (runs, status, error, from, nchunks, bank) = {
+    let (runs, status, error, from, nchunks, bank, warm) = {
         let st = ST.lock();
-        (st.runs.clone(), st.status.clone(), st.error.clone(), st.data_from, st.chunks.len(), st.bank)
+        (st.runs.clone(), st.status.clone(), st.error.clone(), st.data_from, st.chunks.len(), st.bank, st.warm)
     };
+    let blocks_total = from.map(|f| ((boundary(now) - boundary(f)) / EVERY_MS + 1) as usize).unwrap_or(0);
+    if !warm {
+        return json!({"now_ms": now, "status": status, "error": error, "building": true, "blocks_done": nchunks.min(blocks_total), "blocks_total": blocks_total, "bank": bank, "bases": []});
+    }
     let bases: Vec<Value> = BASES
         .iter()
         .enumerate()
         .map(|(bi, base)| {
-            let rec = record(base, bi, &chunks, &runs, now, &bank);
-            let mut trades = rec.trades;
-            trades.sort_by_key(|t| t["exit_ts"].as_i64());
-            let current = runs.iter().filter(|r| r.base == *base).last().cloned();
-            // The rules trading now, and the defaults, on the entire sample with a fresh balance
-            // (in-sample: a backtest, not the honest record).
             let cands = all_cands(&chunks, bi);
-            let whole = |p: &Policy| {
-                let (_, s) = simulate(&cands, &[(*p, 0, now + 1)], now, &bank);
-                let mut v = s.json();
-                v["balance"] = json!(bank.start + s.pnl);
-                v
-            };
-            let whole_sample = json!({"current": current.as_ref().map(|r| whole(&r.active)), "defaults": whole(&policy(&default_idx(base)))});
+            let current = runs.iter().filter(|r| r.base == *base).last().cloned();
+            let rules = current.as_ref().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(base)));
+            let (trades, tot, curve) = backtest(&cands, &rules, now, &bank, base);
+            let (_, tot_def, curve_defaults) = backtest(&cands, &policy(&default_idx(base)), now, &bank, base);
+            // Every pick's rules over the whole dataset (same rules -> same numbers, computed once).
+            let mut memo: Vec<(Policy, Value)> = Vec::new();
+            let windows: Vec<Value> = runs
+                .iter()
+                .filter(|r| r.base == *base)
+                .map(|r| {
+                    let v = match memo.iter().find(|(p, _)| *p == r.active) {
+                        Some((_, v)) => v.clone(),
+                        None => {
+                            let (_, s) = simulate(&cands, &[(r.active, 0, now + 1)], now, &bank);
+                            let mut v = s.json();
+                            v["balance"] = json!(bank.start + s.pnl);
+                            memo.push((r.active, v.clone()));
+                            v
+                        }
+                    };
+                    json!({"run": r, "from": r.ts, "whole": v})
+                })
+                .collect();
             let depth_known = cands.iter().filter(|c| c.buy.is_some()).count();
-            let recent: Vec<Value> = trades.iter().rev().take(60).cloned().collect();
-            json!({"base": base, "current": current, "default": policy(&default_idx(base)), "whole_sample": whole_sample,
-                "record": rec.tot.json(), "defaults_record": rec.tot_def.json(),
-                "balance": bank.start + rec.tot.pnl, "balance_defaults": bank.start + rec.tot_def.pnl,
-                "curve": rec.curve, "curve_defaults": rec.curve_defaults, "windows": rec.windows, "recent": recent,
+            let recent: Vec<Value> = trades.iter().rev().take(80).cloned().collect();
+            json!({"base": base, "current": current, "rules": rules, "default": policy(&default_idx(base)),
+                "record": tot.json(), "defaults_record": tot_def.json(),
+                "balance": bank.start + tot.pnl, "balance_defaults": bank.start + tot_def.pnl,
+                "curve": curve, "curve_defaults": curve_defaults, "windows": windows, "recent": recent,
                 "candidates": cands.len(), "depth_known": depth_known})
         })
         .collect();
@@ -1027,7 +1035,7 @@ pub fn view(_app: &App) -> Value {
         "every_ms": EVERY_MS, "min_trades": MIN_N, "version": VERSION, "grid": GRID, "bank": bank, "bases": bases})
 }
 
-/// Closed paper trades with a sale after `since` (for Telegram).
+/// Newly closed paper trades of the current rules (for Telegram).
 pub fn closed_since(since: Ms) -> Vec<Value> {
     let now = now_ms();
     let chunks = snapshot();
@@ -1037,8 +1045,10 @@ pub fn closed_since(since: Ms) -> Vec<Value> {
     };
     let mut out = Vec::new();
     for (bi, base) in BASES.iter().enumerate() {
-        let rec = record(base, bi, &chunks, &runs, now, &bank);
-        out.extend(rec.trades.into_iter().filter(|t| t["exit_ts"].as_i64().unwrap_or(0) > since));
+        let cands = all_cands(&chunks, bi);
+        let rules = runs.iter().filter(|r| r.base == *base).last().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(base)));
+        let (trades, _, _) = backtest(&cands, &rules, now, &bank, base);
+        out.extend(trades.into_iter().filter(|t| t["exit_ts"].as_i64().unwrap_or(0) > since));
     }
     out.sort_by_key(|t| t["exit_ts"].as_i64());
     out
@@ -1067,7 +1077,7 @@ mod tests {
             px,
             buy,
             pause: false,
-            exits: [[None; 4]; 3],
+            exits: [[None; 5]; 3],
         }
     }
 
@@ -1093,4 +1103,33 @@ mod tests {
             assert_eq!(idx_of(&policy(&unflat(f))), unflat(f));
         }
     }
+}
+
+/// Research dump: every move re-measured with another reaction / confirm delay, flattened with
+/// its features and the result of every sale at a $25 stake (walking the book).
+pub fn dump(app: &App, reaction: Ms, confirm: Ms) -> anyhow::Result<Value> {
+    let now = now_ms();
+    let from: Ms = {
+        let c = crate::store::open_ro(&app.db_path)?;
+        c.query_row("SELECT MIN(ts_ms) FROM changes", [], |r| r.get::<_, Option<Ms>>(0))?.unwrap_or(now)
+    };
+    let mut out = Vec::new();
+    let mut start = boundary(from);
+    while start < now {
+        let ch = build_chunk_with(&app.db_path, start, (start + EVERY_MS).min(now + 1), now, (reaction, confirm))?;
+        for (bi, v) in ch.iter().enumerate() {
+            for c in v {
+                let mut ex = Vec::new();
+                for ci in 0..3 {
+                    for gi in 0..GIVE.len() {
+                        ex.push(c.exits[ci][gi].and_then(|x| fill(c, &x, 25.0, true)).map(|f| (f.pnl / 25.0 * 10_000.0).round() / 10_000.0));
+                    }
+                }
+                out.push(json!({"b": BASES[bi], "m": c.match_id, "s": c.sport, "o": c.outcome, "d": c.dir, "tr": c.trigger, "t": c.tf,
+                    "k": c.books, "bm": c.bm, "fol": c.fol, "sp": c.sp, "e": c.edge[1], "px": c.px, "p": c.pause, "dep": c.buy.is_some(), "x": ex}));
+            }
+        }
+        start += EVERY_MS;
+    }
+    Ok(json!({"reaction": reaction, "confirm": confirm, "catch": CATCH, "give": GIVE, "rows": out}))
 }

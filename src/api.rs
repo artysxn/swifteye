@@ -54,6 +54,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/snipe", get(snipe))
         .route("/adaptive", get(adaptive))
         .route("/adaptive/settings", post(adaptive_settings))
+        .route("/adaptive/dump", get(adaptive_dump))
+        .route("/predarb", get(predarb))
+        .route("/predarb/order/{id}", post(predarb_order))
+        .route("/predarb/sell/{ts}/{id}", post(predarb_sell))
         .route("/api", get(index))
         .route("/ui", get(ui))
         .route("/quotes", get(quotes))
@@ -1106,6 +1110,46 @@ async fn rankings(State(app): S, Query(q): Query<LagQ>) -> Response {
 /// The adaptive paper bot: current rules, the 4-hourly re-choices and the walk-forward record.
 async fn adaptive(State(app): S) -> Response {
     match tokio::task::spawn_blocking(move || crate::adaptive::view(&app)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct DumpQ {
+    reaction: Option<i64>,
+    confirm: Option<i64>,
+}
+
+/// Research: every move re-measured with another reaction / confirm delay.
+async fn adaptive_dump(State(app): S, Query(q): Query<DumpQ>) -> Response {
+    let (r, c) = (q.reaction.unwrap_or(1000), q.confirm.unwrap_or(500));
+    match tokio::task::spawn_blocking(move || crate::adaptive::dump(&app, r, c)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Order button on the Arbitrage Scout: paper-take the Polymarket x Kalshi arbitrage of one game.
+async fn predarb_order(State(app): S, Path(id): Path<i64>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::predarb::order(&app, id)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Sell an open paper arbitrage at the latest prices.
+async fn predarb_sell(State(app): S, Path((ts, id)): Path<(i64, i64)>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::predarb::sell(&app, ts, id)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Paper Polymarket x Kalshi arbitrage.
+async fn predarb(State(app): S) -> Response {
+    match tokio::task::spawn_blocking(move || crate::predarb::view(&app)).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }

@@ -39,7 +39,7 @@ pub struct OddsAlerts {
 
 impl Default for OddsAlerts {
     fn default() -> Self {
-        OddsAlerts { enabled: true, watched_only: true, min_move_pts: 3.0, markets: vec!["1x2".into()], sources: "all".into(), cooldown_s: 60, watch: Vec::new(), games: HashMap::new() }
+        OddsAlerts { enabled: false, watched_only: true, min_move_pts: 3.0, markets: vec!["1x2".into()], sources: "all".into(), cooldown_s: 60, watch: Vec::new(), games: HashMap::new() }
     }
 }
 
@@ -96,7 +96,7 @@ pub struct ArbAlerts {
 
 impl Default for ArbAlerts {
     fn default() -> Self {
-        ArbAlerts { enabled: true, min_profit_pct: 1.0, stake: 100.0 }
+        ArbAlerts { enabled: false, min_profit_pct: 1.0, stake: 100.0 }
     }
 }
 
@@ -113,14 +113,27 @@ pub struct SuspAlerts {
 
 impl Default for SuspAlerts {
     fn default() -> Self {
-        SuspAlerts { enabled: true, activity: true, lines: true }
+        SuspAlerts { enabled: false, activity: true, lines: true }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+/// Paper bot activity: the default (and only default-on) Telegram message.
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct PaperAlerts {
     pub enabled: bool,
+    /// Snipe trades (bought and sold within minutes): one line each when they close.
+    pub trades: bool,
+    /// Polymarket x Kalshi arbitrage: bought, sold early, paid out.
+    pub arbs: bool,
+    /// Current paper balances on Polymarket and Kalshi under every message.
+    pub standings: bool,
+}
+
+impl Default for PaperAlerts {
+    fn default() -> Self {
+        PaperAlerts { enabled: true, trades: true, arbs: true, standings: true }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -673,6 +686,7 @@ async fn odds_loop(app: Arc<App>) {
 async fn scan_loop(app: Arc<App>) {
     let mut sent_arbs: HashMap<String, (Ms, f64)> = HashMap::new();
     let mut paper_seen: Ms = now_ms();
+    let mut arb_seen: Ms = now_ms();
     let mut tick: u64 = 0;
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -712,8 +726,15 @@ async fn scan_loop(app: Arc<App>) {
         }
         if c.paper.enabled && tick % 2 == 0 {
             // Closed trades of the adaptive paper bot (rules re-chosen every 4 hours).
-            let trades = tokio::task::spawn_blocking(move || crate::adaptive::closed_since(paper_seen)).await.unwrap_or_default();
+            let trades = if c.paper.trades { tokio::task::spawn_blocking(move || crate::adaptive::closed_since(paper_seen)).await.unwrap_or_default() } else { Vec::new() };
             let mut lines = Vec::new();
+            if c.paper.arbs {
+                let a2 = app.clone();
+                let since = arb_seen;
+                let (evs, upto) = tokio::task::spawn_blocking(move || crate::predarb::events_since(&a2, since)).await.unwrap_or_default();
+                arb_seen = arb_seen.max(upto);
+                lines.extend(evs);
+            }
             for t in &trades {
                 paper_seen = paper_seen.max(t["exit_ts"].as_i64().unwrap_or(0));
                 let pnl = t["pnl"].as_f64().unwrap_or(0.0);
@@ -733,7 +754,14 @@ async fn scan_loop(app: Arc<App>) {
                 ));
             }
             if !lines.is_empty() {
-                let _ = send("paper", &format!("<b>Paper bot</b> (adaptive rules, share of the balance a trade)\n{}", lines.join("\n"))).await;
+                let mut text = format!("<b>Paper bot</b>\n{}", lines.join("\n"));
+                if c.paper.standings {
+                    let a2 = app.clone();
+                    if let Ok(st) = tokio::task::spawn_blocking(move || standings(&a2)).await {
+                        text.push_str(&format!("\n\n{st}"));
+                    }
+                }
+                let _ = send("paper", &text).await;
             }
         }
     }
@@ -784,4 +812,18 @@ mod tests {
         assert_eq!(o.move_floor(), o.min_move_pts);
         let _ = std::fs::remove_file(PATH.lock().clone());
     }
+}
+
+/// Current paper standings: each market's backtest balance (snipe) and the arbitrage totals.
+fn standings(app: &App) -> String {
+    let v = crate::adaptive::view(app);
+    let a = crate::predarb::view(app);
+    let mut out = String::from("<b>Standings</b>");
+    for b in v["bases"].as_array().cloned().unwrap_or_default() {
+        let bal = b["balance"].as_f64().unwrap_or(0.0);
+        let start = v["bank"]["start"].as_f64().unwrap_or(0.0);
+        out.push_str(&format!("\n{}: ${:.2} ({}${:.2})", if b["base"] == "kalshi" { "Kalshi" } else { "Polymarket" }, bal, if bal >= start { "+" } else { "-" }, (bal - start).abs()));
+    }
+    out.push_str(&format!("\nArbitrage: {} taken, ${:.2} locked", a["trades"].as_u64().unwrap_or(0), a["locked_profit"].as_f64().unwrap_or(0.0)));
+    out
 }

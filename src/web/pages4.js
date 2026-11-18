@@ -167,7 +167,10 @@ SE.pages.telegram = {
           <div class="field"><label data-tip="The same price on the same source does not alert again within this time.">Repeat after</label><div id="tgCd"></div></div>
           <div class="field"><label data-tip="Pre-match arbitrage from the Arbitrage Scout, checked every 30 s. The same one is sent again after an hour or when it gets a point better.">Arbitrage</label><div>${sw('tgArb', a.enabled)}</div></div>
           <div class="field"><label>Smallest return</label><div style="display:flex;gap:8px;align-items:center"><input class="input" type="number" id="tgArbMin" step="0.5" value="${a.min_profit_pct}" style="width:90px">%<span class="muted" style="margin-left:18px">Stake for the split $</span><input class="input" type="number" id="tgStake" min="1" step="10" value="${a.stake}" style="width:100px"></div></div>
-          <div class="field"><label data-tip="Each closed trade of the Snipe window paper bot (default rules, $100 a trade). Paper money only.">Paper bot trades</label><div>${sw('tgPaper', s.paper.enabled)}</div></div>
+          <div class="field"><label data-tip="Paper bot activity, checked every minute. Paper money only. On by default; the other alert types are off by default.">Paper bot activity</label><div>${sw('tgPaper', s.paper.enabled)}</div></div>
+          <div class="field"><label data-tip="Each snipe trade when it closes (bought and sold within minutes).">· Snipe trades</label><div>${sw('tgPaperT', s.paper.trades)}</div></div>
+          <div class="field"><label data-tip="Polymarket × Kalshi arbitrage: bought, sold early, paid out.">· Arbitrage positions</label><div>${sw('tgPaperA', s.paper.arbs)}</div></div>
+          <div class="field"><label data-tip="Current paper balances on Polymarket and Kalshi, and the arbitrage total, under every message.">· Standings</label><div>${sw('tgPaperS', s.paper.standings)}</div></div>
           <div class="field"><label data-tip="Games flagged on the Suspicious page. Thresholds are set there.">Suspicious matches</label><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">${sw('tgSus', s.suspicious?.enabled !== false)}<label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" id="tgSusA" ${s.suspicious?.activity !== false ? 'checked' : ''}>Heavily bet CS2 games</label><label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" id="tgSusL" ${s.suspicious?.lines !== false ? 'checked' : ''}>Pre-match line moves</label><a href="#/suspicious" class="muted">Thresholds</a></div></div>`)}
         ${P.sec('sports_esports', 'By game', `
           <p class="note" style="margin:0 0 12px">Each game can follow the settings above or use its own. Leave a box empty or on <i>Same</i> to use the general value. A game switched off is silent, bell-watched matches included.</p>
@@ -186,6 +189,9 @@ SE.pages.telegram = {
       on('tgOdds', (t) => save({ odds: { enabled: t.checked } }));
       on('tgArb', (t) => save({ arbs: { enabled: t.checked } }));
       on('tgPaper', (t) => save({ paper: { enabled: t.checked } }));
+      on('tgPaperT', (t) => save({ paper: { trades: t.checked } }));
+      on('tgPaperA', (t) => save({ paper: { arbs: t.checked } }));
+      on('tgPaperS', (t) => save({ paper: { standings: t.checked } }));
       on('tgSus', (t) => save({ suspicious: { enabled: t.checked } }));
       on('tgSusA', (t) => save({ suspicious: { activity: t.checked } }));
       on('tgSusL', (t) => save({ suspicious: { lines: t.checked } }));
@@ -212,7 +218,8 @@ SE.pages.telegram = {
 SE.pages.arbs = {
   title: 'Arbitrage Scout',
   render(el) {
-    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake $<input class="input" id="aSt" type="number" min="1" step="10" value="${SE.pref('arbStake') || 100}" style="width:90px"></label>`) +
+    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake $<input class="input" id="aSt" type="number" min="1" step="10" value="${SE.pref('arbStake') || 100}" style="width:90px"></label><button class="btn" id="aHb">${ic('history')}History</button>`) +
+      `<div class="panel" id="aHist" hidden><div class="sec-head" style="margin-bottom:10px"><h2>${ic('history')}Past arbitrage</h2><div class="tools"><span class="muted" id="aHn"></span></div></div><div id="aHt"></div></div>` +
       `<div class="src-filter" id="aBk"></div>` +
       P.stats(P.stat('aN', 'balance', 'Arbitrage now', 'Pre-match sets of bets that pay out more than they cost, whatever the result.', true), P.stat('aB', 'trending_up', 'Best return'), P.stat('aL', 'hourglass_bottom', 'Typical lifetime', 'Median time an arbitrage stayed open before closing on its own, from the live scan every 5 s. Ones that ended at kick-off or with a restart are left out.'), P.stat('aNear', 'near_me', 'Within 2% of one', 'Sets that cost up to 2% more than they pay: one price move away.')) +
       P.sec('balance', 'Opportunities', '<div id="aT"></div>', '<span class="muted" id="aScan"></span>', 'Best price for each outcome across every source, pre-match only, scanned every 5 s. Polymarket and Kalshi legs use the best ask (No = 1 minus the Yes bid), Kalshi with its taker fee.') +
@@ -239,7 +246,21 @@ SE.pages.arbs = {
       { key: 'left', label: 'Est. left', cls: 'r', tip: 'Median lifetime of past arbitrage that lasted at least this long, minus how long this one has been open. A rough guide, not a promise.', fmt: (r) => left(r), sort: (r) => r.left_ms },
       { key: 'l', label: 'Bets', fmt: (r) => `<div class="legs">${r.legs.map((l) => `<div><span class="leg-o">${outLabel(l)}</span> ${SE.book(l.book, 'sm')} <b>${l.odds.toFixed(2)}</b> <span class="muted">$${l.stake.toFixed(2)}</span> <span class="faint">${SE.fmtAgo(l.updated_ms)}</span></div>`).join('')}</div>` },
       { key: 'w', label: '', fmt: (r) => (r.warn.length ? `<span class="ic faint" data-tip="${esc(r.warn.join('. '))}">warning</span>` : '') },
+      { key: 'ord', label: '', w: 96, fmt: (r) => (held.has(+r.match_id) ? `<span class="chip accent" data-tip="The paper bot already holds an arbitrage on this game (Snipe window → Paper bot → Open positions).">${ic('check')}Bought</span>` : r.profit > 0 && r.legs.every((l) => SE.PRED.includes(l.book)) ? `<button class="btn sm primary" data-ord="${+r.match_id}" data-tip="Send to the paper bot: it re-prices the game from the latest Polymarket and Kalshi quotes and takes the arbitrage if it is still there (12.5% of the starting balance, capped to the order book). Later this places the real orders.">${ic('bolt')}Order</button>` : '') },
     ], { sort: 'p', empty: 'No pre-match arbitrage right now. Try Near misses.', emptyIcon: 'balance', onClick: (r) => SE.go('#/match/' + r.match_id) });
+    // Order button (rows re-render every 5 s, so listen on the table).
+    $('#aT').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-ord]');
+      if (!b) return;
+      e.stopPropagation();
+      b.disabled = true;
+      try {
+        const r = await api('/predarb/order/' + b.dataset.ord, { method: 'POST' });
+        if (r.ok) { held.add(+b.dataset.ord); b.outerHTML = `<span class="chip accent">${ic('check')}Bought</span>`; const p = r.taken[0]; SE.toast(`Paper order: Yes ${(p.yes * 100).toFixed(1)}¢ on ${SE.bookName(p.yes_on)} + No ${(p.no * 100).toFixed(1)}¢, $${p.cost.toFixed(2)} staked, $${p.profit.toFixed(2)} locked`, 6000); }
+        else SE.toast(r.error, 6000);
+      } catch (err) { SE.toast(err.message, 6000); }
+      if (b.isConnected) b.disabled = false;
+    }, true);
     // Sources you can bet on: only arbitrage whose every bet is on one of them (none chosen = all).
     const books = new Set(SE.pref('arbBooks') || []);
     function drawBooks(arbs) {
@@ -259,8 +280,10 @@ SE.pages.arbs = {
         load();
       }));
     }
+    let held = new Set();
     async function load() {
       const stake = Math.max(1, +$('#aSt').value || 100);
+      try { const a = await api('/predarb'); const now = Date.now(); held = new Set(a.recent.filter((p) => (p.payout_ms || 0) > now).map((p) => +p.match_id)); } catch {}
       const r = await api(`/arbs?min_profit=${Math.min(min, -0.02)}&stake=${stake}`);
       life = r.lifetime;
       const q = $('#aQ').value.trim().toLowerCase();
@@ -289,6 +312,29 @@ SE.pages.arbs = {
         : `<div class="empty">${ic('history')}None closed yet.</div>`;
       $$('#aH tr[data-m]').forEach((tr) => tr.addEventListener('click', () => SE.go('#/match/' + tr.dataset.m)));
     }
+    // Full history: every finished arbitrage the live scan saw (with the "Bet on" filter applied).
+    const ht = SE.table($('#aHt'), [
+      { key: 'e', label: 'Closed', w: 130, fmt: (x) => `<span class="muted">${SE.fmtDateTime(x.end_ms || x.last_ms)}</span>`, sort: (x) => x.end_ms || x.last_ms },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (x) => P.matchCell(x.home, x.away, x.league, x.sport, x.match_id) },
+      { key: 'mk', label: 'Market', w: 120, fmt: (x) => `${esc(SE.marketLabel(x.market))}${x.line != null ? ' <b>' + x.line + '</b>' : ''}` },
+      { key: 'b', label: 'Sources', w: 220, fmt: (x) => (x.books || '').split(',').filter(Boolean).map((b) => SE.book(b, 'sm')).join(' ') },
+      { key: 'p', label: 'Best return', cls: 'r', w: 110, fmt: (x) => `<b class="up">+${((x.peak_profit || 0) * 100).toFixed(2)}%</b>`, sort: (x) => x.peak_profit || 0 },
+      { key: 'l', label: 'Lasted', cls: 'r', w: 110, fmt: (x) => `${x.censored ? '≥ ' : ''}${dur(x.lasted_ms)}<div class="faint">${{ gone: 'closed', kickoff: 'kick-off', restart: 'restart' }[x.end_reason] || esc(x.end_reason || 'open')}</div>`, sort: (x) => x.lasted_ms },
+    ], { sort: 'e', empty: 'No arbitrage has closed yet.', onClick: (x) => SE.go('#/match/' + x.match_id) });
+    async function loadAll() {
+      const h = await api('/arbs/history?limit=2000');
+      let rows = h.recent;
+      if (books.size) rows = rows.filter((x) => (x.books || '').split(',').every((b) => books.has(b)));
+      if (!$('#aHn')) return;
+      $('#aHn').textContent = `${rows.length} finished${books.size ? ' on your chosen sources' : ''}`;
+      ht.set(rows);
+    }
+    $('#aHb').addEventListener('click', () => {
+      const p = $('#aHist');
+      p.hidden = !p.hidden;
+      $('#aHb').classList.toggle('on', !p.hidden);
+      if (!p.hidden) loadAll();
+    });
     $('#aQ').addEventListener('input', SE.debounce(load, 150));
     $('#aSt').addEventListener('input', SE.debounce(() => { SE.setPref('arbStake', +$('#aSt').value || 100); load(); }, 300));
     load();

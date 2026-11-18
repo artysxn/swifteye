@@ -12,6 +12,8 @@ mod matcher;
 mod model;
 mod pmacct;
 mod predmeta;
+mod predarb;
+mod prune;
 mod rank;
 mod snipe;
 mod store;
@@ -160,6 +162,8 @@ async fn main() -> anyhow::Result<()> {
     arbtrack::spawn(app.clone());
     adaptive::spawn(app.clone());
     suspect::spawn(app.clone());
+    prune::spawn(app.clone());
+    predarb::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);

@@ -522,10 +522,72 @@ SE.chart = (el, xs, series, opts = {}) => {
     el
   );
   u.over.addEventListener('mouseleave', SE.tipHide);
+  SE.chartNav(u, el, opts);
   const ro = new ResizeObserver(() => u.setSize({ width: el.clientWidth, height: opts.height || el.clientHeight || 300 }));
   ro.observe(el);
   u._ro = ro;
   return u;
+};
+/**
+ * Chart navigation: scroll = zoom around the pointer, Shift + scroll (or a sideways trackpad
+ * swipe) = move left / right, drag = zoom into a range, double-click or the Reset button = the
+ * whole chart. Never zooms or moves past the data.
+ */
+SE.chartNav = (u, el, opts = {}) => {
+  const full = () => {
+    const d = u.data[0];
+    if (!d.length) return null;
+    const pad = opts.xPad || 0;
+    return [d[0] - pad, d[d.length - 1] + pad];
+  };
+  if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+  const btn = document.createElement('button');
+  btn.className = 'btn sm chart-reset';
+  btn.innerHTML = '<span class="ic">zoom_out_map</span>Reset zoom';
+  btn.hidden = true;
+  el.appendChild(btn);
+  const zoomed = () => {
+    const f = full(), x = u.scales.x;
+    return !!(f && x.min != null && (x.min > f[0] + 1 || x.max < f[1] - 1));
+  };
+  const sync = () => { btn.hidden = !zoomed(); };
+  const setX = (a, b) => {
+    const f = full();
+    if (!f) return;
+    const W = f[1] - f[0];
+    let w = Math.max(b - a, Math.min(W, 2000));
+    if (w >= W) { a = f[0]; b = f[1]; } else {
+      b = a + w;
+      if (a < f[0]) { b += f[0] - a; a = f[0]; }
+      if (b > f[1]) { a -= b - f[1]; b = f[1]; }
+    }
+    u.setScale('x', { min: a, max: b });
+    sync();
+  };
+  const reset = () => { const f = full(); if (f) { u.setScale('x', { min: f[0], max: f[1] }); sync(); } };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); reset(); });
+  u.over.addEventListener('dblclick', (e) => { e.preventDefault(); reset(); });
+  u.over.addEventListener('wheel', (e) => {
+    const { min, max } = u.scales.x;
+    if (min == null) return;
+    e.preventDefault();
+    const w = max - min;
+    const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    if (sideways) {
+      const d = e.shiftKey ? (e.deltaY || e.deltaX) : e.deltaX;
+      const dx = (d / (u.over.clientWidth || 1)) * w * (e.deltaMode === 1 ? 20 : 1);
+      setX(min + dx, max + dx);
+      return;
+    }
+    const f = Math.pow(1.0015, e.deltaMode === 1 ? e.deltaY * 20 : e.deltaY);
+    const at = u.posToVal(e.offsetX, 'x');
+    const r = (at - min) / (w || 1);
+    const nw = w * f;
+    setX(at - r * nw, at - r * nw + nw);
+  }, { passive: false });
+  // Drag-to-zoom (uPlot's select) changes the scale on mouse up.
+  u.over.addEventListener('mouseup', () => setTimeout(sync, 0));
+  u._nav = { sync, reset };
 };
 SE.destroyChart = (u) => { if (u) { u._ro?.disconnect(); u.destroy(); } };
 /**
@@ -544,6 +606,7 @@ SE.chartKeep = (el, prev, xs, series, opts = {}, legendEl = null) => {
     if (prev._sig === sig && document.body.contains(prev.root)) {
       prev.setData([xs, ...series.map((s) => s.values)], !zoom);
       if (zoom) prev.setScale('x', zoom);
+      prev._nav?.sync();
       return prev;
     }
     SE.destroyChart(prev);
@@ -558,6 +621,7 @@ SE.chartKeep = (el, prev, xs, series, opts = {}, legendEl = null) => {
     legendEl?.querySelector(`label[data-i="${i + 1}"]`)?.classList.add('off');
   });
   if (zoom) u.setScale('x', zoom);
+  u._nav?.sync();
   return u;
 };
 SE.alignSeries = (lists) => {

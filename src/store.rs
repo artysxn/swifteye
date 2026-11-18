@@ -82,6 +82,12 @@ CREATE INDEX IF NOT EXISTS kalshi_quotes_ev ON kalshi_quotes(event, outcome, ts_
 -- Pre-match arbitrage opportunities (match + market + line) as the live scan saw them come
 -- and go. end_reason: gone | kickoff (the match started) | restart. censored = 1: already
 -- open in the first scan after a start, so its real start is unknown.
+CREATE TABLE IF NOT EXISTS pred_arbs(
+  ts_ms INTEGER NOT NULL,
+  match_id INTEGER NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pred_arbs_ts ON pred_arbs(ts_ms);
 CREATE TABLE IF NOT EXISTS arb_history(
   id INTEGER PRIMARY KEY,
   key TEXT NOT NULL,

@@ -578,3 +578,7 @@ tr.on td { background: var(--bg-2); }
 .bank-bar label { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
 .bank-in { display: inline-flex; align-items: center; gap: 6px; }
 .bank-in .input { width: 96px; }
+
+/* Chart navigation */
+.chart-reset { position: absolute; top: 6px; right: 8px; z-index: 5; }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
