@@ -393,12 +393,16 @@ async fn bot_loop(app: Arc<App>) {
                     let a2 = app.clone();
                     let v2 = v.clone();
                     let chart = tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten();
+                    let value = account_value(&app, v["real"].as_bool() == Some(true)).await;
                     let sent = match chart {
-                        Some(cfgj) => send_chart(&cfgj, &caption).await,
+                        Some(cfgj) => {
+                            let (ch, cap) = with_value(cfgj, &caption, &value);
+                            send_chart(&ch, &cap).await
+                        }
                         None => Err(anyhow!("no chart")),
                     };
                     if sent.is_err() {
-                        let _ = send("bot", &caption).await;
+                        let _ = send("bot", &format!("{caption}\n💼 {}", esc(&value))).await;
                     }
                 }
             }
@@ -444,6 +448,36 @@ fn trade_chart(app: &App, v: &Value) -> Option<Value> {
         "options": {"title": {"display": true, "text": title}, "legend": {"position": "bottom"}, "spanGaps": true,
             "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "¢"}}]}}
     }))
+}
+
+/// "Account $X" for a chart: real = the Polymarket account now (cash + what open real snipe
+/// trades cost); paper = the snipe bot's paper wallet (start + closed results).
+async fn account_value(app: &App, real: bool) -> String {
+    let db = app.db_path.clone();
+    let open_real = {
+        let db = db.clone();
+        tokio::task::spawn_blocking(move || crate::store::open_ro(&db).map(|c| crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true).1).unwrap_or(0.0)).await.unwrap_or(0.0)
+    };
+    if real {
+        let pm = crate::pmacct::load(&db);
+        match crate::exec::pm_cash(&client(), &pm).await {
+            Ok(cash) => format!("Polymarket account ${:.2} (cash ${cash:.2} + open ${open_real:.2})", cash + open_real),
+            Err(_) => "Polymarket account: not readable".into(),
+        }
+    } else {
+        let (bal, open) = tokio::task::spawn_blocking(move || {
+            let s = crate::bots::settings();
+            crate::store::open_ro(&db).map(|c| { let l = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, false); (s.snipe.c.start + l.0, l.1) }).unwrap_or((0.0, 0.0))
+        }).await.unwrap_or((0.0, 0.0));
+        format!("Paper wallet ${bal:.2} (${open:.2} in open trades)")
+    }
+}
+
+/// Put the account value into a chart's title and its caption.
+fn with_value(mut chart: Value, caption: &str, value: &str) -> (Value, String) {
+    let t = chart["options"]["title"]["text"].as_str().unwrap_or("").to_string();
+    chart["options"]["title"]["text"] = json!([t, value]);
+    (chart, format!("{caption}\n💼 {}", esc(value)))
 }
 
 /// Render a Chart.js config with QuickChart and send it as a photo with an HTML caption.
@@ -719,9 +753,13 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
         });
         let Some(v) = last else { return reply(http, &c.token, chat, "No closed snipe trade yet.").await };
         let cap = format!("Last snipe trade: {} v {} · {}", esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")), money_s(v["pnl"].as_f64().unwrap_or(0.0)));
+        let value = account_value(app, v["real"].as_bool() == Some(true)).await;
         return match trade_chart(app, &v) {
-            Some(ch) if send_chart(&ch, &cap).await.is_ok() => Ok(()),
-            _ => reply(http, &c.token, chat, &format!("{cap}\n(no chart: not enough recorded prices)")).await,
+            Some(ch) => {
+                let (ch, cap2) = with_value(ch, &cap, &value);
+                if send_chart(&ch, &cap2).await.is_ok() { Ok(()) } else { reply(http, &c.token, chat, &cap2).await }
+            }
+            None => reply(http, &c.token, chat, &format!("{cap}\n💼 {}\n(no chart: not enough recorded prices)", esc(&value))).await,
         };
     }
     let msg = match cmd.as_str() {
