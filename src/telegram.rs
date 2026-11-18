@@ -381,8 +381,13 @@ async fn bot_loop(app: Arc<App>) {
             let entry = v["entry"].as_f64().unwrap_or(0.0);
             if id > last_id {
                 last_id = id;
-                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢",
-                    entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0);
+                let (target, give) = pays_at(&v);
+                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢\n💰 Cash in {}: when Polymarket reaches {}¢ (≈{}); at the latest {} (gives up)",
+                    entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0,
+                    eta_text(&app, v["ts"].as_i64().unwrap_or(0)),
+                    target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into()),
+                    target.map(|x| money_s(n * (x - entry))).unwrap_or_default(),
+                    give.map(hhmm).unwrap_or_default());
                 let _ = send("bot", &text).await;
             }
             if let Some(cl) = v["closed_ms"].as_i64() {
@@ -417,12 +422,50 @@ async fn bot_loop(app: Arc<App>) {
     }
 }
 
+/// Where a snipe trade pays: the bought side's price at which the bot sells (Polymarket has made
+/// `catch` of the bookmakers' move), and the give-up time. (target 0..1, give-up ms)
+fn pays_at(v: &Value) -> (Option<f64>, Option<Ms>) {
+    let (pre, mv, sp) = (v["pre_mid"].as_f64(), v["move"].as_f64(), v["spread"].as_f64().unwrap_or(0.0));
+    let need = v["catch"].as_f64().unwrap_or(1.0) * mv.unwrap_or(0.0);
+    let target = pre.zip(mv).map(|(pre, _)| if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { pre + need - sp / 2.0 } else { 1.0 - pre + need - sp / 2.0 });
+    let give = v["ts"].as_i64().zip(v["give_up_s"].as_i64()).map(|(t, g)| t + g * 1000);
+    (target.map(|x| x.clamp(0.0, 1.0)), give)
+}
+
+/// How long a winning snipe usually takes to cash in: the median time from buy to sale of the
+/// bot's trades that sold on the catch-up (paper and real, last 200); 70 s until there are 5.
+fn typical_hold_ms(app: &App) -> Ms {
+    let v: Vec<Ms> = crate::store::open_ro(&app.db_path)
+        .ok()
+        .and_then(|c| {
+            let mut st = c.prepare("SELECT closed_ms - ts_ms FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NOT NULL AND json_extract(data, '$.reason') = 'caught up' ORDER BY closed_ms DESC LIMIT 200").ok()?;
+            let it = st.query_map([], |r| r.get::<_, Ms>(0)).ok()?;
+            Some(it.filter_map(|x| x.ok()).filter(|x| *x > 0).collect())
+        })
+        .unwrap_or_default();
+    if v.len() < 5 {
+        return 70_000;
+    }
+    let mut v = v;
+    v.sort();
+    v[v.len() / 2]
+}
+
+/// "≈HH:MM (~N min)" estimated cash-in for a trade bought at `ts`.
+fn eta_text(app: &App, ts: Ms) -> String {
+    let h = typical_hold_ms(app);
+    let mins = (h as f64 / 60_000.0).max(0.1);
+    format!("≈{} (~{} typical)", hhmm(ts + h), if mins < 1.0 { format!("{:.0} s", h as f64 / 1000.0) } else { format!("{mins:.0} min") })
+}
+
 /// Chart.js config: the market's Polymarket bid / ask each minute from 10 min before the buy to 5
 /// min after the sale, the buy (green) and the sale (red) marked, in the bought side's price.
 fn trade_chart(app: &App, v: &Value) -> Option<Value> {
     let c = crate::store::open_ro(&app.db_path).ok()?;
     let (m, o) = (v["match_id"].as_i64()?, v["outcome"].as_str()?.to_string());
-    let (t0, t1) = (v["ts"].as_i64()? - 600_000, v["closed_ms"].as_i64()? + 300_000);
+    let (target, give) = pays_at(v);
+    let end = v["closed_ms"].as_i64().unwrap_or_else(|| now_ms());
+    let (t0, t1) = (v["ts"].as_i64()? - 600_000, end + 300_000);
     let yes = v["dir"].as_f64().unwrap_or(1.0) > 0.0;
     let mut st = c.prepare("SELECT ts_ms, bid, ask FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms >= ?3 AND ts_ms <= ?4 ORDER BY ts_ms").ok()?;
     let rows: Vec<(Ms, Option<f64>, Option<f64>)> = st.query_map(params![m, o, t0, t1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok()?.filter_map(|x| x.ok()).collect();
@@ -442,8 +485,12 @@ fn trade_chart(app: &App, v: &Value) -> Option<Value> {
     let mut buy = vec![Value::Null; keys.len()];
     let mut sell = vec![Value::Null; keys.len()];
     buy[idx(v["ts"].as_i64()?)] = json!(cents(v["entry"].as_f64()));
-    sell[idx(v["closed_ms"].as_i64()?)] = json!(cents(v["exit"].as_f64()));
-    let title = format!("{} v {} · {} {} · {} (cents)", v["home"].as_str().unwrap_or(""), v["away"].as_str().unwrap_or(""), if yes { "Yes" } else { "No" }, outcome_name(&o), if v["real"].as_bool() == Some(true) { "REAL" } else { "paper" });
+    if let Some(cl) = v["closed_ms"].as_i64() {
+        sell[idx(cl)] = json!(cents(v["exit"].as_f64()));
+    }
+    let eta = if v["closed_ms"].is_i64() { String::new() } else { format!(" · cash in {}", eta_text(app, v["ts"].as_i64().unwrap_or(0))) };
+    let title = format!("{} v {} · {} {} · {} (cents) · pays at {}¢{eta}, gives up {}", v["home"].as_str().unwrap_or(""), v["away"].as_str().unwrap_or(""), if yes { "Yes" } else { "No" }, outcome_name(&o), if v["real"].as_bool() == Some(true) { "REAL" } else { "paper" },
+        target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into()), give.map(hhmm).unwrap_or_default());
     Some(json!({
         "type": "line",
         "data": {"labels": labels, "datasets": [
@@ -451,6 +498,7 @@ fn trade_chart(app: &App, v: &Value) -> Option<Value> {
             {"label": "Ask", "data": mins.values().map(|x| cents(x.1)).collect::<Vec<_>>(), "borderColor": "#b8c4c0", "fill": false, "pointRadius": 0, "borderWidth": 1.5, "steppedLine": true},
             {"label": "Buy", "data": buy, "borderColor": "#0f9e73", "backgroundColor": "#0f9e73", "showLine": false, "pointRadius": 7, "pointStyle": "triangle"},
             {"label": "Sell", "data": sell, "borderColor": "#e0453c", "backgroundColor": "#e0453c", "showLine": false, "pointRadius": 7, "pointStyle": "rectRot"},
+            {"label": format!("Pays at {}¢ (sells when caught up)", target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into())), "data": vec![cents(target); keys.len()], "borderColor": "#2f6fdb", "borderDash": [6, 4], "fill": false, "pointRadius": 0, "borderWidth": 1.5},
         ]},
         "options": {"title": {"display": true, "text": title}, "legend": {"position": "bottom"}, "spanGaps": true,
             "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "¢"}}]}}
