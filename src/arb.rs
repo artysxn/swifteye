@@ -4,8 +4,8 @@
 //! * Bookmakers: the live decimal price in memory (event seen in the last 5 minutes).
 //! * Polymarket / Kalshi: the engine keeps only the mid, which nobody can trade at, so these
 //!   legs use the recorded best ASK (`pm_quotes` / `kalshi_quotes`, last 60 minutes). Yes on an
-//!   outcome costs its ask; No costs 1 - Yes bid. Kalshi's taker fee (7% x p x (1-p)) is added
-//!   to the cost; Polymarket is taken as fee-free.
+//!   outcome costs its ask; No costs 1 - Yes bid. Kalshi's taker fee (7% x p x (1-p)) and
+//!   Polymarket's sports taker fee (5% x p x (1-p)) are added to the cost.
 //! * Markets: 1X2 (home/draw/away, or home/away for two-way sports), total over/under and
 //!   handicap home/away at the same line, both-teams-to-score yes/no. In a three-way market a
 //!   prediction market's No on one outcome also covers the other two (a two-leg set).
@@ -75,6 +75,10 @@ fn better(slot: &mut Option<Cand>, c: Cand) {
 
 fn kalshi_cost(p: f64) -> f64 {
     p + 0.07 * p * (1.0 - p)
+}
+
+fn pm_cost(p: f64) -> f64 {
+    p + crate::venue::Fee::PM_SPORTS.raw(1.0, p)
 }
 
 struct Game {
@@ -148,7 +152,7 @@ pub fn scan(app: &App, min_profit: f64, stake: f64) -> Vec<Arb> {
                 if g.pm {
                     let sql = "SELECT bid, ask, ts_ms FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms >= ?3 ORDER BY ts_ms DESC LIMIT 1";
                     if let Some((b, a, ts)) = pred_quotes(c, sql, &mid, o.as_str(), since) {
-                        pred.push((PM, o, a.filter(|a| *a > 0.0 && *a < 1.0), b.filter(|b| *b > 0.0 && *b < 1.0).map(|b| 1.0 - b), ts));
+                        pred.push((PM, o, a.filter(|a| *a > 0.0 && *a < 1.0).map(pm_cost), b.filter(|b| *b > 0.0 && *b < 1.0).map(|b| pm_cost(1.0 - b)), ts));
                     }
                 }
                 if let Some((ev, swap)) = &g.kalshi {

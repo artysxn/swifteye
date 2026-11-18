@@ -1,8 +1,8 @@
-//! Polymarket account sync (read-only): positions, portfolio value, open orders, recent trades.
+//! Polymarket account sync: positions, portfolio value, open orders, recent trades. Orders are
+//! placed by exec.rs (real-money bots), which signs them with `private_key` here.
 //!
 //! Credentials live in `polymarket.json` next to the database, are edited from the
-//! Settings page, and are never sent back to the browser in full. Nothing here places
-//! or cancels orders.
+//! Settings page, and are never sent back to the browser in full.
 //!
 //! * Positions, value, activity: public Data API v2 (v1 was retired), keyed by the profile (proxy) wallet.
 //! * Open orders and trades: CLOB L2 auth. HMAC-SHA256 over `timestamp + method + path [+ body]`
@@ -31,6 +31,11 @@ pub struct PmCreds {
     pub api_key: String,
     pub api_secret: String,
     pub passphrase: String,
+    /// The signer's (EOA's) private key, hex, used ONLY to sign real-money orders (exec.rs).
+    pub private_key: String,
+    /// 0 = EOA wallet, 1 = Polymarket proxy (older email / Magic login), 2 = browser-wallet Safe,
+    /// 3 = deposit wallet (email / Google sign-ups now).
+    pub signature_type: u8,
 }
 
 pub fn path_for(db: &Path) -> PathBuf {
@@ -67,6 +72,13 @@ pub fn public_view(c: &PmCreds) -> Value {
         "passphrase": mask(&c.passphrase),
         "has_wallet": !c.wallet.is_empty(),
         "has_api": !c.api_key.is_empty() && !c.api_secret.is_empty() && !c.passphrase.is_empty(),
+        "private_key": if c.private_key.trim().is_empty() { "" } else { "•••• saved ••••" },
+        "signature_type": c.signature_type,
+        "has_trading_key": crate::exec::signer_address(&c.private_key).is_ok(),
+        // A Polymarket API secret is base64 (about 44 characters); a 64-hex value is a private key
+        // pasted in the wrong field.
+        "api_secret_ok": secret_ok(&c.api_secret),
+        "trading_address": crate::exec::signer_address(&c.private_key).unwrap_or_default(),
     })
 }
 
@@ -85,10 +97,20 @@ pub fn merge(mut c: PmCreds, edit: &Value) -> PmCreds {
     take("api_key", &mut c.api_key);
     take("api_secret", &mut c.api_secret);
     take("passphrase", &mut c.passphrase);
+    take("private_key", &mut c.private_key);
+    if let Some(t) = edit.get("signature_type").and_then(|v| v.as_u64()) {
+        c.signature_type = t.min(3) as u8;
+    }
     c
 }
 
-fn l2_headers(c: &PmCreds, method: &str, path: &str, body: &str) -> Result<Vec<(&'static str, String)>> {
+pub fn secret_ok(s: &str) -> bool {
+    let t = s.trim();
+    let hexish = t.trim_start_matches("0x").len() == 64 && t.trim_start_matches("0x").chars().all(|c| c.is_ascii_hexdigit());
+    !t.is_empty() && !hexish && (URL_SAFE.decode(t).is_ok() || URL_SAFE_NO_PAD.decode(t.trim_end_matches('=')).is_ok() || base64::engine::general_purpose::STANDARD.decode(t).is_ok())
+}
+
+pub(crate) fn l2_headers(c: &PmCreds, method: &str, path: &str, body: &str) -> Result<Vec<(&'static str, String)>> {
     let ts = (crate::clock::now_ms() / 1000).to_string();
     let secret = URL_SAFE
         .decode(c.api_secret.trim())

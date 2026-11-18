@@ -38,6 +38,8 @@ struct KGame {
     start_ms: Option<Ms>,
     /// (outcome, market ticker)
     tickers: Vec<(Outcome, String)>,
+    /// Per market ticker: settlement rules (for the paper arbitrage).
+    meta: Vec<(String, crate::venue::Meta)>,
 }
 
 /// Latest top of book per contract: (bid, ask, Kalshi's stamp in ms).
@@ -66,13 +68,27 @@ struct KBook {
 }
 
 impl KBook {
-    fn depth(&self) -> Depth {
+    /// (Yes bids, Yes asks = 1 - No bids) as (price, size). Levels on the wrong side of the
+    /// `ticker` channel's best bid / ask are stale (an update we did not get or could not apply;
+    /// seen as crossed books) and are left out, like the Polymarket feed does. The book keeps them,
+    /// in case it is the ticker that is behind.
+    fn levels(&self, bid: Option<f64>, ask: Option<f64>) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
+        let mut bids: Vec<(f64, f64)> = self.yes.iter().map(|(k, q)| (*k as f64 / 10_000.0, *q)).collect();
+        let mut asks: Vec<(f64, f64)> = self.no.iter().map(|(k, q)| (1.0 - *k as f64 / 10_000.0, *q)).collect();
+        if let Some(b) = bid {
+            bids.retain(|l| l.0 <= b + 1e-9);
+        }
+        if let Some(a) = ask {
+            asks.retain(|l| l.0 >= a - 1e-9);
+        }
+        (bids, asks)
+    }
+    fn depth(&self, bid: Option<f64>, ask: Option<f64>) -> Depth {
         if self.yes.is_empty() && self.no.is_empty() {
             return Depth::default();
         }
-        let bids: Vec<(f64, f64)> = self.yes.iter().map(|(k, q)| (*k as f64 / 10_000.0, *q)).collect();
-        let asks: Vec<(f64, f64)> = self.no.iter().map(|(k, q)| (1.0 - *k as f64 / 10_000.0, *q)).collect();
-        Depth::from_levels(&bids, &asks)
+        let (b, a) = self.levels(bid, ask);
+        Depth::from_levels(&b, &a)
     }
 }
 
@@ -94,7 +110,7 @@ impl Shared {
     /// behind it) changed.
     fn record(&mut self, ticker: &str, bid: Option<f64>, ask: Option<f64>, server_ts: Option<Ms>) -> Option<Write> {
         let (event, outcome) = self.tickers.get(ticker)?.clone();
-        let depth = self.books.get(ticker).map(|b| b.depth()).unwrap_or_default();
+        let depth = self.books.get(ticker).map(|b| b.depth(bid, ask)).unwrap_or_default();
         let now = now_ms();
         if let Some((b, a, d, t)) = self.recorded.get(ticker) {
             let price_same = (*b, *a) == (bid, ask);
@@ -106,6 +122,15 @@ impl Shared {
         Some(Write::KQuote { ts_ms: now, server_ts_ms: server_ts, event, outcome, bid, ask, est: false, depth })
     }
 
+    /// Hand the paper arbitrage this contract's current book (trimmed to the ticker's best prices).
+    fn publish(&self, tk: &str) {
+        if let Some(b) = self.books.get(tk) {
+            let (bid, ask, _) = self.book.get(tk).copied().unwrap_or((None, None, None));
+            let (bids, asks) = b.levels(bid, ask);
+            crate::venue::publish(crate::venue::V::Kalshi, tk, bids, asks, now_ms());
+        }
+    }
+
     /// Fold an `orderbook_snapshot` / `orderbook_delta` message; returns the ticker.
     fn book_msg(&mut self, kind: &str, m: &Value) -> Option<String> {
         let tk = text(&m["market_ticker"]);
@@ -114,8 +139,18 @@ impl Shared {
         }
         let b = self.books.entry(tk.clone()).or_default();
         if kind == "orderbook_snapshot" {
-            b.yes = if m["yes_dollars"].is_array() { klevels(&m["yes_dollars"]) } else { klevels(&m["yes"]) };
-            b.no = if m["no_dollars"].is_array() { klevels(&m["no_dollars"]) } else { klevels(&m["no"]) };
+            // Current format: `yes_dollars_fp` / `no_dollars_fp` ([["0.0800", "300.00"], ...]),
+            // absent when that side is empty. Older: `yes_dollars`, then cents in `yes`.
+            let side = |k: &str| {
+                for key in [format!("{k}_dollars_fp"), format!("{k}_dollars"), k.to_string()] {
+                    if m[key.as_str()].is_array() {
+                        return klevels(&m[key.as_str()]);
+                    }
+                }
+                Default::default()
+            };
+            b.yes = side("yes");
+            b.no = side("no");
         } else {
             let p = kprice(&m["price_dollars"]).or_else(|| kprice(&m["price"]))?;
             let d = num(&m["delta_fp"]).or_else(|| num(&m["delta"]))?;
@@ -175,6 +210,12 @@ impl Kalshi {
                         {
                             let mut sh = s.lock();
                             sh.tickers = found.iter().flat_map(|g| g.tickers.iter().map(move |(o, t)| (t.clone(), (g.event.clone(), *o)))).collect();
+                            crate::venue::map_events(found.iter().flat_map(|g| g.tickers.iter().map(move |(o, t)| (g.event.clone(), *o, t.clone()))));
+                            for g in &found {
+                                for (tk, m) in &g.meta {
+                                    crate::venue::set_meta(crate::venue::V::Kalshi, tk, m.clone());
+                                }
+                            }
                             sh.games = found;
                         }
                         if changed {
@@ -348,6 +389,7 @@ fn parse_event(e: &Value, series_title: &str, sport: &'static str) -> Option<KGa
     let (home, away) = (home.trim().to_string(), away.trim().to_string());
     let (hn, an) = (Names::new(&home), Names::new(&away));
     let mut tickers = Vec::new();
+    let mut meta = Vec::new();
     let mut start = None;
     for m in e["markets"].as_array().into_iter().flatten() {
         if m["status"].as_str().is_some_and(|s| s != "active") {
@@ -370,6 +412,8 @@ fn parse_event(e: &Value, series_title: &str, sport: &'static str) -> Option<KGa
         start = start.or_else(|| kickoff(m, sport));
         if !tickers.iter().any(|(o, _)| *o == outcome) {
             tickers.push((outcome, text(&m["ticker"])));
+            let rules = format!("{}\n{}", text(&m["rules_primary"]), text(&m["rules_secondary"]));
+            meta.push((text(&m["ticker"]), crate::venue::Meta { fee: Some(crate::venue::Fee { rate: 0.07, exponent: 1.0 }), rules, title: text(&m["title"]), complement: None }));
         }
     }
     if tickers.is_empty() {
@@ -384,6 +428,7 @@ fn parse_event(e: &Value, series_title: &str, sport: &'static str) -> Option<KGa
         league: if comp.is_empty() { series_title.replace(" Game", "") } else { comp.to_string() },
         start_ms: start,
         tickers,
+        meta,
     })
 }
 
@@ -437,6 +482,9 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
     let mut id = 0u64;
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     let mut last_msg = now_ms();
+    // Order-book messages must arrive in `seq` order per subscription; a gap means a missed
+    // delta, and the only cure is fresh snapshots (reconnect).
+    let mut seqs: HashMap<i64, i64> = HashMap::new();
     loop {
         tokio::select! {
             _ = tick.tick() => {
@@ -464,6 +512,7 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
             msg = rx.next() => {
                 let Some(msg) = msg else { bail!("closed by server") };
                 last_msg = now_ms();
+                crate::venue::alive(crate::venue::V::Kalshi, last_msg);
                 match msg? {
                     Message::Text(t) => {
                         let Ok(v) = serde_json::from_str::<Value>(&t) else { continue };
@@ -478,6 +527,7 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
                                 let w = {
                                     let mut sh = shared.lock();
                                     sh.book.insert(tk.clone(), (bid, ask, ts));
+                                    sh.publish(&tk);
                                     sh.record(&tk, bid, ask, ts)
                                 };
                                 if let Some(w) = w {
@@ -485,10 +535,17 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
                                 }
                             }
                             Some(kind @ ("orderbook_snapshot" | "orderbook_delta")) => {
+                                if let (Some(sid), Some(seq)) = (int(&v["sid"]), int(&v["seq"])) {
+                                    let prev = seqs.insert(sid, seq);
+                                    if kind == "orderbook_delta" && prev.is_some_and(|p| seq != p + 1) {
+                                        bail!("order-book sequence gap on subscription {sid} ({} -> {seq}); reconnecting for fresh snapshots", prev.unwrap_or(0));
+                                    }
+                                }
                                 let w = {
                                     let mut sh = shared.lock();
                                     match sh.book_msg(kind, &v["msg"]) {
                                         Some(tk) => {
+                                            sh.publish(&tk);
                                             let (bid, ask, ts) = sh.book.get(&tk).copied().unwrap_or((None, None, None));
                                             sh.record(&tk, bid, ask, ts)
                                         }

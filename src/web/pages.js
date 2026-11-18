@@ -436,7 +436,7 @@ SE.pages.snipe = {
     tab(SE.pref('snipeTab') || 'bot');
     $('#pSet').addEventListener('click', () => { panel().hidden = !panel().hidden; $('#pSet').classList.toggle('on', !panel().hidden); });
     $('#pSetX').addEventListener('click', () => { panel().hidden = true; $('#pSet').classList.remove('on'); });
-    const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 0, ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket', game: '' };
+    const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 'sports', ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket', game: '' };
     let data = null, eq = null;
     const gs = P.gameSelect($('#pG'), (v) => { st.game = v; load(); });
     P.sportSelect($('#pS'), () => { st.game = ''; gs.load(); load(); });
@@ -452,7 +452,7 @@ SE.pages.snipe = {
     SE.seg($('#pFi'), [[0, 'instantly'], [250, '0.25 s'], [500, '0.5 s'], [1000, '1 s']], st.fill, (v) => { st.fill = +v; load(); });
     SE.seg($('#pSl'), [[0, '0¢'], [1, '1¢'], [2, '2¢'], [3, '3¢']], st.slip, (v) => { st.slip = +v; load(); });
     SE.seg($('#pSt'), [[10, '$10'], [100, '$100'], [1000, '$1,000']], st.stake, (v) => { st.stake = +v; load(); });
-    SE.seg($('#pF'), [[0, '0%', 'No Polymarket fee.'], [50, '0.5%'], [100, '1%'], [200, '2%']], st.fee, (v) => { st.fee = +v; load(); });
+    SE.seg($('#pF'), [['sports', 'Sports fee', 'Polymarket\'s taker fee on sports markets: 5% × p × (1 − p) per contract, on every buy and sale.'], [0, 'None', 'No Polymarket fee (wrong since sports fees started; for comparison only).'], [50, '0.5%'], [100, '1%']], st.fee, (v) => { st.fee = v === 'sports' ? 'sports' : +v; load(); });
     for (const [id, k] of [['#pLeadB', 'leadB'], ['#pGrpB', 'grpB'], ['#pTrB', 'trB']]) SE.seg($(id), [['polymarket', SE.logo('polymarket') + 'Polymarket'], ['kalshi', SE.logo('kalshi') + 'Kalshi']], st[k], (v) => { st[k] = v; draw(); });
 
     const money = (x) => (x == null ? '' : (x < 0 ? '-$' : '$') + Math.abs(x).toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) < 100 ? 2 : 0 }));
@@ -509,7 +509,7 @@ SE.pages.snipe = {
           return fact('timer', `<b>${name(b)}</b>: on average <b>${secs(s1?.mean_ms)}</b> after the first bookmaker (median ${secs(s1?.median_ms)}); still ≥ 2 s behind on <b>${SE.fmtPct(g2?.[2])}</b> of ${SE.fmtInt(o?.events || 0)} moves. The model found it delayed and bought on <b>${SE.fmtInt(f?.entered || 0)}</b> of ${SE.fmtInt(f?.triggers || 0)} bookmaker moves. ${bh ? `Best give-up time: <b>${bh.hold_s < 60 ? bh.hold_s + ' s' : bh.hold_s / 60 + ' min'}</b> (${SE.fmtPct(bh.roi, 1)} per trade).` : ''}`);
         }).join('') +
         ['polymarket', 'kalshi'].map((b) => fact('rule', `<b>${name(b)} buys only when:</b> ${esc(gateText(base(b)?.gate || {}))}. Sells at the bid once it has made <b>${SE.fmtPct(data.settings.catch)}</b> of the bookmaker\'s move.`)).join('') +
-        fact('info', `Tests the delay ${data.settings.reaction_ms / 1000} s after the bookmaker moves and again ${data.settings.confirm_ms / 1000} s later; the order lands ${data.settings.fill_ms / 1000} s later at that moment\'s price, ${Math.round(data.settings.slip * 100)}¢ worse on every buy and sale, and is not taken if the price ran more than ${Math.round(data.settings.cap * 100)}¢. ${money(data.settings.stake)} a trade, Polymarket fee ${data.settings.pm_fee_bps / 100}% a side, Kalshi taker fee. Polymarket prices are its real order book; Kalshi uses its real quotes since they were recorded and its own 1-minute candles before that (${(() => { const q = base('kalshi')?.quote_source || {}; return `this range: ${SE.fmtInt(q.book || 0)} buys on recorded quotes, ${SE.fmtInt(q.candle || 0)} on candles`; })()}). Order-book depth is not modelled.`);
+        fact('info', `Tests the delay ${data.settings.reaction_ms / 1000} s after the bookmaker moves and again ${data.settings.confirm_ms / 1000} s later; the order lands ${data.settings.fill_ms / 1000} s later at that moment\'s price, ${Math.round(data.settings.slip * 100)}¢ worse on every buy and sale, and is not taken if the price ran more than ${Math.round(data.settings.cap * 100)}¢. ${money(data.settings.stake)} a trade, Polymarket fee ${data.settings.pm_fee_bps == null ? 'the sports taker fee (5% × p × (1 − p) a contract)' : data.settings.pm_fee_bps / 100 + '%'} a side, Kalshi taker fee. Polymarket prices are its real order book; Kalshi uses its real quotes since they were recorded and its own 1-minute candles before that (${(() => { const q = base('kalshi')?.quote_source || {}; return `this range: ${SE.fmtInt(q.book || 0)} buys on recorded quotes, ${SE.fmtInt(q.candle || 0)} on candles`; })()}). Order-book depth is not modelled.`);
       // ---- tiles
       $('#pTiles').innerHTML = ['polymarket', 'kalshi'].map((b) => {
         const h = holdOf(b), o = base(b)?.opportunity, g2 = o?.lead_at_least.find((x) => x[0] === 2000);
@@ -566,7 +566,7 @@ SE.pages.snipe = {
 
     async function load() {
       $('#pTiles').innerHTML = `<div class="empty">${ic('hourglass_top')}Simulating…</div>`;
-      const q = `/snipe?since=${st.hours ? P.rangeSince(st.hours) : 0}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}${st.game ? '&match=' + st.game : ''}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
+      const q = `/snipe?since=${st.hours ? P.rangeSince(st.hours) : 0}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}${st.game ? '&match=' + st.game : ''}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}${st.fee === 'sports' ? '' : '&pm_fee_bps=' + st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
       const d = await api(q).catch((e) => { $('#pTiles').innerHTML = `<div class="empty">${ic('error')}${esc(String(e.message || e))}</div>`; return null; });
       if (!d) return;
       data = d;

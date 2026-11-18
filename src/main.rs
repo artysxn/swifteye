@@ -1,11 +1,15 @@
 mod adaptive;
 mod api;
 mod arb;
+mod arbsim;
 mod arbtrack;
 mod books;
+mod bots;
 mod clock;
 mod data;
+mod diag;
 mod engine;
+mod exec;
 mod kalacct;
 mod lag;
 mod matcher;
@@ -15,10 +19,14 @@ mod predmeta;
 mod predarb;
 mod prune;
 mod rank;
+mod settle;
 mod snipe;
+mod snipebot;
 mod store;
 mod suspect;
 mod telegram;
+mod timing;
+mod venue;
 
 use engine::{Engine, Write};
 use model::*;
@@ -163,7 +171,12 @@ async fn main() -> anyhow::Result<()> {
     adaptive::spawn(app.clone());
     suspect::spawn(app.clone());
     prune::spawn(app.clone());
+    timing::init(&app.db_path);
+    if let Err(e) = bots::init(&app) {
+        tracing::warn!("bots: {e:#}");
+    }
     predarb::spawn(app.clone());
+    snipebot::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);

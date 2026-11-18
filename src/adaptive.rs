@@ -5,8 +5,10 @@
 //! them from the data every 4 hours (00, 04, 08, 12, 16 and 20 UTC), separately for Polymarket and
 //! Kalshi, and paper-trades the current choice.
 //!
-//! * Facts are fixed, not tuned: reaction 1 s, confirming check 0.5 s later, order travel 0.25 s,
-//!   1c slippage on every buy and sale, Kalshi taker fee, Polymarket fee 0, the real order book
+//! * Facts are fixed, not tuned: reaction 1 s, confirming check 0.5 s later, order travel and the
+//!   venue's matching delay as measured by the test runs (timing.rs: ~1.5 s on live Polymarket games),
+//!   1c slippage on every buy and sale, Kalshi taker fee, Polymarket sports taker fee
+//!   (5% x p x (1-p) a contract, each side; version 6, before that 0), the real order book
 //!   (fills capped to what rested when depth was recorded; before that, a full fill).
 //! * Money: a paper balance (settings: starting balance, share staked per trade). Each trade
 //!   stakes that share of the balance (start plus closed P&L) when it is placed, at most the cash
@@ -27,7 +29,8 @@
 //!   (Version 1 used one standard error, 20 trades and no validation: its first real pick chose
 //!   rules that had looked good on 22 trades and lost $1,000 on Polymarket in the next 4 hours.
 //!   Version 2 still switched to a negative-scoring candidate when the current rules had too few
-//!   trades to qualify. Version 3 staked a fixed $100.)
+//!   trades to qualify. Version 3 staked a fixed $100. Version 5 had no Polymarket fee. Version 6
+//!   filled 250 ms after the decision; version 7 uses the measured order and matching times.)
 //! * Versioned: runs store the method version and the balance settings; a change of either
 //!   recomputes the whole walk-forward history from the first data, so records stay comparable.
 //!   Rules are evaluated by their values (thresholds exactly; the sale at the nearest measured
@@ -58,16 +61,21 @@ use std::time::Duration;
 
 const PM: &str = "polymarket";
 const BASES: [&str; 2] = [PM, KALSHI];
+/// Which markets the paper bot trades. Kalshi is OFF (2026-11-18): unhedged, its snipe lost
+/// (-5% a trade over 851 lagging moves, -11% in the second half; walk-forward -4% after the
+/// rules were frozen) because Kalshi often does not catch up and its spread eats the exit. Its
+/// rules are still re-chosen and shown as research; no paper trades, no Telegram alerts.
+const TRADED: [bool; 2] = [true, false];
 
 // ---- facts (measured, never tuned)
 const REACTION: Ms = 1_000;
 const CONFIRM: Ms = 500;
-const FILL: Ms = 250;
+/// Order travel and venue matching come from the diagnostic test runs (timing.rs): Polymarket's
+/// reply plus, on games already playing, its matching delay; Kalshi's order time.
 const SLIP: f64 = 0.01;
 /// Stake used only to estimate the fee per contract in the expected-gain test.
 const REF_STAKE: f64 = 100.0;
 const CAP: f64 = 0.02;
-const PM_FEE: f64 = 0.0;
 
 // ---- schedule
 pub const EVERY_MS: Ms = 4 * 3_600_000;
@@ -78,7 +86,7 @@ const PAUSE_WINDOW_MS: Ms = 120_000;
 
 // ---- choosing
 /// Method version: stored with every run; a change recomputes the history.
-const VERSION: u32 = 5;
+const VERSION: u32 = 7;
 const MIN_N: usize = 30;
 /// Standard errors subtracted from the average return.
 const SE_K: f64 = 2.0;
@@ -196,6 +204,11 @@ impl Default for Bank {
 }
 
 /// The current paper balance settings.
+/// The Polymarket rules the bot trades now: the last pick, else the defaults.
+pub fn active_rules() -> Policy {
+    ST.lock().runs.iter().filter(|r| r.base == PM).last().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(PM)))
+}
+
 pub fn bank() -> Bank {
     ST.lock().bank
 }
@@ -279,7 +292,7 @@ struct Cand {
 }
 
 fn fee(pm: bool, n: f64, p: f64) -> f64 {
-    if pm { PM_FEE * n * p } else { snipe::kalshi_fee(n, p) }
+    if pm { crate::venue::pm_fee(crate::venue::Fee::PM_SPORTS, n, p) } else { snipe::kalshi_fee(n, p) }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -312,7 +325,7 @@ fn fill(c: &Cand, x: &Exit, stake: f64, walk: bool) -> Option<Fill> {
 
 /// The trigger bookmaker suspended this price within 2 minutes before the move (a goal,
 /// a red card, a break of serve: the book paused, then reopened somewhere else).
-fn after_pause(c: &Connection, book: &str, match_id: i64, outcome: &str, t0: Ms) -> bool {
+pub(crate) fn after_pause(c: &Connection, book: &str, match_id: i64, outcome: &str, t0: Ms) -> bool {
     c.prepare_cached(
         "SELECT 1 FROM changes WHERE match_id = ?1 AND book = ?2 AND market = '1x2' AND outcome = ?3 AND kind = 'suspend' AND ts_ms BETWEEN ?4 AND ?5 LIMIT 1",
     )
@@ -329,7 +342,11 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     let (mid, o) = (e.match_id, e.outcome.as_str());
     let dir = e.direction as f64;
     let (td, td2) = (t0 + tm.0, t0 + tm.0 + tm.1);
-    let tf = td2 + FILL;
+    let tmg = crate::timing::get();
+    let fd: Ms = if pm { tmg.pm_fill_ms(crate::timing::live(c, mid, td2)) } else { tmg.kalshi_order_ms };
+    // Bought shares can only be sold once they have settled (Polymarket).
+    let settle: Ms = if pm { tmg.pm_settle_ms } else { 0 };
+    let tf = td2 + fd;
     let b_pre = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS)?;
     let (b1, b2) = (snipe::book_prob(c, tb, mid, o, td)?, snipe::book_prob(c, tb, mid, o, td2)?);
     let (q0, q1, q2, qf) = (q.at(mid, o, t0 - snipe::PRE_MS)?, q.at(mid, o, td)?, q.at(mid, o, td2)?, q.at(mid, o, tf)?);
@@ -384,24 +401,25 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     for (ci, &k) in CATCH.iter().enumerate() {
         for (gi, &g) in GIVE.iter().enumerate() {
             let give = tf + g * 1000;
-            let hit = path.iter().take_while(|x| x.2 <= give).find(|x| snipe::caught_up(x, dir, pre_mid, k * bm1, s1)).map(|x| x.2);
+            // A sale can only be sent once the shares have settled.
+            let hit = path.iter().take_while(|x| x.2 <= give).filter(|x| x.2 >= tf + settle).find(|x| snipe::caught_up(x, dir, pre_mid, k * bm1, s1)).map(|x| x.2);
             let (t_sell, caught) = match hit {
                 Some(t) => (t, true),
-                None if give + FILL > now => continue, // still open
+                None if give + fd > now => continue, // still open
                 None => (give, false),
             };
-            if t_sell + FILL > now {
+            if t_sell + fd > now {
                 continue;
             }
-            let Some(qs) = q.at(mid, o, t_sell + FILL) else { continue };
+            let Some(qs) = q.at(mid, o, t_sell + fd) else { continue };
             let px = (if dir > 0.0 { qs.0 } else { 1.0 - qs.1 }) - SLIP;
             // Selling Yes hits bids; selling No hits Yes asks.
             let sell = if side.is_some() {
-                q.depth(mid, o, t_sell + FILL).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
+                q.depth(mid, o, t_sell + fd).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
             } else {
                 None
             };
-            exits[ci][gi] = Some(Exit { ts: t_sell + FILL, px, sell, caught });
+            exits[ci][gi] = Some(Exit { ts: t_sell + fd, px, sell, caught });
         }
     }
     Some(Cand {
@@ -1026,13 +1044,119 @@ pub fn view(_app: &App) -> Value {
                 "record": tot.json(), "defaults_record": tot_def.json(),
                 "balance": bank.start + tot.pnl, "balance_defaults": bank.start + tot_def.pnl,
                 "curve": curve, "curve_defaults": curve_defaults, "windows": windows, "recent": recent,
-                "candidates": cands.len(), "depth_known": depth_known})
+                "candidates": cands.len(), "depth_known": depth_known, "traded": TRADED[bi]})
         })
         .collect();
     let next = boundary(now) + EVERY_MS;
     json!({"now_ms": now, "status": status, "error": error, "data_from": from, "chunks": nchunks,
         "first_run_ms": from.map(|f| boundary(f + FIRST_AFTER_MS) + EVERY_MS), "next_run_ms": next,
         "every_ms": EVERY_MS, "min_trades": MIN_N, "version": VERSION, "grid": GRID, "bank": bank, "bases": bases})
+}
+
+/// Whole-dataset simulation of the live snipe bot with its Bots-page settings: every recorded
+/// Polymarket move, the bot's own sizing (share of its balance, x edge when on, per-trade and
+/// open-money caps, its own cash), fills on the recorded book. `walk_forward`: each 4-hour window
+/// trades the rules picked before it (defaults before the first pick) = what the bot would have
+/// done; else today's rules on all of it (in-sample). `one_book`: the 1-bookmaker shadow.
+pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool) -> Value {
+    let now = now_ms();
+    let chunks = snapshot();
+    let (runs, warm) = {
+        let st = ST.lock();
+        (st.runs.clone(), st.warm)
+    };
+    if !warm {
+        return json!({"building": true});
+    }
+    let cands = all_cands(&chunks, 0);
+    let pm_runs: Vec<&Run> = runs.iter().filter(|r| r.base == PM).collect();
+    let def = policy(&default_idx(PM));
+    let mut segs: Vec<(Policy, Ms, Ms)> = if walk_forward {
+        let first = pm_runs.first().map(|r| r.ts).unwrap_or(now + 1);
+        let mut v = vec![(def, 0, first)];
+        v.extend(segments(&pm_runs, now + 1, |r| r.active));
+        v
+    } else {
+        vec![(active_rules(), 0, now + 1)]
+    };
+    if one_book {
+        for s in &mut segs {
+            s.0.min_books = 1;
+        }
+    }
+    let start = cfg.c.start;
+    let (mut cash, mut closed) = (start, 0.0);
+    let mut open: Vec<(Ms, f64, f64)> = Vec::new();
+    // (fill ts, exit ts, pnl, spent, sport, reason)
+    let mut done: Vec<(Ms, Ms, f64, f64, String, bool)> = Vec::new();
+    for (p, from, to) in &segs {
+        let (ci, _) = sale_idx(p);
+        run_policy(&cands, p, *from, *to, now, |_, c, x| {
+            open.retain(|o| {
+                if o.0 <= c.tf {
+                    cash += o.1 + o.2;
+                    closed += o.2;
+                    false
+                } else {
+                    true
+                }
+            });
+            let open_cost: f64 = open.iter().map(|o| o.1).sum();
+            let k = if cfg.edge_sizing { (c.edge[1][ci] / 0.04).clamp(0.5, 3.0) } else { 1.0 };
+            let stake = (cfg.pct * (start + closed) * k).min(cfg.c.max_trade).min(cash).min(cfg.c.max_open - open_cost);
+            if stake < snipe::MIN_FILL {
+                return false;
+            }
+            let Some(f) = fill(c, x, stake, p.walk_book) else { return false };
+            cash -= f.spent;
+            open.push((x.ts, f.spent, f.pnl));
+            done.push((c.tf, x.ts, f.pnl, f.spent, c.sport.clone(), x.caught));
+            true
+        });
+    }
+    sim_summary(start, cands.first().map(|c| c.tf), now, done.iter().map(|d| (d.0, d.1, d.2, d.3, d.4.as_str(), d.5)).collect())
+}
+
+/// Shared summary for whole-dataset simulations: trades (fill ts, exit ts, pnl, dollars spent,
+/// sport, won the normal way: caught up / unwound).
+pub fn sim_summary(start: f64, from: Option<Ms>, now: Ms, mut t: Vec<(Ms, Ms, f64, f64, &str, bool)>) -> Value {
+    t.sort_by_key(|x| x.1);
+    let n = t.len();
+    let pnl: f64 = t.iter().map(|x| x.2).sum();
+    let staked: f64 = t.iter().map(|x| x.3).sum();
+    let wins = t.iter().filter(|x| x.2 > 0.0).count();
+    let (mut bal, mut peak, mut dd) = (start, start, 0.0f64);
+    let mut curve = vec![json!([from.unwrap_or(now), start])];
+    for x in &t {
+        bal += x.2;
+        peak = peak.max(bal);
+        dd = dd.max(peak - bal);
+        curve.push(json!([x.1, bal]));
+    }
+    let mut days: BTreeMap<i64, (usize, f64, f64)> = BTreeMap::new();
+    for x in &t {
+        let d = days.entry(x.1 - x.1.rem_euclid(86_400_000)).or_default();
+        d.0 += 1;
+        d.1 += x.2;
+        d.2 += x.3;
+    }
+    let mut sports: BTreeMap<&str, (usize, f64, f64)> = BTreeMap::new();
+    for x in &t {
+        let s = sports.entry(x.4).or_default();
+        s.0 += 1;
+        s.1 += x.2;
+        s.2 += x.3;
+    }
+    let span_d = from.map(|f| (now - f) as f64 / 86_400_000.0).unwrap_or(0.0);
+    json!({
+        "trades": n, "wins": wins, "pnl": pnl, "staked": staked, "roi": if staked > 0.0 { pnl / staked } else { 0.0 },
+        "start": start, "end_balance": start + pnl, "max_drawdown": dd, "from": from, "to": now, "days": span_d,
+        "per_day": if span_d > 0.0 { pnl / span_d } else { 0.0 },
+        "curve": curve,
+        "daily": days.iter().map(|(d, v)| json!({"day": d, "trades": v.0, "pnl": v.1, "staked": v.2})).collect::<Vec<_>>(),
+        "sports": sports.iter().map(|(s, v)| json!({"sport": s, "trades": v.0, "pnl": v.1, "staked": v.2})).collect::<Vec<_>>(),
+        "normal_exits": t.iter().filter(|x| x.5).count(),
+    })
 }
 
 /// Newly closed paper trades of the current rules (for Telegram).
@@ -1045,6 +1169,9 @@ pub fn closed_since(since: Ms) -> Vec<Value> {
     };
     let mut out = Vec::new();
     for (bi, base) in BASES.iter().enumerate() {
+        if !TRADED[bi] {
+            continue;
+        }
         let cands = all_cands(&chunks, bi);
         let rules = runs.iter().filter(|r| r.base == *base).last().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(base)));
         let (trades, _, _) = backtest(&cands, &rules, now, &bank, base);
@@ -1084,9 +1211,10 @@ mod tests {
     #[test]
     fn order_size_rules() {
         let x = Exit { ts: 1, px: 0.60, sell: None, caught: true };
-        // No recorded book: the whole stake fills at the price.
+        // No recorded book: the whole stake fills at the price. 1,000 contracts, 50c -> 60c, less
+        // Polymarket's sports fee on the buy ($12.50) and the sale ($12.00).
         let f = fill(&cand(0.50, None), &x, 500.0, false).unwrap();
-        assert!((f.spent - 500.0).abs() < 1e-9 && (f.pnl - 100.0).abs() < 1e-9 && f.filled.is_none());
+        assert!((f.spent - 500.0).abs() < 1e-9 && (f.pnl - 75.5).abs() < 1e-9 && f.filled.is_none());
         // 200 contracts at the best price, 1,000 within 2c: best price only buys $100.
         let c = cand(0.50, Some((200.0, 1000.0)));
         let b = fill(&c, &x, 500.0, false).unwrap();

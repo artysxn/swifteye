@@ -582,3 +582,18 @@ tr.on td { background: var(--bg-2); }
 /* Chart navigation */
 .chart-reset { position: absolute; top: 6px; right: 8px; z-index: 5; }
 .btn.sm { padding: 4px 10px; font-size: 12px; }
+
+/* Whole-dataset simulation loading (Bots page): the site's skeleton shimmer plus a thin accent
+   progress bar and a pulsing accent dot. */
+.sim-load { padding: 6px 0 4px; }
+.sim-load .lbl { display: flex; align-items: center; gap: 9px; color: var(--text-2); font-size: 12.5px; }
+.sim-load .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: simpulse 1.4s ease-out infinite; }
+.sim-load .sk-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 14px 0 12px; }
+.sim-load .sk { height: 62px; border-radius: 10px; background: linear-gradient(90deg, var(--bg-2), var(--bg-3), var(--bg-2)); background-size: 200% 100%; animation: sk 1.2s linear infinite; }
+.sim-load .sk.chart { height: 170px; }
+.sim-bar { position: relative; height: 3px; border-radius: 3px; background: var(--bg-3); overflow: hidden; margin: 10px 0 2px; }
+.sim-bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; transition: width 0.4s ease; }
+.sim-bar.indet > i { width: 32%; animation: simslide 1.15s ease-in-out infinite; }
+@keyframes simslide { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@keyframes simpulse { 0% { box-shadow: 0 0 0 0 var(--accent-line); } 100% { box-shadow: 0 0 0 8px transparent; } }
+@media (prefers-reduced-motion: reduce) { .sim-load .sk, .sim-bar.indet > i, .sim-load .dot { animation: none; } }

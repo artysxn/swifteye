@@ -48,6 +48,19 @@ struct PmEvent {
     tokens: Vec<(Outcome, String)>,
     /// Used to pick one event when Polymarket lists the same game twice.
     liquidity: f64,
+    /// Per token: the market's fee schedule and settlement rules (for the paper arbitrage).
+    meta: Vec<(String, crate::venue::Meta)>,
+}
+
+/// A market's fee and rules. `feesEnabled: false` = free; a schedule without a rate = unknown.
+fn market_meta(m: &Value) -> crate::venue::Meta {
+    let s = &m["feeSchedule"];
+    let fee = if m["feesEnabled"].as_bool() == Some(false) {
+        Some(crate::venue::Fee::NONE)
+    } else {
+        num(&s["rate"]).map(|rate| crate::venue::Fee { rate, exponent: num(&s["exponent"]).unwrap_or(1.0) })
+    };
+    crate::venue::Meta { fee, rules: text(&m["description"]), title: text(&m["question"]), complement: None }
 }
 
 #[derive(Clone, Default)]
@@ -103,6 +116,11 @@ pub async fn run(app: Arc<App>, prematch_min: i64) {
             loop {
                 match discover(&http, prematch_min, &app.cfg).await {
                     Ok(evs) => {
+                        for e in &evs {
+                            for (tok, m) in &e.meta {
+                                crate::venue::set_meta(crate::venue::V::Pm, tok, m.clone());
+                            }
+                        }
                         let changed = {
                             let cur = tx.borrow();
                             cur.len() != evs.len() || cur.iter().zip(evs.iter()).any(|(a, b)| a.id != b.id || a.tokens != b.tokens)
@@ -163,6 +181,7 @@ async fn stream(
                 let m = m?;
                 let recv = now_ms();
                 last_msg = std::time::Instant::now();
+                crate::venue::alive(crate::venue::V::Pm, recv);
                 let text = match m {
                     Message::Text(t) => t.to_string(),
                     Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
@@ -218,6 +237,9 @@ fn absorb(item: &Value, toks: &mut HashMap<String, Tok>, wanted: &std::collectio
             t.asks.retain(|p, _| *p >= k);
         }
         let now = now_ms();
+        // The full book, for the paper arbitrage (every update, not throttled).
+        let lv = |m: &std::collections::BTreeMap<i64, f64>| m.iter().map(|(k, s)| (*k as f64 / 1000.0, *s)).collect::<Vec<_>>();
+        crate::venue::publish(crate::venue::V::Pm, asset, lv(&t.bids), lv(&t.asks), now);
         let d = t.depth_now();
         let price_moved = (t.bid, t.ask, t.last) != before;
         let size_moved = d.differs(&t.depth) && now - t.depth_ms >= DEPTH_EVERY_MS;
@@ -342,6 +364,9 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
                 (true, Outcome::Away) => Outcome::Home,
                 (_, o) => o,
             };
+            if match_id > 0 {
+                crate::venue::map_match(match_id, outcome, tid);
+            }
             writes.push(Write::PmQuote {
                 ts_ms: recv,
                 server_ts_ms: t.server_ts,
@@ -457,6 +482,7 @@ fn parse_two_way(e: &Value, sport: Option<&'static str>) -> Option<PmEvent> {
     let (home, away) = (home.trim().to_string(), away.trim().to_string());
     let (hn, an) = (Names::new(&home), Names::new(&away));
     let mut tokens = Vec::new();
+    let mut meta = Vec::new();
     for m in e["markets"].as_array().into_iter().flatten() {
         if m["sportsMarketType"].as_str() != Some("moneyline") || m["closed"].as_bool() == Some(true) {
             continue;
@@ -472,12 +498,17 @@ fn parse_two_way(e: &Value, sport: Option<&'static str>) -> Option<PmEvent> {
             let outcome = if sh >= sa { Outcome::Home } else { Outcome::Away };
             if !tokens.iter().any(|(o, _)| *o == outcome) {
                 tokens.push((outcome, id.clone()));
+                meta.push((id.clone(), market_meta(m)));
             }
         }
         break;
     }
     if tokens.len() != 2 {
         return None;
+    }
+    // Two-way: each side's "No" is the other side's token.
+    for (tok, m) in meta.iter_mut() {
+        m.complement = tokens.iter().find(|(_, t)| t != tok).map(|(_, t)| t.clone());
     }
     tokens.sort_by_key(|t| t.0);
     Some(PmEvent {
@@ -490,6 +521,7 @@ fn parse_two_way(e: &Value, sport: Option<&'static str>) -> Option<PmEvent> {
         game_id: None,
         liquidity: num(&e["liquidity"]).unwrap_or(0.0),
         tokens,
+        meta,
     })
 }
 
@@ -503,6 +535,7 @@ fn parse_event(e: &Value) -> Option<PmEvent> {
     let (home, away) = (home.trim().to_string(), away.trim().to_string());
     let (hn, an) = (Names::new(&home), Names::new(&away));
     let mut tokens = Vec::new();
+    let mut meta = Vec::new();
     for m in e["markets"].as_array().into_iter().flatten() {
         if m["sportsMarketType"].as_str() != Some("moneyline") || m["closed"].as_bool() == Some(true) {
             continue;
@@ -528,6 +561,9 @@ fn parse_event(e: &Value) -> Option<PmEvent> {
         if let Some(t) = ids.get(yes) {
             if !tokens.iter().any(|(o, _)| *o == outcome) {
                 tokens.push((outcome, t.clone()));
+                let mut mm = market_meta(m);
+                mm.complement = ids.get(1 - yes.min(1)).cloned();
+                meta.push((t.clone(), mm));
             }
         }
     }
@@ -545,5 +581,6 @@ fn parse_event(e: &Value) -> Option<PmEvent> {
         game_id: int(&e["gameId"]).filter(|g| *g > 0).map(|g| g.to_string()),
         liquidity: num(&e["liquidity"]).unwrap_or(0.0),
         tokens,
+        meta,
     })
 }

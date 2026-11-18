@@ -284,7 +284,7 @@ SE.snipeBot = (el) => {
       : `<span class="muted">${esc(d.status || 'Starting')}. The first pick needs 8 hours of data${d.first_run_ms ? `; due ${utc(d.first_run_ms)}` : ''}.</span>`;
     $('#bBases').innerHTML = d.bases.map((b) => {
       const c = b.current, r = b.record, dr = b.defaults_record;
-      const chip = !c ? '' : c.fallback ? '<span class="chip bad" data-tip="The last 24 hours of the honest record lost money, so it trades the default rules until the next pick.">Safety switch: default rules</span>' : c.switched ? '<span class="chip accent">New rules at the last pick</span>' : '<span class="chip">Rules kept at the last pick</span>';
+      const chip = b.traded === false ? '<span class="chip bad" data-tip="Unhedged Kalshi snipes lost money (Kalshi often does not catch up, and its spread eats the sale). Kept as research only: no paper trades, no alerts.">Off: research only</span>' : !c ? '' : c.fallback ? '<span class="chip bad" data-tip="The last 24 hours of the honest record lost money, so it trades the default rules until the next pick.">Safety switch: default rules</span>' : c.switched ? '<span class="chip accent">New rules at the last pick</span>' : '<span class="chip">Rules kept at the last pick</span>';
       const ins = c?.insample?.stats, pt = c?.pause_test;
       return `<section class="sec bot-base"><div class="sec-head"><h2>${SE.book(b.base)}</h2><div class="tools">${chip}</div></div>` +
         P.stats(
@@ -323,7 +323,7 @@ SE.snipeBot = (el) => {
     ], { sort: 't', empty: 'No re-choices yet.' }).set(hist);
 
     // ---- trades
-    const trades = d.bases.flatMap((b) => b.recent).sort((a, b) => b.exit_ts - a.exit_ts);
+    const trades = d.bases.filter((b) => b.traded !== false).flatMap((b) => b.recent).sort((a, b) => b.exit_ts - a.exit_ts);
     SE.table($('#bTr'), [
       { key: 't', label: 'When', w: 130, fmt: (t) => `<span class="muted">${SE.fmtDateTime(t.ts)}</span>`, sort: (t) => t.ts },
       { key: 'b', label: 'Market', w: 120, fmt: (t) => SE.book(t.base, 'sm') },
@@ -340,7 +340,7 @@ SE.snipeBot = (el) => {
     try { a = await api('/predarb'); } catch { return; }
     if (!$('#bArbS')) return;
     const rej = Object.entries(a.rejected || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(', ');
-    $('#bArbS').innerHTML = `<p class="note" style="margin-top:0">${a.trades} paper arbitrages (${a.open} of ${a.max_open} waiting for payout), ${money(a.staked)} staked, <b class="${a.locked_profit > 0 ? 'pos' : ''}">${money(a.locked_profit)} locked</b>. Watching ${a.watching} games listed on both. Gaps seen since start ${a.raw_gaps}${rej ? `; rejected: ${esc(rej)}` : ''}.</p>`;
+    $('#bArbS').innerHTML = `<p class="note" style="margin-top:0">${a.trades} paper arbitrages (${a.open} waiting for payout, ${money(a.cash)} paper cash free; each takes every book level that still pays ${(a.min_pair * 100).toFixed(1)}%+, re-checked at order time), ${money(a.staked)} staked, <b class="${a.locked_profit > 0 ? 'pos' : ''}">${money(a.locked_profit)} locked</b>. Watching ${a.watching} games listed on both. Gaps seen since start ${a.raw_gaps}${rej ? `; rejected: ${esc(rej)}` : ''}.</p>`;
     const now = Date.now();
     const open = (a.recent || []).filter((p) => (p.payout_ms || 0) > now);
     SE.table($('#bPos'), [
@@ -371,8 +371,9 @@ SE.snipeBot = (el) => {
       { key: 't', label: 'When', w: 130, fmt: (t) => `<span class="muted">${SE.fmtDateTime(t.ts)}</span>`, sort: (t) => t.ts },
       { key: 'm', label: 'Match', cls: 'match', fmt: (t) => P.matchCell(t.home, t.away, '', t.sport, t.match_id) + (t.live ? ' <span class="chip">live</span>' : '') },
       { key: 'o', label: 'Outcome', w: 90, fmt: (t) => esc(t.outcome) },
-      { key: 'l', label: 'Legs', w: 230, fmt: (t) => `Yes ${(t.yes * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on)} + No ${(t.no * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on === 'kalshi' ? 'polymarket' : 'kalshi')}` },
-      { key: 's', label: 'Staked', cls: 'r', w: 90, fmt: (t) => money(t.cost) },
+      { key: 'l', label: 'Legs', w: 260, tip: 'Average prices paid. Newer positions walk both order books: book levels taken on each leg, and the return of the last pair bought (the book\'s gradient).', fmt: (t) => `Yes ${(t.yes * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on)} + No ${(t.no * 100).toFixed(1)}¢ on ${SE.bookName(t.yes_on === 'kalshi' ? 'polymarket' : 'kalshi')}${t.levels ? `<div class="faint">${t.levels[0]} + ${t.levels[1]} book levels, last pair ${pct(t.last_return)}</div>` : ''}` },
+      { key: 'r', label: 'Settlement', w: 200, tip: 'Both venues\' rules compared: the result rule they share and, pre-match, what the position would be worth if the game were called off (Polymarket pays 50-50 or No, Kalshi a fair price).', fmt: (t) => (t.settle ? `<span class="muted">${esc(t.settle.result_rule)}</span>${t.settle.void_pnl != null ? `<div class="faint">if called off ${pnl(t.settle.void_pnl)}</div>` : ''}` : '<span class="faint">not checked</span>') },
+      { key: 's', label: 'Staked', cls: 'r', w: 90, fmt: (t) => `${money(t.cost)}${t.fees != null ? `<div class="faint">fees ${money(t.fees)}</div>` : ''}` },
       { key: 'p', label: 'Result', cls: 'r', w: 120, fmt: (t) => (t.closed_ms ? `${pnl(t.pnl)}<div class="faint">sold early</div>` : `${pnl(t.profit)}<div class="faint">${pct(t.profit / t.cost)} locked</div>`), sort: (t) => t.pnl ?? t.profit },
     ], { sort: 't', empty: 'No arbitrage taken yet.' }).set(a.recent);
   }

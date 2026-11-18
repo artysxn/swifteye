@@ -19,7 +19,8 @@
 //! 3. Buy the side the bookmaker moved to (Yes if likelier, No otherwise) at the ask.
 //! 4. Sell at the bid at the first quote where the market has made `catch` of the bookmaker's
 //!    move ("caught up"), or at the give-up time ("gave up"), whichever comes first.
-//! * Polymarket: real best bid/ask from `pm_quotes`. Fee: `pm_fee_bps` of notional per side.
+//! * Polymarket: real best bid/ask from `pm_quotes`. Fee: Polymarket's sports taker fee
+//!   (5% x p x (1-p) per contract, each side), or `pm_fee_bps` of notional when set.
 //! * Kalshi: only the mid is recorded, so bid/ask = mid ∓ `k_spread`/2. Fee: Kalshi's taker
 //!   formula, 7% × contracts × p × (1-p), rounded up to the cent, on entry and exit.
 //! * Not modelled: order-book depth (every fill is assumed at the top of book), queue, or the
@@ -180,7 +181,8 @@ pub struct SimQ {
     pub slip_c: Option<u32>,
     /// Paper stake per trade in dollars (as cents x100 to keep this hashable). Default 100.
     pub stake: Option<u64>,
-    /// Polymarket fee in basis points of notional, each side. Default 0.
+    /// Polymarket fee in basis points of notional, each side. Default (None): Polymarket's sports
+    /// taker fee, 5% x p x (1-p) per contract.
     pub pm_fee_bps: Option<u32>,
     /// Assumed Kalshi spread when neither a real quote nor a candle is known (cents). Default 4.
     pub k_spread_c: Option<u32>,
@@ -386,26 +388,7 @@ impl KalshiQuotes<'_> {
     /// decided by the same name rule the matcher used when linking the event.
     fn event(&mut self, match_id: i64) -> Option<(String, bool)> {
         let c = self.c;
-        self.events
-            .entry(match_id)
-            .or_insert_with(|| {
-                c.query_row(
-                    "SELECT b.book_event_id, COALESCE(b.sport, m.sport), m.home, m.away, COALESCE(b.home, ''), COALESCE(b.away, '')
-                     FROM book_events b JOIN matches m ON m.id = b.match_id
-                     WHERE b.book = 'kalshi' AND b.match_id = ?1 ORDER BY b.last_seen_ms DESC LIMIT 1",
-                    params![match_id],
-                    |r| {
-                        let (ev, sport, mh, ma, eh, ea): (String, String, String, String, String, String) =
-                            (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?);
-                        let swap = !eh.is_empty() && crate::matcher::names_swapped(&sport, &mh, &ma, &eh, &ea);
-                        Ok((ev, swap))
-                    },
-                )
-                .optional()
-                .ok()
-                .flatten()
-            })
-            .clone()
+        self.events.entry(match_id).or_insert_with(|| kalshi_event(c, match_id)).clone()
     }
     fn mid(&self, match_id: i64, outcome: &str, t: Ms) -> Option<(f64, Ms)> {
         let mut st = self
@@ -472,6 +455,25 @@ impl Quotes for KalshiQuotes<'_> {
 
 /// The match's outcome name as Kalshi's own listing calls it (home and away trade places
 /// when the event is listed the other way round; the draw never moves).
+/// A match's Kalshi event ticker, and whether Kalshi lists the teams the other way round.
+pub(crate) fn kalshi_event(c: &Connection, match_id: i64) -> Option<(String, bool)> {
+    c.query_row(
+        "SELECT b.book_event_id, COALESCE(b.sport, m.sport), m.home, m.away, COALESCE(b.home, ''), COALESCE(b.away, '')
+         FROM book_events b JOIN matches m ON m.id = b.match_id
+         WHERE b.book = 'kalshi' AND b.match_id = ?1 ORDER BY b.last_seen_ms DESC LIMIT 1",
+        params![match_id],
+        |r| {
+            let (ev, sport, mh, ma, eh, ea): (String, String, String, String, String, String) =
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?);
+            let swap = !eh.is_empty() && crate::matcher::names_swapped(&sport, &mh, &ma, &eh, &ea);
+            Ok((ev, swap))
+        },
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
 pub(crate) fn kalshi_side(outcome: &str, swap: bool) -> &str {
     match (swap, outcome) {
         (true, "home") => "away",
@@ -555,14 +557,13 @@ pub async fn simulate_cached(app: &Arc<App>, q: &LagQ, s: &SimQ) -> Result<Arc<V
     n.fill_ms.get_or_insert(250);
     n.slip_c.get_or_insert(1);
     n.stake.get_or_insert(100);
-    n.pm_fee_bps.get_or_insert(0);
     n.k_spread_c.get_or_insert(4);
     n.catch_pct.get_or_insert(75);
     n.confirm_ms.get_or_insert(500);
     if n.trigger.as_deref().map_or(true, str::is_empty) {
         n.trigger = Some("first".into());
     }
-    let key = format!("sim3|{}|{:?}", rank_key(q), n);
+    let key = format!("sim4|{}|{:?}", rank_key(q), n);
     let (path, s2) = (app.db_path.clone(), s.clone());
     let job: Job = Arc::new(move || simulate(&path, &rank, &s2).map(|v| Arc::new(v) as Any));
     let (v, _) = cached(key, job).await?;
@@ -631,7 +632,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
     let fill_ms = s.fill_ms.unwrap_or(250).clamp(0, 10_000);
     let slip = s.slip_c.unwrap_or(1).min(20) as f64 / 100.0;
     let stake = s.stake.unwrap_or(100).clamp(1, 1_000_000) as f64;
-    let pm_fee = s.pm_fee_bps.unwrap_or(0).min(1000) as f64 / 10_000.0;
+    let pm_fee_bps = s.pm_fee_bps.map(|b| b.min(1000) as f64 / 10_000.0);
     let k_half = s.k_spread_c.unwrap_or(4).min(50) as f64 / 200.0;
     let catch = s.catch_pct.unwrap_or(75).clamp(5, 200) as f64 / 100.0;
     let confirm_ms = s.confirm_ms.unwrap_or(500).clamp(0, 10_000);
@@ -647,7 +648,11 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
         let mut quotes: Box<dyn Quotes> =
             if base == PM { Box::new(PmQuotes { c: &c }) } else { Box::new(KalshiQuotes { c: &c, half: k_half, events: HashMap::new() }) };
         // Fee for n contracts at price p, one side.
-        let fee = |n: f64, p: f64| if base == PM { pm_fee * n * p } else { kalshi_fee(n, p) };
+        let fee = |n: f64, p: f64| match (base == PM, pm_fee_bps) {
+            (true, Some(f)) => f * n * p,
+            (true, None) => crate::venue::pm_fee(crate::venue::Fee::PM_SPORTS, n, p),
+            _ => kalshi_fee(n, p),
+        };
         let moves: Vec<(&RankEvent, String, Ms)> = r
             .events
             .iter()
@@ -877,7 +882,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
         "fastest_book": r.fastest_book,
         "trigger": trigger,
         "settings": {
-            "reaction_ms": reaction, "fill_ms": fill_ms, "slip": slip, "stake": stake, "pm_fee_bps": pm_fee * 10_000.0,
+            "reaction_ms": reaction, "fill_ms": fill_ms, "slip": slip, "stake": stake, "pm_fee_bps": pm_fee_bps.map(|f| f * 10_000.0),
             "k_spread": k_half * 2.0, "catch": catch, "cap": cap, "confirm_ms": confirm_ms,
         },
         "snipe": r.snipe,

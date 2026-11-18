@@ -56,6 +56,20 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/adaptive/settings", post(adaptive_settings))
         .route("/adaptive/dump", get(adaptive_dump))
         .route("/predarb", get(predarb))
+        .route("/bots", get(bots_get))
+        .route("/bots/settings", post(bots_settings))
+        .route("/bots/real/{bot}", post(bots_real))
+        .route("/bots/sim", get(bots_sim))
+        .route("/bots/accounts", get(bots_accounts))
+        .route("/bots/tests", get(bots_tests))
+        .route("/bots/runs", get(bots_runs))
+        .route("/bots/run/start", post(bots_run_start))
+        .route("/bots/run/stop", post(bots_run_stop))
+        .route("/bots/run/chart", get(bots_run_chart))
+        .route("/pm/api-from-key", post(pm_api_from_key))
+        .route("/bots/test/{bot}", post(bots_test))
+        .route("/bots/test-sellback/{id}", post(bots_test_sellback))
+        .route("/assets/pages6.js", get(|| async { asset("pages6.js", "text/javascript; charset=utf-8", include_str!("web/pages6.js")) }))
         .route("/predarb/order/{id}", post(predarb_order))
         .route("/predarb/sell/{ts}/{id}", post(predarb_sell))
         .route("/api", get(index))
@@ -1143,6 +1157,133 @@ async fn predarb_order(State(app): S, Path(id): Path<i64>) -> Response {
 async fn predarb_sell(State(app): S, Path((ts, id)): Path<(i64, i64)>) -> Response {
     match tokio::task::spawn_blocking(move || crate::predarb::sell(&app, ts, id)).await {
         Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Bots page: both bots, their wallets, the shared caps, the Real switches.
+async fn bots_get(State(app): S) -> Response {
+    match tokio::task::spawn_blocking(move || crate::bots::view(&app)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn bots_settings(State(app): S, Json(edit): Json<Value>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::bots::update(&app, &edit)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SimQ2 {
+    kind: String,
+}
+
+/// Fetch (or create) the Polymarket API key, secret and passphrase that belong to the saved
+/// trading key, and save them. Pressed by the user on the Bots page.
+async fn pm_api_from_key(State(app): S) -> Response {
+    let mut c = crate::pmacct::load(&app.db_path);
+    if crate::exec::signer_address(&c.private_key).is_err() {
+        return err(StatusCode::BAD_REQUEST, "save the trading key first");
+    }
+    match crate::exec::pm_api_from_key(&crate::books::http_client(), &c.private_key).await {
+        Ok((k, s, p)) => {
+            c.api_key = k;
+            c.api_secret = s;
+            c.passphrase = p;
+            if c.signer.trim().is_empty() {
+                c.signer = crate::exec::signer_address(&c.private_key).unwrap_or_default();
+            }
+            match crate::pmacct::save(&app.db_path, &c) {
+                Ok(()) => Json(crate::pmacct::public_view(&c)).into_response(),
+                Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+            }
+        }
+        Err(e) => err(StatusCode::BAD_GATEWAY, format!("{e:#}")),
+    }
+}
+
+async fn bots_runs(State(app): S) -> Response {
+    Json(tokio::task::spawn_blocking(move || crate::bots::runs(&app)).await.unwrap_or_default()).into_response()
+}
+
+/// Start a timed REAL test run of the snipe bot: {"hours": 4|8|16|24, "confirm": "REAL MONEY"}.
+async fn bots_run_start(State(app): S, Json(b): Json<Value>) -> Response {
+    let (h, conf) = (b["hours"].as_i64().unwrap_or(0), b["confirm"].as_str().unwrap_or("").to_string());
+    match tokio::task::spawn_blocking(move || crate::bots::start_run(&app, h, &conf)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn bots_run_stop(State(app): S) -> Response {
+    match tokio::task::spawn_blocking(move || crate::bots::stop_run(&app, "stopped by hand")).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ChartQ {
+    m: i64,
+    o: String,
+    from: i64,
+    to: i64,
+}
+
+async fn bots_run_chart(State(app): S, Query(q): Query<ChartQ>) -> Response {
+    Json(tokio::task::spawn_blocking(move || crate::bots::chart(&app, q.m, &q.o, q.from, q.to)).await.unwrap_or_default()).into_response()
+}
+
+/// Past test runs and the delays they measured.
+async fn bots_tests(State(app): S) -> Response {
+    match tokio::task::spawn_blocking(move || crate::diag::view(&app)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Sell back what an incomplete test left on the account.
+async fn bots_test_sellback(State(app): S, Path(id): Path<i64>) -> Response {
+    match crate::diag::sell_back(app, id).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+/// One REAL test round trip (smallest stakes): {"confirm": "TEST"}.
+async fn bots_test(State(app): S, Path(bot): Path<String>, Json(b): Json<Value>) -> Response {
+    if b["confirm"].as_str().map(str::trim) != Some("TEST") {
+        return err(StatusCode::BAD_REQUEST, "type TEST to confirm a real test order");
+    }
+    match crate::diag::run(app, &bot).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+/// The shared real accounts: cash and positions vs what both bots believe they hold.
+async fn bots_accounts(State(app): S) -> Response {
+    Json(crate::bots::accounts(app).await).into_response()
+}
+
+/// Whole-dataset simulation of a bot with its current settings (cached; poll until done).
+async fn bots_sim(State(app): S, Query(q): Query<SimQ2>) -> Response {
+    Json(crate::bots::sim(&app, &q.kind)).into_response()
+}
+
+/// Real switch: {"real": true, "confirm": "REAL MONEY"} or {"real": false}.
+async fn bots_real(State(app): S, Path(bot): Path<String>, Json(b): Json<Value>) -> Response {
+    let real = b["real"].as_bool().unwrap_or(false);
+    let confirm = b["confirm"].as_str().unwrap_or("").to_string();
+    match tokio::task::spawn_blocking(move || crate::bots::set_real(&app, &bot, real, &confirm)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }

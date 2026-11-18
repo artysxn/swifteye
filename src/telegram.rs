@@ -10,6 +10,7 @@ use crate::model::*;
 use crate::App;
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -239,6 +240,11 @@ async fn call(http: &reqwest::Client, token: &str, method: &str, body: Value) ->
 
 /// Send to the linked chat. Telegram caps a message at 4096 characters.
 pub async fn send(kind: &'static str, text: &str) -> Result<()> {
+    // Owner 2026-11-18: "only send updates on what that bot does now" -> the snipe bot's trades
+    // (paper and real) and the test message; every other alert kind is dropped here.
+    if !matches!(kind, "bot" | "test") {
+        return Ok(());
+    }
     let c = cfg();
     let chat = c.chat_id.ok_or_else(|| anyhow!("no Telegram chat linked yet"))?;
     if c.token.is_empty() {
@@ -307,6 +313,157 @@ fn fmt_kick(ms: Option<Ms>) -> String {
     } else {
         format!("in {}h {:02}m", m / 60, m % 60)
     }
+}
+
+
+// ---------------------------------------------------------------- snipe bot updates
+
+/// Every 20 s: the snipe bot's new buys and sells (paper and real). Each sale comes with a chart
+/// of that market's minute prices around the trade, the buy and the sale marked (Chart.js config
+/// rendered to a PNG by QuickChart, as the aim4 insights bots do; Telegram fetches the image).
+async fn bot_loop(app: Arc<App>) {
+    let mut last_id: i64 = 0;
+    let mut closed_seen: Ms = now_ms();
+    // Start after what already exists.
+    if let Ok(c) = crate::store::open_ro(&app.db_path) {
+        last_id = c.query_row("SELECT COALESCE(MAX(id), 0) FROM bot_trades", [], |r| r.get(0)).unwrap_or(0);
+    }
+    let mut menu_set = String::new();
+    loop {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        let c = cfg();
+        // The command menu in Telegram (once per token).
+        if !c.token.is_empty() && menu_set != c.token {
+            let cmds = json!({"commands": [
+                {"command": "status", "description": "Mode, balances, today, open trades, test run"},
+                {"command": "open", "description": "Open trades"},
+                {"command": "trades", "description": "Last 10 closed trades"},
+                {"command": "run", "description": "The real test run"},
+                {"command": "chart", "description": "Chart of the last closed trade"},
+                {"command": "kill", "description": "Emergency: stop opening trades"},
+                {"command": "unkill", "description": "Resume trading"},
+                {"command": "pause", "description": "Updates off"},
+                {"command": "resume", "description": "Updates on"}]});
+            if call(&client(), &c.token, "setMyCommands", cmds).await.is_ok() {
+                menu_set = c.token.clone();
+            }
+        }
+        if !c.enabled || c.chat_id.is_none() {
+            continue;
+        }
+        let a2 = app.clone();
+        let (since_id, since_close) = (last_id, closed_seen);
+        let rows: Vec<(i64, Value)> = tokio::task::spawn_blocking(move || {
+            let Ok(c) = crate::store::open_ro(&a2.db_path) else { return Vec::new() };
+            let Ok(mut st) = c.prepare("SELECT id, data, real, closed_ms FROM bot_trades WHERE bot = 'snipe' AND (id > ?1 OR closed_ms > ?2) ORDER BY id") else { return Vec::new() };
+            st.query_map(params![since_id, since_close], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<Ms>>(3)?)))
+                .map(|it| {
+                    it.filter_map(|x| x.ok())
+                        .filter_map(|(id, d, real, cl)| {
+                            let mut v: Value = serde_json::from_str(&d).ok()?;
+                            v["real"] = json!(real != 0);
+                            v["closed_ms"] = json!(cl);
+                            Some((id, v))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+        for (id, v) in rows {
+            let tag = if v["real"].as_bool() == Some(true) { "💵 REAL" } else { "📝 paper" };
+            let name = format!("{} v {}", esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")));
+            let side = format!("{} {}", if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { "Yes" } else { "No" }, outcome_name(v["outcome"].as_str().unwrap_or("")));
+            let n = v["contracts"].as_f64().unwrap_or(0.0);
+            let entry = v["entry"].as_f64().unwrap_or(0.0);
+            if id > last_id {
+                last_id = id;
+                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢",
+                    entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0);
+                let _ = send("bot", &text).await;
+            }
+            if let Some(cl) = v["closed_ms"].as_i64() {
+                if cl > closed_seen {
+                    closed_seen = cl;
+                    let pnl = v["pnl"].as_f64().unwrap_or(0.0);
+                    let caption = format!("{} <b>Snipe sold</b> · {tag}\n{name} · {side}\n{n:.0}: {:.1}¢ → {:.1}¢ ({}) · <b>{}${:.2}</b>",
+                        if pnl >= 0.0 { "✅" } else { "❌" }, entry * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")),
+                        if pnl >= 0.0 { "+" } else { "-" }, pnl.abs());
+                    let a2 = app.clone();
+                    let v2 = v.clone();
+                    let chart = tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten();
+                    let sent = match chart {
+                        Some(cfgj) => send_chart(&cfgj, &caption).await,
+                        None => Err(anyhow!("no chart")),
+                    };
+                    if sent.is_err() {
+                        let _ = send("bot", &caption).await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Chart.js config: the market's Polymarket bid / ask each minute from 10 min before the buy to 5
+/// min after the sale, the buy (green) and the sale (red) marked, in the bought side's price.
+fn trade_chart(app: &App, v: &Value) -> Option<Value> {
+    let c = crate::store::open_ro(&app.db_path).ok()?;
+    let (m, o) = (v["match_id"].as_i64()?, v["outcome"].as_str()?.to_string());
+    let (t0, t1) = (v["ts"].as_i64()? - 600_000, v["closed_ms"].as_i64()? + 300_000);
+    let yes = v["dir"].as_f64().unwrap_or(1.0) > 0.0;
+    let mut st = c.prepare("SELECT ts_ms, bid, ask FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms >= ?3 AND ts_ms <= ?4 ORDER BY ts_ms").ok()?;
+    let rows: Vec<(Ms, Option<f64>, Option<f64>)> = st.query_map(params![m, o, t0, t1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok()?.filter_map(|x| x.ok()).collect();
+    let mut mins: std::collections::BTreeMap<Ms, (Option<f64>, Option<f64>)> = Default::default();
+    for (t, b, a) in rows {
+        // The bought side's price: Yes as is; No = 1 - the other side of the Yes book.
+        let (b2, a2) = if yes { (b, a) } else { (a.map(|x| 1.0 - x), b.map(|x| 1.0 - x)) };
+        mins.insert(t - t.rem_euclid(60_000), (b2, a2));
+    }
+    if mins.len() < 2 {
+        return None;
+    }
+    let keys: Vec<Ms> = mins.keys().copied().collect();
+    let idx = |t: Ms| keys.iter().rposition(|k| *k <= t).unwrap_or(0);
+    let labels: Vec<String> = keys.iter().map(|k| time::OffsetDateTime::from_unix_timestamp(k / 1000).map(|d| format!("{:02}:{:02}", d.hour(), d.minute())).unwrap_or_default()).collect();
+    let cents = |x: Option<f64>| x.map(|p| (p * 1000.0).round() / 10.0);
+    let mut buy = vec![Value::Null; keys.len()];
+    let mut sell = vec![Value::Null; keys.len()];
+    buy[idx(v["ts"].as_i64()?)] = json!(cents(v["entry"].as_f64()));
+    sell[idx(v["closed_ms"].as_i64()?)] = json!(cents(v["exit"].as_f64()));
+    let title = format!("{} v {} · {} {} · {} (cents)", v["home"].as_str().unwrap_or(""), v["away"].as_str().unwrap_or(""), if yes { "Yes" } else { "No" }, outcome_name(&o), if v["real"].as_bool() == Some(true) { "REAL" } else { "paper" });
+    Some(json!({
+        "type": "line",
+        "data": {"labels": labels, "datasets": [
+            {"label": "Bid", "data": mins.values().map(|x| cents(x.0)).collect::<Vec<_>>(), "borderColor": "#7a8a86", "fill": false, "pointRadius": 0, "borderWidth": 1.5, "steppedLine": true},
+            {"label": "Ask", "data": mins.values().map(|x| cents(x.1)).collect::<Vec<_>>(), "borderColor": "#b8c4c0", "fill": false, "pointRadius": 0, "borderWidth": 1.5, "steppedLine": true},
+            {"label": "Buy", "data": buy, "borderColor": "#0f9e73", "backgroundColor": "#0f9e73", "showLine": false, "pointRadius": 7, "pointStyle": "triangle"},
+            {"label": "Sell", "data": sell, "borderColor": "#e0453c", "backgroundColor": "#e0453c", "showLine": false, "pointRadius": 7, "pointStyle": "rectRot"},
+        ]},
+        "options": {"title": {"display": true, "text": title}, "legend": {"position": "bottom"}, "spanGaps": true,
+            "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "¢"}}]}}
+    }))
+}
+
+/// Render a Chart.js config with QuickChart and send it as a photo with an HTML caption.
+async fn send_chart(chart: &Value, caption: &str) -> Result<()> {
+    let c = cfg();
+    let chat = c.chat_id.ok_or_else(|| anyhow!("no Telegram chat linked yet"))?;
+    let http = client();
+    let r: Value = http
+        .post("https://quickchart.io/chart/create")
+        .json(&json!({"chart": chart, "width": 900, "height": 500, "devicePixelRatio": 2, "backgroundColor": "white", "format": "png"}))
+        .send()
+        .await?
+        .json()
+        .await?;
+    let url = r["url"].as_str().ok_or_else(|| anyhow!("chart render failed"))?;
+    let res = call(&http, &c.token, "sendPhoto", json!({"chat_id": chat, "photo": url, "caption": caption, "parse_mode": "HTML"})).await;
+    let mut log = LOG.lock();
+    log.push_front(Sent { ts_ms: now_ms(), kind: "bot", text: caption.to_string(), ok: res.is_ok(), error: res.as_ref().err().map(|e| format!("{e:#}")) });
+    log.truncate(40);
+    res.map(|_| ())
 }
 
 // ---------------------------------------------------------------- public view / edits
@@ -416,6 +573,7 @@ pub fn watched() -> Vec<i64> {
 
 pub fn spawn(app: Arc<App>) {
     load(&app.db_path);
+    tokio::spawn(bot_loop(app.clone()));
     tokio::spawn(updates_loop(app.clone()));
     tokio::spawn(odds_loop(app.clone()));
     tokio::spawn(scan_loop(app));
@@ -535,45 +693,138 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
                 g.linked_as = Some(if user.is_empty() { format!("chat {chat}") } else { user.clone() });
                 save(&g);
             }
-            return reply(http, &c.token, chat, &format!("Linked to Swifteye. Alerts come here.\n\n{}\n\nChange them on the Telegram page in Swifteye, or use /pause and /resume.", status_text(&cfg()))).await;
+            return reply(http, &c.token, chat, &format!("Linked to Swifteye: snipe bot updates come here.\n\n{}\n\n{HELP}", bot_status(app))).await;
         }
         if c.chat_id == Some(chat) {
-            return reply(http, &c.token, chat, &status_text(&c)).await;
+            return reply(http, &c.token, chat, &bot_status(app)).await;
         }
         return reply(http, &c.token, chat, "This bot belongs to a private Swifteye install. To link it, open the Telegram page in Swifteye and press <b>Open in Telegram</b>, or enter your handle there and send /start again.").await;
     }
     if c.chat_id != Some(chat) {
         return Ok(()); // not the linked chat: stay quiet
     }
+    if cmd == "/chart" {
+        // The last closed snipe trade, charted.
+        let last: Option<Value> = crate::store::open_ro(&app.db_path).ok().and_then(|c| {
+            c.query_row("SELECT data, real, closed_ms FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NOT NULL ORDER BY closed_ms DESC LIMIT 1", [], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Ms>(2)?))
+            })
+            .ok()
+            .and_then(|(d, real, cl)| {
+                let mut v: Value = serde_json::from_str(&d).ok()?;
+                v["real"] = json!(real != 0);
+                v["closed_ms"] = json!(cl);
+                Some(v)
+            })
+        });
+        let Some(v) = last else { return reply(http, &c.token, chat, "No closed snipe trade yet.").await };
+        let cap = format!("Last snipe trade: {} v {} · {}", esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")), money_s(v["pnl"].as_f64().unwrap_or(0.0)));
+        return match trade_chart(app, &v) {
+            Some(ch) if send_chart(&ch, &cap).await.is_ok() => Ok(()),
+            _ => reply(http, &c.token, chat, &format!("{cap}\n(no chart: not enough recorded prices)")).await,
+        };
+    }
     let msg = match cmd.as_str() {
-        "/status" => status_text(&c),
+        "/status" => bot_status(app),
+        "/open" => trade_list(app, true, 10),
+        "/trades" => trade_list(app, false, 10),
+        "/run" => run_text(app),
+        "/kill" => match crate::bots::update(app, &json!({"kill": true})) {
+            Ok(_) => "🛑 Kill switch ON: the bot opens no new trades (open ones still get sold). /unkill to resume.".into(),
+            Err(e) => format!("Could not: {e:#}"),
+        },
+        "/unkill" => match crate::bots::update(app, &json!({"kill": false})) {
+            Ok(_) => "Kill switch off: the bot trades again.".into(),
+            Err(e) => format!("Could not: {e:#}"),
+        },
         "/pause" => {
             CFG.lock().enabled = false;
             save(&cfg());
-            "Alerts paused. /resume to start them again.".into()
+            "Updates paused (the bot keeps trading). /resume to get them again.".into()
         }
         "/resume" => {
             CFG.lock().enabled = true;
             save(&cfg());
-            "Alerts on.".into()
+            "Updates on.".into()
         }
-        "/watching" => {
-            if c.odds.watch.is_empty() {
-                "No matches watched. Press the bell on a match in Swifteye.".into()
-            } else {
-                c.odds.watch.iter().map(|id| {
-                    let (h, a, s) = names(app, *id);
-                    format!("• {} v {} <i>{}</i>", esc(&h), esc(&a), fmt_kick(s))
-                }).collect::<Vec<_>>().join("\n")
-            }
-        }
-        "/arbs" => {
-            let arbs = crate::arb::scan(app, 0.0, c.arbs.stake);
-            if arbs.is_empty() { "No pre-match arbitrage right now.".into() } else { arbs.iter().take(5).map(arb_text).collect::<Vec<_>>().join("\n\n") }
-        }
-        _ => "Commands: /status, /arbs, /watching, /pause, /resume".into(),
+        _ => HELP.into(),
     };
     reply(http, &c.token, chat, &msg).await
+}
+
+const HELP: &str = "<b>Snipe bot</b>\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
+
+fn money_s(x: f64) -> String {
+    format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())
+}
+
+fn bot_status(app: &App) -> String {
+    let s = crate::bots::settings();
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
+    let mode = if s.kill { "🛑 KILLED" } else if !s.snipe.c.enabled { "off" } else if s.snipe.c.real { "💵 REAL" } else { "📝 paper" };
+    let (pc, po, pd, pn, pw) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, false);
+    let (rc, ro, rd, rn, rw) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true);
+    let r = crate::adaptive::active_rules();
+    let mut t = format!(
+        "<b>Snipe bot</b> · {mode}\n📝 Paper: ${:.2} ({}), today {}, {pn} trades {pw} won, ${po:.2} open\n💵 Real: {} total, today {}, {rn} trades {rw} won, ${ro:.2} open, ${:.2} free of ${:.0}\nRules: {}+ books, {:.0} pt move, ≤{:.0}% followed, gain ≥{:.0}¢, give up {} min\nStake {:.0}% (max ${:.0}), daily loss stop ${:.0}",
+        s.snipe.c.start + pc, money_s(pc), money_s(pd), money_s(rc), money_s(rd), crate::bots::real_free(&c, crate::bots::SNIPE), s.snipe.c.bankroll,
+        r.min_books, r.min_move * 100.0, r.max_followed * 100.0, r.min_edge * 100.0, r.give_up_s / 60, s.snipe.pct * 100.0, s.snipe.c.max_trade, s.snipe.c.daily_loss
+    );
+    if let Some(run) = &s.run {
+        let rep = crate::bots::run_report(app, run, now_ms());
+        t.push_str(&format!("\n⏱ Test run until {}: {} trades, {}", hhmm(run.end_ms), rep["trades"], money_s(rep["pnl"].as_f64().unwrap_or(0.0))));
+    }
+    t
+}
+
+fn hhmm(ms: Ms) -> String {
+    time::OffsetDateTime::from_unix_timestamp(ms / 1000).map(|d| format!("{:02}:{:02} UTC", d.hour(), d.minute())).unwrap_or_default()
+}
+
+fn trade_list(app: &App, open: bool, n: i64) -> String {
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
+    let sql = if open {
+        "SELECT data, real FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NULL ORDER BY ts_ms DESC LIMIT ?1"
+    } else {
+        "SELECT data, real FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NOT NULL ORDER BY closed_ms DESC LIMIT ?1"
+    };
+    let rows: Vec<(Value, bool)> = c
+        .prepare(sql)
+        .and_then(|mut st| st.query_map([n], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).map(|it| it.filter_map(|x| x.ok()).filter_map(|(d, real)| serde_json::from_str(&d).ok().map(|v| (v, real != 0))).collect()))
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return if open { "No open trades.".into() } else { "No closed trades yet.".into() };
+    }
+    rows.iter()
+        .map(|(v, real)| {
+            let side = format!("{} {}", if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { "Yes" } else { "No" }, outcome_name(v["outcome"].as_str().unwrap_or("")));
+            let head = format!("{} {} v {} · {side}", if *real { "💵" } else { "📝" }, esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")));
+            if open {
+                format!("{head}\n   {:.0} @ {:.1}¢ (${:.2})", v["contracts"].as_f64().unwrap_or(0.0), v["entry"].as_f64().unwrap_or(0.0) * 100.0, v["cost"].as_f64().unwrap_or(0.0))
+            } else {
+                let p = v["pnl"].as_f64().unwrap_or(0.0);
+                format!("{} {head}\n   {:.1}¢ → {:.1}¢ ({}) <b>{}</b>", if p >= 0.0 { "✅" } else { "❌" }, v["entry"].as_f64().unwrap_or(0.0) * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")), money_s(p))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn run_text(app: &App) -> String {
+    let g = crate::bots::runs(app);
+    let (r, live) = match (&g["current"], g["past"].get(0)) {
+        (Value::Object(_), _) => (g["current"].clone(), true),
+        (_, Some(p)) => (p.clone(), false),
+        _ => return "No test run yet. Start one on the Bots page.".into(),
+    };
+    let sig = r["signals"].as_array().map(|a| a.iter().take(4).map(|x| format!("{} {}", x["result"].as_str().unwrap_or("").replace('_', " "), x["n"])).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+    format!(
+        "<b>Test run</b> · {}\n{} → {}\nResult {} on ${:.2} staked\n{} trades: {} closed, {} won, {} open\nSignals: {}",
+        if live { "running" } else { r["ended"].as_str().unwrap_or("ended") },
+        hhmm(r["start_ms"].as_i64().unwrap_or(0)), hhmm(r["end_ms"].as_i64().unwrap_or(0)),
+        money_s(r["pnl"].as_f64().unwrap_or(0.0)), r["staked"].as_f64().unwrap_or(0.0),
+        r["trades"], r["closed"], r["wins"], r["open"], esc(&sig)
+    )
 }
 
 fn arb_text(a: &crate::arb::Arb) -> String {
