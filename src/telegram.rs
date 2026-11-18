@@ -335,6 +335,8 @@ async fn bot_loop(app: Arc<App>) {
         // The command menu in Telegram (once per token).
         if !c.token.is_empty() && menu_set != c.token {
             let cmds = json!({"commands": [
+                {"command": "balance", "description": "Chart of the bot's real balance ($40 test run)"},
+                {"command": "balancepaper", "description": "Chart of the paper balance"},
                 {"command": "status", "description": "Mode, balances, today, open trades, test run"},
                 {"command": "open", "description": "Open trades"},
                 {"command": "trades", "description": "Last 10 closed trades"},
@@ -393,7 +395,7 @@ async fn bot_loop(app: Arc<App>) {
                     let a2 = app.clone();
                     let v2 = v.clone();
                     let chart = tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten();
-                    let value = account_value(&app, v["real"].as_bool() == Some(true)).await;
+                    let value = bot_balance(&app, v["real"].as_bool() == Some(true));
                     let sent = match chart {
                         Some(cfgj) => {
                             let (ch, cap) = with_value(cfgj, &caption, &value);
@@ -403,6 +405,11 @@ async fn bot_loop(app: Arc<App>) {
                     };
                     if sent.is_err() {
                         let _ = send("bot", &format!("{caption}\n💼 {}", esc(&value))).await;
+                    }
+                    let a3 = app.clone();
+                    let real = v["real"].as_bool() == Some(true);
+                    if let Ok(Some((ch, cap))) = tokio::task::spawn_blocking(move || balance_chart(&a3, real)).await {
+                        let _ = send_chart(&ch, &cap).await;
                     }
                 }
             }
@@ -471,6 +478,71 @@ async fn account_value(app: &App, real: bool) -> String {
         }).await.unwrap_or((0.0, 0.0));
         format!("Paper wallet ${bal:.2} (${open:.2} in open trades)")
     }
+}
+
+/// The bot's own balance: during a real test run, its bankroll ($40) plus the run's results;
+/// otherwise its real bankroll plus its real results; for a paper trade, the paper wallet.
+fn bot_balance(app: &App, real: bool) -> String {
+    let st = crate::bots::settings();
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return String::new() };
+    if let Some(run) = &st.run {
+        let rep = crate::bots::run_report(app, run, now_ms());
+        let p = rep["pnl"].as_f64().unwrap_or(0.0);
+        return format!("Bot balance ${:.2} (test run: ${:.0} {})", run.bankroll + p, run.bankroll, money_s(p));
+    }
+    if real {
+        let (closed, open, ..) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true);
+        format!("Bot balance ${:.2} (${:.0} bankroll {}, ${open:.2} in open trades)", st.snipe.c.bankroll + closed, st.snipe.c.bankroll, money_s(closed))
+    } else {
+        let (closed, open, ..) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, false);
+        format!("Paper bot balance ${:.2} (${:.0} start {}, ${open:.2} in open trades)", st.snipe.c.start + closed, st.snipe.c.start, money_s(closed))
+    }
+}
+
+/// The bot's balance over time: starts at its money (the test run's $40, else its real bankroll;
+/// paper: the paper start) and steps by each closed trade's result. (Chart.js config, caption)
+fn balance_chart(app: &App, real: bool) -> Option<(Value, String)> {
+    let st = crate::bots::settings();
+    let c = crate::store::open_ro(&app.db_path).ok()?;
+    let now = now_ms();
+    // Real during / after a test run: the run's window and bankroll; else since the start.
+    let last_run: Option<Value> = if real && st.run.is_none() { crate::bots::runs(app)["past"].get(0).cloned() } else { None };
+    let (start_bal, from, to, label) = if real {
+        if let Some(r) = &st.run {
+            (r.bankroll, r.start_ms, now, format!("Snipe bot balance · REAL test run (${:.0})", r.bankroll))
+        } else if let Some(r) = &last_run {
+            (r["bankroll"].as_f64().unwrap_or(40.0), r["start_ms"].as_i64().unwrap_or(0), r["end_ms"].as_i64().unwrap_or(now), format!("Snipe bot balance · last REAL test run (${:.0})", r["bankroll"].as_f64().unwrap_or(40.0)))
+        } else {
+            (st.snipe.c.bankroll, 0, now, format!("Snipe bot balance · REAL (${:.0} bankroll)", st.snipe.c.bankroll))
+        }
+    } else {
+        (st.snipe.c.start, st.snipe.c.paper_since, now, format!("Snipe bot balance · paper (${:.0} start)", st.snipe.c.start))
+    };
+    let mut q = c.prepare("SELECT closed_ms, json_extract(data, '$.pnl') FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND closed_ms IS NOT NULL AND ts_ms >= ?2 AND closed_ms <= ?3 ORDER BY closed_ms").ok()?;
+    let pts: Vec<(Ms, f64)> = q.query_map(params![real as i64, from, to], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))).ok()?.filter_map(|x| x.ok()).collect();
+    let fmt_t = |ms: Ms| time::OffsetDateTime::from_unix_timestamp(ms / 1000).map(|d| format!("{:02}/{:02} {:02}:{:02}", d.day(), u8::from(d.month()), d.hour(), d.minute())).unwrap_or_default();
+    let mut labels = vec![fmt_t(from.max(pts.first().map(|p| p.0 - 60_000).unwrap_or(now)).min(now))];
+    let mut vals = vec![(start_bal * 100.0).round() / 100.0];
+    let mut bal = start_bal;
+    for (t, p) in &pts {
+        bal += p;
+        labels.push(fmt_t(*t));
+        vals.push((bal * 100.0).round() / 100.0);
+    }
+    labels.push("now".into());
+    vals.push((bal * 100.0).round() / 100.0);
+    let colour = if bal >= start_bal { "#0f9e73" } else { "#e0453c" };
+    let wins = pts.iter().filter(|p| p.1 > 0.0).count();
+    let caption = format!("💼 <b>Bot balance ${bal:.2}</b> ({}{:.2} from ${start_bal:.0}) · {} trades, {wins} won", if bal >= start_bal { "+$" } else { "-$" }, (bal - start_bal).abs(), pts.len());
+    Some((json!({
+        "type": "line",
+        "data": {"labels": labels, "datasets": [
+            {"label": "Balance ($)", "data": vals, "borderColor": colour, "backgroundColor": "rgba(15,158,115,0.08)", "fill": true, "pointRadius": 3, "steppedLine": true, "borderWidth": 2},
+            {"label": "Start", "data": vec![start_bal; labels.len()], "borderColor": "#9aa5a1", "borderDash": [6, 4], "fill": false, "pointRadius": 0, "borderWidth": 1},
+        ]},
+        "options": {"title": {"display": true, "text": [label, format!("${bal:.2} now")]}, "legend": {"position": "bottom"},
+            "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "$"}}]}}
+    }), caption))
 }
 
 /// Put the account value into a chart's title and its caption.
@@ -737,6 +809,14 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
     if c.chat_id != Some(chat) {
         return Ok(()); // not the linked chat: stay quiet
     }
+    if cmd == "/balance" || cmd == "/balancepaper" {
+        let real = cmd == "/balance";
+        return match balance_chart(app, real) {
+            Some((ch, cap)) if send_chart(&ch, &cap).await.is_ok() => Ok(()),
+            Some((_, cap)) => reply(http, &c.token, chat, &cap).await,
+            None => reply(http, &c.token, chat, "No balance history yet.").await,
+        };
+    }
     if cmd == "/chart" {
         // The last closed snipe trade, charted.
         let last: Option<Value> = crate::store::open_ro(&app.db_path).ok().and_then(|c| {
@@ -753,7 +833,7 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
         });
         let Some(v) = last else { return reply(http, &c.token, chat, "No closed snipe trade yet.").await };
         let cap = format!("Last snipe trade: {} v {} · {}", esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")), money_s(v["pnl"].as_f64().unwrap_or(0.0)));
-        let value = account_value(app, v["real"].as_bool() == Some(true)).await;
+        let value = bot_balance(app, v["real"].as_bool() == Some(true));
         return match trade_chart(app, &v) {
             Some(ch) => {
                 let (ch, cap2) = with_value(ch, &cap, &value);
@@ -790,7 +870,7 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
     reply(http, &c.token, chat, &msg).await
 }
 
-const HELP: &str = "<b>Snipe bot</b>\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
+const HELP: &str = "<b>Snipe bot</b>\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
 
 fn money_s(x: f64) -> String {
     format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())
