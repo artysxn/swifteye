@@ -329,14 +329,22 @@ async fn bot_loop(app: Arc<App>) {
         last_id = c.query_row("SELECT COALESCE(MAX(id), 0) FROM bot_trades", [], |r| r.get(0)).unwrap_or(0);
     }
     let mut menu_set = String::new();
+    let mut tick: u64 = 0;
     loop {
         tokio::time::sleep(Duration::from_secs(20)).await;
+        tick += 1;
+        // Keep the whole-dataset replay fresh for /projected (cached; cheap when nothing changed).
+        if tick % 15 == 1 {
+            let _ = crate::bots::sim(&app, "snipe-wf");
+        }
         let c = cfg();
         // The command menu in Telegram (once per token).
         if !c.token.is_empty() && menu_set != c.token {
             let cmds = json!({"commands": [
                 {"command": "balance", "description": "Chart of the bot's real balance ($40 test run)"},
                 {"command": "balancepaper", "description": "Chart of the paper balance"},
+                {"command": "projected", "description": "What money turns into: /projected 24h [start]"},
+                {"command": "log", "description": "All real-money orders"},
                 {"command": "status", "description": "Mode, balances, today, open trades, test run"},
                 {"command": "open", "description": "Open trades"},
                 {"command": "trades", "description": "Last 10 closed trades"},
@@ -895,6 +903,8 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
         "/open" => trade_list(app, true, 10),
         "/trades" => trade_list(app, false, 10),
         "/run" => run_text(app),
+        "/projected" => projected(app, &arg),
+        "/log" => real_log(app, arg.parse::<i64>().unwrap_or(20).clamp(1, 60)),
         "/kill" => match crate::bots::update(app, &json!({"kill": true})) {
             Ok(_) => "🛑 Kill switch ON: the bot opens no new trades (open ones still get sold). /unkill to resume.".into(),
             Err(e) => format!("Could not: {e:#}"),
@@ -918,10 +928,112 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
     reply(http, &c.token, chat, &msg).await
 }
 
-const HELP: &str = "<b>Snipe bot</b>\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
+const HELP: &str = "<b>Snipe bot</b>\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
 
 fn money_s(x: f64) -> String {
     format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())
+}
+
+/// "24h", "3d", "1w", "90m" (default hours) -> days.
+fn parse_span(s: &str) -> Option<f64> {
+    let s = s.trim().to_lowercase();
+    let (num, unit) = s.split_at(s.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(s.len()));
+    let n: f64 = num.trim().parse().ok()?;
+    let d = match unit.trim() {
+        "" | "h" | "hr" | "hrs" | "hour" | "hours" => n / 24.0,
+        "d" | "day" | "days" => n,
+        "w" | "wk" | "week" | "weeks" => n * 7.0,
+        "m" | "min" | "mins" => n / 1440.0,
+        _ => return None,
+    };
+    (d > 0.0 && d <= 365.0).then_some(d)
+}
+
+/// The bot's money now: the test run's $40 ± results while one runs, else its real bankroll ±
+/// real results.
+fn bot_value(app: &App) -> f64 {
+    let st = crate::bots::settings();
+    if let Some(r) = &st.run {
+        return r.bankroll + crate::bots::run_report(app, r, now_ms())["pnl"].as_f64().unwrap_or(0.0);
+    }
+    crate::store::open_ro(&app.db_path).map(|c| st.snipe.c.bankroll + crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true).0).unwrap_or(st.snipe.c.bankroll)
+}
+
+/// /projected <time> [start]: what `start` turns into over `time` at the bot's rate, from the
+/// whole-dataset replay of today's settings and, once there are 10+, from its own closed trades.
+fn projected(app: &App, arg: &str) -> String {
+    let mut it = arg.split_whitespace();
+    let Some(days) = it.next().and_then(parse_span) else { return "Use: /projected 24h [start]  (also 72h, 3d, 1w; start defaults to the bot's balance)".into() };
+    let start = it.next().and_then(|x| x.trim_start_matches('$').parse::<f64>().ok()).filter(|x| *x > 0.0).unwrap_or_else(|| bot_value(app));
+    let span = if days >= 1.0 { format!("{days:.1} days") } else { format!("{:.0} h", days * 24.0) };
+    let mut out = format!("<b>Projection</b> · ${start:.2} over {span}\n");
+    // Return on the money per day, linear (no compounding) and compounded.
+    let line = |label: &str, per_day: f64, n: &str| -> String {
+        let lin = start * (1.0 + per_day * days);
+        let comp = start * (1.0 + per_day).powf(days);
+        let half = start * (1.0 + per_day * 0.5 * days);
+        format!("{label} ({n}): {:+.1}%/day\n   → <b>${lin:.2}</b> simple · ${comp:.2} compounding · ${half:.2} at half the edge\n", per_day * 100.0)
+    };
+    let mut any = false;
+    if let Some(x) = crate::bots::sim_cached("snipe-wf") {
+        let (s0, pnl, d) = (x["start"].as_f64().unwrap_or(0.0), x["pnl"].as_f64().unwrap_or(0.0), x["days"].as_f64().unwrap_or(0.0));
+        if s0 > 0.0 && d > 0.0 {
+            out.push_str(&line("Replay of all data, today's settings", pnl / s0 / d, &format!("{} trades over {d:.1} days", x["trades"])));
+            any = true;
+        }
+    }
+    // The bot's own closed trades (real if any, else paper): profit per day on its money.
+    if let Ok(c) = crate::store::open_ro(&app.db_path) {
+        for (real, money, label) in [(true, crate::bots::settings().snipe.c.bankroll, "Its real trades"), (false, crate::bots::settings().snipe.c.start, "Its paper trades")] {
+            let r: Option<(i64, f64, Ms, Ms)> = c.query_row("SELECT COUNT(*), COALESCE(SUM(json_extract(data, '$.pnl')), 0), MIN(ts_ms), MAX(closed_ms) FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND closed_ms IS NOT NULL AND ts_ms >= ?2", params![real as i64, if real { 0 } else { crate::bots::settings().snipe.c.paper_since }], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<Ms>>(2)?.unwrap_or(0), r.get::<_, Option<Ms>>(3)?.unwrap_or(0)))).ok();
+            if let Some((n, pnl, a, b)) = r {
+                let d = ((b - a) as f64 / 86_400_000.0).max(1.0 / 24.0);
+                if n >= 10 && money > 0.0 {
+                    out.push_str(&line(label, pnl / money / d, &format!("{n} trades over {:.1} h", d * 24.0)));
+                    any = true;
+                } else if n > 0 {
+                    out.push_str(&format!("{label}: {n} closed so far ({}), too few to project (10+).\n", money_s(pnl)));
+                }
+            }
+        }
+    }
+    if !any {
+        out.push_str("No rate yet: open the Bots page once to run the replay, or wait for 10+ closed trades.\n");
+    }
+    out.push_str("<i>Estimates from past data, not a promise: few days of data, real fills can be worse, and a bad day stops at the daily loss limit.</i>");
+    out
+}
+
+/// /log: every real-money order the bots sent (newest first).
+fn real_log(app: &App, n: i64) -> String {
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
+    let rows: Vec<(Ms, String, String, bool, Value)> = c
+        .prepare("SELECT ts_ms, bot, venue, ok, data FROM bot_orders ORDER BY id DESC LIMIT ?1")
+        .and_then(|mut st| st.query_map([n], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0, serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null)))).map(|it| it.filter_map(|x| x.ok()).collect()))
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return "No real-money orders yet.".into();
+    }
+    let mut out = format!("<b>Real-money orders</b> (last {})\n", rows.len());
+    let mut net = 0.0;
+    for (ts, bot, venue, ok, d) in &rows {
+        let side = d["side"].as_str().unwrap_or("?");
+        let f = &d["fill"];
+        let (filled, avg) = (f["filled"].as_f64().unwrap_or(0.0), f["avg"].as_f64().unwrap_or(0.0));
+        let usd = filled * avg;
+        if *ok {
+            net += if side.starts_with("buy") { -usd } else { usd };
+        }
+        let t = time::OffsetDateTime::from_unix_timestamp(ts / 1000).map(|x| format!("{:02}/{:02} {:02}:{:02}", x.day(), u8::from(x.month()), x.hour(), x.minute())).unwrap_or_default();
+        let what = if *ok && filled > 0.0 {
+            format!("{} {filled:.0} @ {:.1}¢ = ${usd:.2}", if side.starts_with("buy") { "BUY" } else { "SELL" }, avg * 100.0)
+        } else {
+            format!("{} failed: {}", side.to_uppercase(), esc(&d["error"].as_str().unwrap_or("nothing filled").chars().take(80).collect::<String>()))
+        };
+        out.push_str(&format!("{} {t} · {} · {} · {what}\n", if *ok { "✅" } else { "⚠️" }, esc(bot), esc(venue)));
+    }
+    out.push_str(&format!("Cash flow of these orders (sales − buys, before fees): {}", money_s(net)));
+    out
 }
 
 fn bot_status(app: &App) -> String {

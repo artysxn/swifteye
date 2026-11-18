@@ -761,6 +761,11 @@ pub fn chart(app: &App, match_id: i64, outcome: &str, from: Ms, to: Ms) -> Value
     json!({"minutes": mins.iter().map(|(t, (b, a))| json!([t, b, a])).collect::<Vec<_>>(), "signals": sig, "trades": tr})
 }
 
+/// The last finished simulation of a kind, if any (Telegram /projected).
+pub fn sim_cached(kind: &str) -> Option<Value> {
+    SIMS.lock().get(kind).and_then(|x| x.result.clone())
+}
+
 /// Everything the Bots page shows.
 pub fn view(app: &App) -> Value {
     let s = settings();
