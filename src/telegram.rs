@@ -975,10 +975,11 @@ fn projected(app: &App, arg: &str) -> String {
         format!("{label} ({n}): {:+.1}%/day\n   → <b>${lin:.2}</b> simple · ${comp:.2} compounding · ${half:.2} at half the edge\n", per_day * 100.0)
     };
     let mut any = false;
-    if let Some(x) = crate::bots::sim_cached("snipe-wf") {
+    if let Some((x, at)) = crate::bots::sim_cached("snipe-wf") {
         let (s0, pnl, d) = (x["start"].as_f64().unwrap_or(0.0), x["pnl"].as_f64().unwrap_or(0.0), x["days"].as_f64().unwrap_or(0.0));
         if s0 > 0.0 && d > 0.0 {
-            out.push_str(&line("Replay of all data, today's settings", pnl / s0 / d, &format!("{} trades over {d:.1} days", x["trades"])));
+            let when = time::OffsetDateTime::from_unix_timestamp(at / 1000).map(|t| format!("{:02}/{:02} {:02}:{:02} UTC", t.day(), u8::from(t.month()), t.hour(), t.minute())).unwrap_or_default();
+            out.push_str(&line(&format!("Replay of all data (baseline from {when})"), pnl / s0 / d, &format!("{} trades over {d:.1} days", x["trades"])));
             any = true;
         }
     }
@@ -998,7 +999,7 @@ fn projected(app: &App, arg: &str) -> String {
         }
     }
     if !any {
-        out.push_str("No rate yet: open the Bots page once to run the replay, or wait for 10+ closed trades.\n");
+        out.push_str("No rate yet: no saved replay and fewer than 10 closed trades.\n");
     }
     out.push_str("<i>Estimates from past data, not a promise: few days of data, real fills can be worse, and a bad day stops at the daily loss limit.</i>");
     out

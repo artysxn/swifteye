@@ -171,6 +171,10 @@ pub fn event(msg: impl Into<String>) {
 pub fn init(app: &App) -> anyhow::Result<()> {
     let s: Settings = std::fs::read_to_string(path(app)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     *SET.write() = s;
+    let sp = saved_path(&app.db_path);
+    if let Some(v) = std::fs::read_to_string(&sp).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        *SAVED.lock() = Some((sp, v));
+    }
     let c = Connection::open(&app.db_path)?;
     c.busy_timeout(std::time::Duration::from_secs(10))?;
     c.execute_batch(
@@ -555,6 +559,7 @@ pub fn sim(app: &Arc<App>, kind: &str) -> Value {
                     // The move table is still being rebuilt after a restart: the next poll retries.
                     Ok(v) if v["building"].as_bool() == Some(true) => slot.key.clear(),
                     Ok(v) => {
+                        save_sim(&app2.db_path, &kind2, &v, &key);
                         slot.result = Some(v);
                         slot.error = None;
                         slot.computed_ms = now_ms();
@@ -761,9 +766,30 @@ pub fn chart(app: &App, match_id: i64, outcome: &str, from: Ms, to: Ms) -> Value
     json!({"minutes": mins.iter().map(|(t, (b, a))| json!([t, b, a])).collect::<Vec<_>>(), "signals": sig, "trades": tr})
 }
 
-/// The last finished simulation of a kind, if any (Telegram /projected).
-pub fn sim_cached(kind: &str) -> Option<Value> {
-    SIMS.lock().get(kind).and_then(|x| x.result.clone())
+/// Finished simulations saved next to the database (`sims.json`), so a baseline survives restarts:
+/// {kind: {"result": .., "computed_ms": .., "settings": ..}}.
+static SAVED: LazyLock<parking_lot::Mutex<Option<(PathBuf, Value)>>> = LazyLock::new(Default::default);
+
+fn saved_path(db: &std::path::Path) -> PathBuf {
+    db.parent().map(|d| d.join("sims.json")).unwrap_or_else(|| PathBuf::from("sims.json"))
+}
+
+fn save_sim(db: &std::path::Path, kind: &str, result: &Value, settings: &str) {
+    let p = saved_path(db);
+    let mut all: Value = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}));
+    all[kind] = json!({"result": result, "computed_ms": now_ms(), "settings": settings});
+    let _ = std::fs::write(&p, serde_json::to_string(&all).unwrap_or_default());
+    *SAVED.lock() = Some((p, all));
+}
+
+/// The newest simulation of a kind: this run's, else the saved baseline. (result, computed ms)
+pub fn sim_cached(kind: &str) -> Option<(Value, Ms)> {
+    if let Some(x) = SIMS.lock().get(kind).and_then(|x| x.result.clone().map(|r| (r, x.computed_ms))) {
+        return Some(x);
+    }
+    let g = SAVED.lock();
+    let (_, all) = g.as_ref()?;
+    Some((all[kind]["result"].clone(), all[kind]["computed_ms"].as_i64().unwrap_or(0))).filter(|x| x.0.is_object())
 }
 
 /// Everything the Bots page shows.
