@@ -16,7 +16,7 @@ SE.pages.movers = {
     SE.select($('#vM'), { options: [['1x2', '1X2'], ['total', 'Total goals'], ['handicap', 'Handicap'], ['btts', 'Both score']], value: mk, onChange: (v) => { mk = v; load(); } });
     SE.select($('#vB'), { options: [['', 'All sources'], ...Object.keys(SE.BOOK_NAMES).filter((b) => b !== 'kalshi').map((b) => [b, SE.bookName(b)])], value: '', onChange: (v) => { bk = v; load(); } });
     const t = SE.table($('#vT'), [
-      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league), sort: (r) => r.home },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport), sort: (r) => r.home },
       { key: 'b', label: 'Source', fmt: (r) => SE.book(r.book), sort: (r) => r.book },
       { key: 's', label: 'Selection', fmt: (r) => esc(SE.outcomeLong(r.outcome, r.line)) },
       { key: 'p', label: 'Price', cls: 'r', fmt: (r) => `<span ${SE.qattr({ b: r.book, h: r.home, a: r.away, m: mk, l: r.line, o: r.outcome, p: r.p1, pv: r.p0, u: r.t1 })}>${SE.move(r.p0, r.p1)}</span>` },
@@ -25,7 +25,7 @@ SE.pages.movers = {
       { key: 't', label: 'Last', cls: 'r', fmt: (r) => `<span class="muted">${SE.fmtAgo(r.t1)}</span>`, sort: (r) => r.t1 },
     ], { sort: 'd', limit: 300, empty: 'No price moves in this window.', onClick: (r) => SE.go('#/match/' + r.match_id) });
     const a = SE.table($('#vA'), [
-      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league) },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport) },
       { key: 'n', label: 'Moves', cls: 'r', fmt: (r) => SE.fmtInt(r.n), sort: (r) => r.n },
       { key: 'b', label: 'Sources', cls: 'r', fmt: (r) => r.books, sort: (r) => r.books },
     ], { sort: 'n', limit: 30, empty: 'Quiet.', onClick: (r) => SE.go('#/match/' + r.match_id) });
@@ -36,9 +36,9 @@ SE.pages.movers = {
         SE.sql(`WITH f AS (SELECT match_id, book, line, outcome, COUNT(*) n,
               MIN(CASE WHEN old_price IS NOT NULL THEN id END) fid, MAX(CASE WHEN new_price IS NOT NULL THEN id END) lid
               FROM changes WHERE ${where('')} AND kind IN ('move','resume','suspend') GROUP BY match_id, book, line, outcome)
-             SELECT f.match_id, f.book, f.line, f.outcome, f.n, a.old_price p0, b.new_price p1, b.ts_ms t1, m.home, m.away, m.league
+             SELECT f.match_id, f.book, f.line, f.outcome, f.n, a.old_price p0, b.new_price p1, b.ts_ms t1, m.home, m.away, m.league, m.sport
              FROM f JOIN changes a ON a.id = f.fid JOIN changes b ON b.id = f.lid LEFT JOIN matches m ON m.id = f.match_id`, 20000),
-        SE.sql(`SELECT c.match_id, COUNT(*) n, COUNT(DISTINCT c.book) books, m.home, m.away, m.league FROM changes c LEFT JOIN matches m ON m.id = c.match_id WHERE ${where('c.')} AND c.kind = 'move' GROUP BY c.match_id ORDER BY n DESC LIMIT 30`),
+        SE.sql(`SELECT c.match_id, COUNT(*) n, COUNT(DISTINCT c.book) books, m.home, m.away, m.league, m.sport FROM changes c LEFT JOIN matches m ON m.id = c.match_id WHERE ${where('c.')} AND c.kind = 'move' GROUP BY c.match_id ORDER BY n DESC LIMIT 30`),
       ]);
       t.set(rows.filter((r) => r.p0 && r.p1).map((r) => ({ ...r, d: 1 / r.p1 - 1 / r.p0 })).filter((r) => Math.abs(r.d) >= 0.001));
       a.set(act);
@@ -63,7 +63,7 @@ SE.pages.edges = {
     P.gameSelect($('#eG'), (v) => { game = v; load(); }, '240px');
     SE.seg($('#eMin'), [[0, 'All'], [0.02, '2+ pts'], [0.04, '4+ pts'], [0.08, '8+ pts']], min, (v) => { min = +v; load(); });
     const t = SE.table($('#eT'), [
-      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league) },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport) },
       { key: 's', label: 'Score', fmt: (r) => `<b>${esc(r.score || '')}</b> <span class="faint">${esc(r.clock || '')}</span>` },
       { key: 'o', label: 'Selection', fmt: (r) => `<b>${SE.outcomeLong(r.o)}</b>` },
       { key: 'c', label: 'Consensus', cls: 'r', tip: G.consensus, fmt: (r) => SE.fmtProb(r.cons), sort: (r) => r.cons },
@@ -330,7 +330,7 @@ SE.pages.polymarket = {
         ], { empty: 'No recent activity.', maxHeight: '420px' }).set(activity);
       }
       SE.table($('#pGames'), [
-        { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league), sort: (r) => r.home },
+        { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport), sort: (r) => r.home },
         ...['home', 'draw', 'away'].map((o) => ({ key: o, label: SE.outcomeLabel(o), cls: 'r', fmt: (r) => (r.p[o]?.price ? `<span ${SE.qattr({ b: PM, h: r.home, a: r.away, m: '1x2', o, p: r.p[o].price, pv: r.p[o].prev, u: r.p[o].updated_ms, bt: r.p[o].book_ts_ms })}>${SE.fmtOdds(r.p[o].price)} <span class="faint">${SE.fmtProb(1 / r.p[o].price, 0)}</span></span>` : '<span class="faint">off</span>') })),
         { key: 'u', label: 'Updated', cls: 'r', fmt: (r) => `<span class="muted">${SE.fmtAgo(Math.max(...Object.values(r.p).map((q) => q.updated_ms)))}</span>` },
       ], { empty: 'No Polymarket football game is live or about to start.', emptyIcon: 'sports_soccer', onClick: (r) => SE.go('#/match/' + r.match_id) }).set([...byMatch.values()]);
@@ -507,7 +507,7 @@ SE.pages.kalshi = {
         ], { empty: 'No recent fills.' }).set(fills);
       }
       SE.table($('#qG'), [
-        { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league), sort: (r) => r.home },
+        { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport), sort: (r) => r.home },
         { key: 's', label: 'Status', fmt: (r) => SE.status(r), sort: (r) => r.start_ms },
         ...['home', 'draw', 'away'].map((o) => ({ key: o, label: SE.outcomeLabel(o), cls: 'r', fmt: (r) => (r.p[o]?.price ? `<span ${SE.qattr({ b: 'kalshi', h: r.home, a: r.away, m: '1x2', o, p: r.p[o].price, pv: r.p[o].prev, u: r.p[o].updated_ms })}>${SE.fmtOdds(r.p[o].price)} <span class="faint">${SE.fmtProb(1 / r.p[o].price, 0)}</span></span>` : '<span class="faint">off</span>') })),
       ], { empty: 'No Kalshi football game in scope right now. Kalshi mostly lists the big leagues; games appear here once a bookmaker lists the same match.', emptyIcon: 'sports_soccer', onClick: (r) => SE.go('#/match/' + r.match_id) }).set([...byMatch.values()]);

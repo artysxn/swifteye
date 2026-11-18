@@ -31,6 +31,25 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/assets/uplot.js", get(|| async { asset("vendor/uPlot.iife.min.js", "text/javascript; charset=utf-8", include_str!("web/vendor/uPlot.iife.min.js")) }))
         .route("/assets/uplot.css", get(|| async { asset("vendor/uPlot.min.css", "text/css; charset=utf-8", include_str!("web/vendor/uPlot.min.css")) }))
         .route("/assets/img/{name}", get(img))
+        .route("/assets/pages4.js", get(|| async { asset("pages4.js", "text/javascript; charset=utf-8", include_str!("web/pages4.js")) }))
+        .route("/telegram", get(tg_get).post(tg_post))
+        .route("/telegram/test", post(tg_test))
+        .route("/telegram/watch", get(|| async { Json(json!({"watch": crate::telegram::watched()})) }))
+        .route("/telegram/watch/{id}", post(tg_watch))
+        .route("/arbs", get(arbs))
+        .route("/arbs/history", get(arbs_history))
+        .route("/assets/pages5.js", get(|| async { asset("pages5.js", "text/javascript; charset=utf-8", include_str!("web/pages5.js")) }))
+        .route("/suspicious", get(suspicious))
+        .route("/suspicious/settings", post(suspicious_settings))
+        .route("/suspicious/event/{id}", get(suspicious_event))
+        .route("/search", get(search))
+        .route("/data", get(data_stats))
+        .route("/data/scan", get(data_scan))
+        .route("/data/folders", post(data_folders))
+        .route("/data/job", get(|| async { Json(crate::data::job()) }))
+        .route("/data/export", post(data_export))
+        .route("/data/merge", post(data_merge))
+        .route("/pred/meta", get(pred_meta))
         .route("/rankings", get(rankings))
         .route("/snipe", get(snipe))
         .route("/api", get(index))
@@ -387,7 +406,7 @@ async fn board(State(app): S, Query(p): Query<BoardQ>) -> Response {
             per_book.insert(book.to_string(), v);
         }
         rows.push(json!({
-            "id": id, "home": m.home, "away": m.away, "league": m.league, "start_ms": m.start_ms,
+            "id": id, "sport": m.sport, "home": m.home, "away": m.away, "league": m.league, "start_ms": m.start_ms,
             "score": evs.iter().find_map(|(_, e)| e.meta.score.clone()),
             "clock": evs.iter().find_map(|(_, e)| e.meta.clock.clone()),
             "last_change_ms": last_change,
@@ -663,6 +682,7 @@ async fn quotes(State(app): S) -> Json<Value> {
             for (k, q) in &es.quotes {
                 rows.push(json!([
                     es.match_id,
+                    m.map(|m| m.sport.as_str()).unwrap_or(&es.meta.sport),
                     m.map(|m| m.home.as_str()).unwrap_or(&es.meta.home),
                     m.map(|m| m.away.as_str()).unwrap_or(&es.meta.away),
                     es.meta.league,
@@ -684,7 +704,7 @@ async fn quotes(State(app): S) -> Json<Value> {
     }
     Json(json!({
         "now_ms": now_ms(),
-        "columns": ["match_id","home","away","league","score","clock","book","market","line","outcome","price","prev","updated_ms","book_ts_ms","live","start_ms"],
+        "columns": ["match_id","sport","home","away","league","score","clock","book","market","line","outcome","price","prev","updated_ms","book_ts_ms","live","start_ms"],
         "rows": rows,
     }))
 }
@@ -771,6 +791,240 @@ async fn kalshi_account(State(app): S) -> Json<Value> {
     let c = crate::kalacct::load(&app.db_path);
     let http = crate::books::http_client();
     Json(crate::kalacct::snapshot(&http, &c).await)
+}
+
+// ---------------------------------------------------------------- Telegram, arbitrage, market size
+
+async fn tg_get(State(app): S) -> Json<Value> {
+    Json(crate::telegram::view(&app))
+}
+
+async fn tg_post(State(app): S, Json(edit): Json<Value>) -> Response {
+    match crate::telegram::edit(&edit) {
+        Ok(()) => Json(crate::telegram::view(&app)).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+async fn tg_test(State(app): S) -> Response {
+    match crate::telegram::test(&app).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct WatchB {
+    on: bool,
+}
+
+async fn tg_watch(Path(id): Path<i64>, Json(b): Json<WatchB>) -> Json<Value> {
+    Json(json!({"id": id, "on": crate::telegram::set_watch(id, b.on), "watch": crate::telegram::watched()}))
+}
+
+#[derive(Deserialize)]
+struct ArbQ {
+    /// Smallest return to list, as a fraction (default 0; negative shows near-misses).
+    min_profit: Option<f64>,
+    stake: Option<f64>,
+}
+
+/// Pre-match arbitrage across every source (see arb.rs).
+async fn arbs(State(app): S, Query(q): Query<ArbQ>) -> Response {
+    // The live tracker scans every 5 s (near misses down to -3%); serve its latest scan.
+    let _ = app;
+    let (min, stake) = (q.min_profit.unwrap_or(0.0).clamp(-0.03, 1.0), q.stake.unwrap_or(100.0).clamp(1.0, 1e7));
+    Json(crate::arbtrack::current(min, stake)).into_response()
+}
+
+#[derive(Deserialize)]
+struct ArbHistQ {
+    limit: Option<i64>,
+}
+
+/// Finished arbitrages and how long they lasted.
+async fn arbs_history(State(app): S, Query(q): Query<ArbHistQ>) -> Response {
+    let limit = q.limit.unwrap_or(100).clamp(1, 2000);
+    match tokio::task::spawn_blocking(move || crate::arbtrack::history(&app, limit)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Per match, the size and activity of its Polymarket and Kalshi listings: liquidity and
+/// volume (from the sources), price changes in the last hour, and the cheapest outcome's price.
+async fn pred_meta(State(app): S) -> Response {
+    static CACHE: std::sync::LazyLock<parking_lot::Mutex<Option<(Ms, Value)>>> = std::sync::LazyLock::new(Default::default);
+    if let Some((t, v)) = CACHE.lock().clone() {
+        if now_ms() - t < 20_000 {
+            return Json(v).into_response();
+        }
+    }
+    // (match, book) -> (event id, cheapest outcome probability)
+    let mut listed: Vec<(i64, &'static str, String, Option<f64>)> = Vec::new();
+    {
+        let eng = app.engine.lock();
+        for book in ["polymarket", "kalshi"] {
+            let Some(bs) = eng.books.get(book) else { continue };
+            for es in bs.events.values() {
+                let min_p = es.quotes.iter().filter(|(k, _)| k.0 == Market::X12).filter_map(|(_, q)| q.price.filter(|p| *p > 1.0).map(|p| 1.0 / p)).fold(None, |m: Option<f64>, p| Some(m.map_or(p, |m| m.min(p))));
+                listed.push((es.match_id, book, es.meta.id.clone(), min_p));
+            }
+        }
+    }
+    let path = app.db_path.clone();
+    let since = now_ms() - 3_600_000;
+    let counts: std::collections::HashMap<(i64, String), i64> = tokio::task::spawn_blocking(move || -> std::collections::HashMap<(i64, String), i64> {
+        let Ok(c) = crate::store::open_ro(&path) else { return Default::default() };
+        let Ok(mut st) = c.prepare("SELECT match_id, book, COUNT(*) FROM changes WHERE book IN ('polymarket', 'kalshi') AND ts_ms > ?1 AND kind = 'move' GROUP BY match_id, book") else { return Default::default() };
+        st.query_map([since], |r| Ok(((r.get::<_, i64>(0)?, r.get::<_, String>(1)?), r.get::<_, i64>(2)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+    let mut by_match: serde_json::Map<String, Value> = serde_json::Map::new();
+    for (mid, book, ev, min_p) in listed {
+        let size = crate::predmeta::get(book, &ev).unwrap_or_default();
+        let entry = by_match.entry(mid.to_string()).or_insert_with(|| json!({}));
+        entry[book] = json!({
+            "liquidity": size.liquidity,
+            "volume": size.volume,
+            "volume_24h": size.volume_24h,
+            "moves_1h": counts.get(&(mid, book.to_string())).copied().unwrap_or(0),
+            "min_price": min_p,
+        });
+    }
+    let v = json!({"now_ms": now_ms(), "matches": by_match});
+    *CACHE.lock() = Some((now_ms(), v.clone()));
+    Json(v).into_response()
+}
+
+#[derive(Deserialize)]
+struct SuspQ {
+    days: Option<i64>,
+}
+
+/// Heavily bet lower-tier CS2 games and pre-match line moves (see suspect.rs).
+async fn suspicious(State(app): S, Query(q): Query<SuspQ>) -> Response {
+    let days = q.days.unwrap_or(7);
+    match tokio::task::spawn_blocking(move || crate::suspect::view(&app, days)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn suspicious_event(Path(id): Path<String>) -> Response {
+    match crate::suspect::event_detail(&id).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_GATEWAY, format!("{e:#}")),
+    }
+}
+
+async fn suspicious_settings(Json(edit): Json<Value>) -> Response {
+    match crate::suspect::save_settings(&edit) {
+        Ok(s) => Json(json!({"settings": s})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct SearchQ {
+    q: String,
+}
+
+/// Site search: matches (live, upcoming and recent) and leagues by name.
+async fn search(State(app): S, Query(q): Query<SearchQ>) -> Response {
+    let term = q.q.trim().to_lowercase().replace(['%', '_'], "");
+    if term.chars().count() < 2 {
+        return Json(json!({"matches": [], "leagues": []})).into_response();
+    }
+    let (path, like, now) = (app.db_path.clone(), format!("%{term}%"), now_ms());
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<Value>, Vec<Value>)> {
+        let c = crate::store::open_ro(&path)?;
+        let mut st = c.prepare(
+            "SELECT id, sport, home, away, league, start_ms FROM matches
+             WHERE lower(home) LIKE ?1 OR lower(away) LIKE ?1 OR lower(league) LIKE ?1
+             ORDER BY abs(COALESCE(start_ms, created_ms) - ?2) LIMIT 30",
+        )?;
+        let m = st
+            .query_map(rusqlite::params![like, now], |r| {
+                Ok(json!({"id": r.get::<_, i64>(0)?, "sport": r.get::<_, String>(1)?, "home": r.get::<_, String>(2)?, "away": r.get::<_, String>(3)?,
+                    "league": r.get::<_, Option<String>>(4)?, "start_ms": r.get::<_, Option<i64>>(5)?}))
+            })?
+            .filter_map(|x| x.ok())
+            .collect();
+        let mut st = c.prepare("SELECT league, sport, COUNT(*) n FROM matches WHERE league IS NOT NULL AND lower(league) LIKE ?1 GROUP BY league ORDER BY n DESC LIMIT 8")?;
+        let l = st
+            .query_map(rusqlite::params![like], |r| Ok(json!({"league": r.get::<_, String>(0)?, "sport": r.get::<_, String>(1)?, "matches": r.get::<_, i64>(2)?})))?
+            .filter_map(|x| x.ok())
+            .collect();
+        Ok((m, l))
+    })
+    .await;
+    match res {
+        Ok(Ok((mut m, l))) => {
+            let eng = app.engine.lock();
+            let live: std::collections::HashSet<i64> = eng.books.values().flat_map(|b| b.events.values().filter(|e| e.meta.live).map(|e| e.match_id)).collect();
+            let open: std::collections::HashSet<i64> = eng.books.values().flat_map(|b| b.events.values().map(|e| e.match_id)).collect();
+            for x in &mut m {
+                let id = x["id"].as_i64().unwrap_or(0);
+                x["live"] = json!(live.contains(&id));
+                x["listed"] = json!(open.contains(&id));
+            }
+            Json(json!({"matches": m, "leagues": l})).into_response()
+        }
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct DataQ {
+    fresh: Option<bool>,
+}
+
+/// Tables, rows and bytes on disk (cached 10 min; `fresh=true` recomputes).
+async fn data_stats(State(app): S, Query(q): Query<DataQ>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::data::stats(&app, q.fresh.unwrap_or(false))).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn data_scan(State(app): S) -> Response {
+    let a2 = app.clone();
+    match tokio::task::spawn_blocking(move || crate::data::scan(&a2)).await {
+        Ok(v) => Json(json!({"folders": crate::data::cfg(&app).folders, "files": v})).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn data_folders(State(app): S, Json(c): Json<crate::data::DataCfg>) -> Response {
+    match crate::data::save_cfg(&app, &c) {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+async fn data_export(State(app): S) -> Response {
+    match crate::data::export(app) {
+        Ok(p) => Json(json!({"ok": true, "path": p})).into_response(),
+        Err(e) => err(StatusCode::CONFLICT, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct MergeB {
+    path: String,
+}
+
+async fn data_merge(State(app): S, Json(b): Json<MergeB>) -> Response {
+    match crate::data::merge(app, b.path) {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 /// Logo and source icons, compiled in.

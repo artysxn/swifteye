@@ -193,6 +193,19 @@ impl Matcher {
         let Some(m) = self.matches.get(&id) else { return false };
         m.orient(&Names::new(&ev.home), &Names::new(&ev.away), true).2
     }
+}
+
+/// `Matcher::is_swapped` from stored names (match home/away vs the book event's home/away),
+/// for readers of the database that need a source's own orientation turned into the match's.
+pub fn names_swapped(sport: &str, match_home: &str, match_away: &str, ev_home: &str, ev_away: &str) -> bool {
+    if sport == "football" {
+        return false;
+    }
+    let (mh, ma, eh, ea) = (Names::new(match_home), Names::new(match_away), Names::new(ev_home), Names::new(ev_away));
+    mh.sim(&ea) + ma.sim(&eh) > mh.sim(&eh) + ma.sim(&ea)
+}
+
+impl Matcher {
 
     pub fn touch(&mut self, id: i64, now: Ms) {
         if let Some(m) = self.matches.get_mut(&id) {

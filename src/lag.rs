@@ -94,12 +94,27 @@ fn cross_time(s: &Series, from: Ms, to: Ms, level: f64, up: bool) -> Option<Ms> 
     s[start..].iter().take_while(|p| p.0 <= to).find(|p| hit(p.1)).map(|p| p.0)
 }
 
-/// (time of halfway crossing, level before, level after)
-pub(crate) fn jumps(s: &Series, min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, f64)> {
+/// Times a series came back after a gap in recording (an `open` row after earlier rows:
+/// collector restart, or the event dropped out of the source's feed and returned).
+pub(crate) type Breaks = BTreeMap<(String, String), Vec<Ms>>;
+
+/// Note a gap when a source's (book, outcome) re-opens after it had already been seen.
+pub(crate) fn note_break(breaks: &mut Breaks, series: &BTreeMap<(String, String), Series>, key: &(String, String), kind: &str, t: Ms) {
+    if kind == "open" && series.get(key).is_some_and(|s| !s.is_empty()) {
+        breaks.entry(key.clone()).or_default().push(t);
+    }
+}
+
+/// (time of halfway crossing, level before, level after). A move whose settle window spans a
+/// break is not a move: it is the difference between before and after a gap in recording.
+pub(crate) fn jumps(s: &Series, breaks: &[Ms], min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, f64)> {
     let mut out = Vec::new();
     let mut skip_until = Ms::MIN;
     for &(t, p) in s {
         if t <= skip_until {
+            continue;
+        }
+        if breaks.iter().any(|&b| b > t - settle_ms && b <= t + settle_ms) {
             continue;
         }
         let Some(before) = value_at(s, t - settle_ms).or_else(|| None) else { continue };
@@ -116,6 +131,49 @@ pub(crate) fn jumps(s: &Series, min_jump: f64, settle_ms: i64) -> Vec<(Ms, f64, 
         skip_until = t + settle_ms;
     }
     out
+}
+
+/// One match's 1X2 history as implied-probability series per (source, outcome), with the
+/// gaps in recording. `keep(book)` picks the sources.
+pub(crate) fn load_series(
+    c: &rusqlite::Connection,
+    match_id: i64,
+    lo: Ms,
+    hi: Ms,
+    source_clock: bool,
+    keep: impl Fn(&str) -> bool,
+) -> Result<(BTreeMap<(String, String), Series>, Breaks)> {
+    let mut series: BTreeMap<(String, String), Series> = BTreeMap::new();
+    let mut breaks = Breaks::new();
+    let mut st = c.prepare_cached(
+        "SELECT book, outcome, ts_ms, book_ts_ms, new_price, kind FROM changes
+         WHERE match_id = ?1 AND market = '1x2' AND ts_ms BETWEEN ?2 AND ?3 ORDER BY ts_ms, id",
+    )?;
+    let rows = st.query_map(params![match_id, lo, hi], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, Option<i64>>(3)?,
+            r.get::<_, Option<f64>>(4)?,
+            r.get::<_, String>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (book, outcome, ts, bts, price, kind) = row?;
+        if !keep(&book) {
+            continue;
+        }
+        let t = if source_clock { bts.unwrap_or(ts) } else { ts };
+        let key = (book, outcome);
+        note_break(&mut breaks, &series, &key, &kind, t);
+        let Some(price) = price.filter(|x| *x > 1.0) else { continue };
+        series.entry(key).or_default().push((t, 1.0 / price));
+    }
+    for s in series.values_mut() {
+        s.sort_by_key(|x| x.0);
+    }
+    Ok((series, breaks))
 }
 
 /// How a follower series reacted around time `t` to a move from `from` to `to`.
@@ -158,24 +216,9 @@ pub fn compute(db: &Path, p: &Params) -> Result<Vec<LagEvent>> {
         if let Ok(n) = st.query_row([mid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
             names.insert(mid, n);
         }
-        // (book, outcome) -> series of implied probability
-        let mut series: BTreeMap<(String, String), Series> = BTreeMap::new();
-        let mut st = c.prepare_cached(
-            "SELECT book, outcome, ts_ms, book_ts_ms, new_price FROM changes
-             WHERE match_id = ?1 AND market = '1x2' AND ts_ms BETWEEN ?2 AND ?3 ORDER BY ts_ms, id",
-        )?;
-        let rows = st.query_map(params![mid, lo, hi], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<f64>>(4)?))
-        })?;
-        for row in rows {
-            let (book, outcome, ts, bts, price) = row?;
-            let Some(price) = price.filter(|x| *x > 1.0) else { continue };
-            let t = if p.source_clock { bts.unwrap_or(ts) } else { ts };
-            series.entry((book, outcome)).or_default().push((t, 1.0 / price));
-        }
-        for s in series.values_mut() {
-            s.sort_by_key(|x| x.0);
-        }
+        let (series, breaks) = load_series(&c, mid, lo, hi, p.source_clock, |_| true)?;
+        let none: Vec<Ms> = Vec::new();
+        let brk = |b: &str, o: &str| breaks.get(&(b.to_string(), o.to_string())).unwrap_or(&none);
         let (home, away) = names.get(&mid).cloned().unwrap_or_default();
         for outcome in ["home", "draw", "away"] {
             let Some(pm) = series.get(&(PM.to_string(), outcome.to_string())) else { continue };
@@ -187,7 +230,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Vec<LagEvent>> {
 
             // Book jumps -> Polymarket reaction.
             for (book, bs) in &books {
-                for (tb, from, to) in jumps(bs, p.min_jump, p.settle_ms) {
+                for (tb, from, to) in jumps(bs, brk(book, outcome), p.min_jump, p.settle_ms) {
                     if tb < p.since || tb >= p.until {
                         continue;
                     }
@@ -217,7 +260,7 @@ pub fn compute(db: &Path, p: &Params) -> Result<Vec<LagEvent>> {
             }
 
             // Polymarket jumps -> each book's reaction, and the first book to react.
-            for (tp, from, to) in jumps(pm, p.min_jump, p.settle_ms) {
+            for (tp, from, to) in jumps(pm, brk(PM, outcome), p.min_jump, p.settle_ms) {
                 if tp < p.since || tp >= p.until {
                     continue;
                 }
@@ -384,29 +427,8 @@ pub fn compute_books(db: &Path, p: &Params) -> Result<Vec<BookLagEvent>> {
             })?;
 
         // (book, outcome) -> series of implied probability
-        let mut series: BTreeMap<(String, String), Series> = BTreeMap::new();
-        {
-            let mut st = c.prepare(
-                "SELECT book, outcome, ts_ms, book_ts_ms, new_price FROM changes
-                 WHERE match_id = ?1 AND market = '1x2' AND ts_ms BETWEEN ?2 AND ?3
-                   AND book != ?4 ORDER BY ts_ms, id",
-            )?;
-            let rows = st.query_map(params![mid, lo, hi, PM], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<f64>>(4)?))
-            })?;
-            for row in rows {
-                let (book, outcome, ts, bts, price) = row?;
-                let Some(price) = price.filter(|x| *x > 1.0) else { continue };
-                if p.book.as_ref().is_some_and(|b| b != &book) {
-                    continue;
-                }
-                let t = if p.source_clock { bts.unwrap_or(ts) } else { ts };
-                series.entry((book, outcome)).or_default().push((t, 1.0 / price));
-            }
-        }
-        for s in series.values_mut() {
-            s.sort_by_key(|x| x.0);
-        }
+        let (series, breaks) = load_series(&c, mid, lo, hi, p.source_clock, |b| b != PM && p.book.as_ref().map_or(true, |x| x == b))?;
+        let none: Vec<Ms> = Vec::new();
 
         for outcome in ["home", "draw", "away"] {
             let books: Vec<(&String, &Series)> = series
@@ -415,7 +437,8 @@ pub fn compute_books(db: &Path, p: &Params) -> Result<Vec<BookLagEvent>> {
                 .map(|((b, _), s)| (b, s))
                 .collect();
             for (tb_book, tb_s) in &books {
-                for (tt, from, to) in jumps(tb_s, p.min_jump, p.settle_ms) {
+                let tb_breaks = breaks.get(&((*tb_book).clone(), outcome.to_string())).unwrap_or(&none);
+                for (tt, from, to) in jumps(tb_s, tb_breaks, p.min_jump, p.settle_ms) {
                     if tt < p.since || tt >= p.until {
                         continue;
                     }
@@ -503,13 +526,24 @@ mod tests {
         // Book jumps 0.40 -> 0.60 at t=10_000; Polymarket drifts there 3 s later.
         let book: Series = vec![(0, 0.40), (10_000, 0.60), (30_000, 0.60)];
         let pm: Series = vec![(0, 0.42), (12_000, 0.47), (13_000, 0.53), (14_000, 0.61), (40_000, 0.61)];
-        let j = jumps(&book, 0.04, 10_000);
+        let j = jumps(&book, &[], 0.04, 10_000);
         assert_eq!(j.len(), 1);
         let (tb, from, to) = j[0];
         assert_eq!(tb, 10_000);
         let (tp, _, _, ok) = follow(&pm, tb, from, to, 60_000);
         assert!(ok);
         assert_eq!(tp, Some(13_000)); // 0.42 -> 0.61, halfway 0.515
+    }
+
+    #[test]
+    fn a_reopen_after_a_gap_is_not_a_jump() {
+        // Seen at 0.40 until t=10 s, collector down, re-opened at 0.80 at t=600 s; a real move
+        // to 0.60 at t=700 s still counts.
+        let s: Series = vec![(0, 0.40), (10_000, 0.40), (600_000, 0.80), (700_000, 0.60)];
+        let j = jumps(&s, &[600_000], 0.04, 10_000);
+        assert_eq!(j.len(), 1);
+        assert_eq!(j[0].1, 0.80);
+        assert_eq!(jumps(&s, &[], 0.04, 10_000).len(), 2);
     }
 
     #[test]

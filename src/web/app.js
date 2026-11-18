@@ -186,7 +186,14 @@ SE.bookColor = (b) => SE.BOOK_COLORS[b] || '#8e8e93';
 SE.bookName = (b) => SE.BOOK_NAMES[b] || b;
 SE.logo = (b) => `<img class="lg" src="/assets/img/${SE.esc(b)}.png" alt="" onerror="this.style.visibility='hidden'">`;
 SE.book = (b, cls = '') => `<span class="src ${cls}" data-tipsrc="${SE.esc(b)}">${SE.logo(b)}${SE.esc(SE.bookName(b))}</span>`;
-SE.logos = (books) => `<span class="logos">${books.map((b) => `<span data-tipsrc="${SE.esc(b)}">${SE.logo(b)}</span>`).join('')}</span>`;
+/** Polymarket / Kalshi first, then the `max` best-ranked bookmakers, then "+N" for the rest. */
+SE.logos = (books, max = 3) => {
+  const pos = (b) => SE.ctx.rank.get(b)?.pos ?? 999;
+  const pred = books.filter((b) => SE.PRED.includes(b));
+  const rest = books.filter((b) => !SE.PRED.includes(b)).sort((a, b) => pos(a) - pos(b));
+  const more = rest.slice(max);
+  return `<span class="logos">${[...pred, ...rest.slice(0, max)].map((b) => `<span data-tipsrc="${SE.esc(b)}">${SE.logo(b)}</span>`).join('')}${more.length ? `<span class="more" data-tip="${SE.esc(more.map(SE.bookName).join(', '))}">+${more.length}</span>` : ''}</span>`;
+};
 
 SE.move = (oldP, newP) => {
   if (newP == null) return `<span class="price-move faint">${SE.fmtOdds(oldP)} ${SE.ic('arrow_forward')} off</span>`;
@@ -450,7 +457,10 @@ SE.chart = (el, xs, series, opts = {}) => {
       ms: 1,
       cursor: { drag: { x: true, y: false }, points: { size: 7 } },
       legend: { show: false },
-      scales: { x: { time: true }, y: opts.yRange ? { range: opts.yRange } : {} },
+      scales: {
+        x: { time: true, ...(opts.xPad ? { range: [xs[0] - opts.xPad, xs[xs.length - 1] + opts.xPad] } : {}) },
+        y: opts.yRange ? { range: opts.yRange } : {},
+      },
       axes: [
         { ...axis, values: (u, ticks) => {
           const span = (u.scales.x.max ?? 0) - (u.scales.x.min ?? 0);
@@ -463,7 +473,7 @@ SE.chart = (el, xs, series, opts = {}) => {
         ...series.map((s) => ({
           label: s.label, stroke: s.color, width: s.points ? 0 : s.width || 1.6, dash: s.dash, spanGaps: true,
           paths: s.points ? () => null : opts.step === false || s.linear ? undefined : uPlot.paths.stepped({ align: 1 }),
-          points: s.points ? { show: true, size: 6, stroke: s.color, fill: s.color, width: 0 } : { show: false },
+          points: s.points || xs.length < 10 ? { show: true, size: 6, stroke: s.color, fill: s.color, width: 0 } : { show: false },
         })),
       ],
       hooks: {
@@ -546,10 +556,29 @@ SE.legend = (el, series, u) => {
 
 // ---------------------------------------------------------------- tables
 /** cols: [{ key, label, tip, fmt(row), sort(row), cls }]  opts: { sort, dir, onClick, rowTip(row), empty, emptyIcon, limit, maxHeight, cls } */
+// One width per kind of column, the same in every table; fixed layout so refreshes never shift
+// columns. The match column (cls 'match') takes the remaining space. A column's `w` overrides.
+// Sized from measured content (Nov 2026) plus 20 px padding.
+const COL_W = {
+  '': 34, '#': 50, Match: null, Sources: 125, Books: 90, Source: 135, Bookmaker: 110, 'Best bookmaker': 120, 'Detected on': 110,
+  'Best 1': 78, 'Best X': 78, 'Best 2': 78,
+  Polymarket: 110, 'PM odds': 90, 'Largest gap': 100, 'Polymarket move': 125, 'Book move': 100, Bets: 400,
+  Status: 135, 'Kick-off': 125, When: 110, Time: 90, Placed: 110, Received: 110, Updated: 100, 'Last change': 100, Last: 90, Ends: 120, 'Day (UTC)': 110,
+  Market: 125, Selection: 100, Outcome: 110, Side: 80, Type: 90, Score: 100,
+  'Open for': 95, 'Est. left': 100,
+  Price: 110, Kalshi: 115, 'Moves first': 130, 'Ahead of PM': 110, 'Took part': 110, 'P&amp;L': 135,
+};
+// Columns whose text may run long (set scores, dates with a chip) wrap instead of clipping.
+const COL_WRAP = new Set(['Status', 'Ends']);
+const MATCH_MIN = 200;
+const colW = (c) => (c.w !== undefined ? c.w : (c.cls || '').includes('match') ? null : COL_W[c.label] !== undefined ? COL_W[c.label] : (c.cls || '').includes('r') ? 100 : 110);
 SE.table = (el, cols, opts = {}) => {
   let rows = [];
   let sortKey = opts.sort || null, dir = opts.dir || -1;
-  el.innerHTML = `<div class="scroll" style="${opts.maxHeight ? 'max-height:' + opts.maxHeight : ''}"><table class="tbl ${opts.cls || ''}"><thead><tr>${cols
+  const ws = cols.map(colW);
+  const minW = ws.reduce((a, w) => a + (w ?? MATCH_MIN), 0);
+  const colgroup = (list) => list.map((w) => `<col${w ? ` style="width:${w}px"` : ''}>`).join('');
+  el.innerHTML = `<div class="scroll" style="${opts.maxHeight ? 'max-height:' + opts.maxHeight : ''}"><table class="tbl fixed ${opts.cls || ''}" style="min-width:${minW}px"><colgroup>${colgroup(ws)}</colgroup><thead><tr>${cols
     .map((c) => `<th class="${c.sort ? 'sortable' : ''} ${c.cls || ''}" data-k="${c.key}" ${c.tip ? `data-tip="${SE.esc(c.tip)}"` : ''}>${c.label}</th>`).join('')}</tr></thead><tbody></tbody></table></div>`;
   const tbody = $('tbody', el);
   $$('th.sortable', el).forEach((th) => th.addEventListener('click', () => {
@@ -562,8 +591,36 @@ SE.table = (el, cols, opts = {}) => {
     if (c?.sort) r = [...rows].sort((a, b) => { const x = c.sort(a), y = c.sort(b); if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * dir; });
     $$('th', el).forEach((th) => { const col = cols.find((x) => x.key === th.dataset.k); th.innerHTML = col.label + (th.dataset.k === sortKey ? ' ' + SE.ic(dir < 0 ? 'arrow_downward' : 'arrow_upward') : ''); });
     if (!r.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}"><div class="empty">${SE.ic(opts.emptyIcon || 'inbox')}${opts.empty || 'Nothing here yet.'}</div></td></tr>`; return; }
-    tbody.innerHTML = r.slice(0, opts.limit || 2000).map((row) => `<tr class="${opts.onClick ? 'link' : ''}" data-i="${rows.indexOf(row)}" ${opts.rowTip ? `data-tip="${SE.esc(opts.rowTip(row))}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.fmt ? c.fmt(row) : SE.esc(row[c.key])}</td>`).join('')}</tr>`).join('');
+    tbody.innerHTML = r.slice(0, opts.limit || 2000).map((row) => `<tr class="${opts.onClick ? 'link' : ''}" data-i="${rows.indexOf(row)}" ${opts.rowTip ? `data-tip="${SE.esc(opts.rowTip(row))}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}${COL_WRAP.has(c.label) ? ' wrap' : ''}">${c.fmt ? c.fmt(row) : SE.esc(row[c.key])}</td>`).join('')}</tr>`).join('');
     if (opts.onClick) $$('tr.link', tbody).forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a')) opts.onClick(rows[+tr.dataset.i]); }));
+    fit();
+  }
+  // A panel too narrow for the standard widths: let the browser size the columns from the
+  // content once, then freeze those widths so later refreshes do not shift them. Re-fit on resize.
+  const table = $('table', el);
+  let frozen = false;
+  function fit() {
+    const avail = $('.scroll', el).clientWidth; // inside any vertical scrollbar
+    if (!avail || frozen || !rows.length) return;
+    if (minW <= avail) {
+      if (table.style.tableLayout) { table.style.tableLayout = ''; table.style.minWidth = minW + 'px'; $('colgroup', table).innerHTML = colgroup(ws); }
+      return;
+    }
+    table.style.tableLayout = 'auto';
+    table.style.minWidth = '';
+    $('colgroup', table).innerHTML = colgroup(ws.map(() => null));
+    const got = $$('thead th', table).map((th) => Math.floor(th.getBoundingClientRect().width));
+    // Content that cannot shrink can leave it a few px too wide: take that from the match column.
+    const over = got.reduce((a, b) => a + b, 0) - avail, mi = ws.indexOf(null);
+    if (over > 0 && mi >= 0) got[mi] = Math.max(120, got[mi] - over);
+    $('colgroup', table).innerHTML = colgroup(got);
+    table.style.tableLayout = 'fixed';
+    table.style.minWidth = got.reduce((a, b) => a + b, 0) + 'px';
+    frozen = true;
+  }
+  if (window.ResizeObserver) {
+    let lastW = 0;
+    new ResizeObserver(SE.debounce(() => { if (el.clientWidth && el.clientWidth !== lastW) { lastW = el.clientWidth; frozen = false; fit(); } }, 200)).observe(el);
   }
   return { set(r) { rows = r || []; draw(); }, rows: () => rows };
 };

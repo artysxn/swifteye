@@ -302,6 +302,8 @@ struct Trade {
     /// Where the quote came from: "book" (real top of book), "candle" (Kalshi minute candle spread),
     /// "assumed" (mid ± the assumed spread).
     src: &'static str,
+    /// Share of the stake the recorded order book could fill; null = book depth not recorded then.
+    filled: Option<f64>,
 }
 
 #[derive(Serialize, Default, Clone, Debug)]
@@ -317,6 +319,10 @@ type Q = (f64, f64, Ms, &'static str);
 /// Top of book for one prediction market.
 trait Quotes {
     fn at(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<Q>;
+    /// Order-book size behind the latest quote at or before t (None = not recorded).
+    fn depth(&mut self, _match_id: i64, _outcome: &str, _t: Ms) -> Option<crate::engine::Depth> {
+        None
+    }
     /// Every quote change in (from, to], oldest first.
     fn path(&mut self, match_id: i64, outcome: &str, from: Ms, to: Ms) -> Vec<Q>;
 }
@@ -332,7 +338,18 @@ struct PmQuotes<'a> {
     c: &'a Connection,
 }
 
+fn depth_row(r: &rusqlite::Row) -> rusqlite::Result<crate::engine::Depth> {
+    Ok(crate::engine::Depth { bid_size: r.get(0)?, ask_size: r.get(1)?, bid_depth: r.get(2)?, ask_depth: r.get(3)? })
+}
+
 impl Quotes for PmQuotes<'_> {
+    fn depth(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<crate::engine::Depth> {
+        let mut st = self
+            .c
+            .prepare_cached("SELECT bid_size, ask_size, bid_depth, ask_depth FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1")
+            .ok()?;
+        st.query_row(params![match_id, outcome, t], depth_row).optional().ok()?
+    }
     fn at(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<Q> {
         let mut st = self
             .c
@@ -359,19 +376,34 @@ impl Quotes for PmQuotes<'_> {
 struct KalshiQuotes<'a> {
     c: &'a Connection,
     half: f64,
-    events: HashMap<i64, Option<String>>,
+    /// match id -> (Kalshi event ticker, listed the other way round from the match?)
+    events: HashMap<i64, Option<(String, bool)>>,
 }
 
 impl KalshiQuotes<'_> {
-    fn event(&mut self, match_id: i64) -> Option<String> {
+    /// `kalshi_quotes` rows keep Kalshi's own home/away (the event title's order); `changes`
+    /// and every other table use the match's. The flag says whether to turn one into the other,
+    /// decided by the same name rule the matcher used when linking the event.
+    fn event(&mut self, match_id: i64) -> Option<(String, bool)> {
         let c = self.c;
         self.events
             .entry(match_id)
             .or_insert_with(|| {
-                c.query_row("SELECT book_event_id FROM book_events WHERE book = 'kalshi' AND match_id = ?1 ORDER BY last_seen_ms DESC LIMIT 1", params![match_id], |r| r.get(0))
-                    .optional()
-                    .ok()
-                    .flatten()
+                c.query_row(
+                    "SELECT b.book_event_id, COALESCE(b.sport, m.sport), m.home, m.away, COALESCE(b.home, ''), COALESCE(b.away, '')
+                     FROM book_events b JOIN matches m ON m.id = b.match_id
+                     WHERE b.book = 'kalshi' AND b.match_id = ?1 ORDER BY b.last_seen_ms DESC LIMIT 1",
+                    params![match_id],
+                    |r| {
+                        let (ev, sport, mh, ma, eh, ea): (String, String, String, String, String, String) =
+                            (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?);
+                        let swap = !eh.is_empty() && crate::matcher::names_swapped(&sport, &mh, &ma, &eh, &ea);
+                        Ok((ev, swap))
+                    },
+                )
+                .optional()
+                .ok()
+                .flatten()
             })
             .clone()
     }
@@ -388,13 +420,22 @@ impl KalshiQuotes<'_> {
     }
     /// Latest kalshi_quotes row at or before t: (bid, ask, ts, est).
     fn row(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<(Option<f64>, Option<f64>, Ms, bool)> {
-        let ev = self.event(match_id)?;
+        let (ev, swap) = self.event(match_id)?;
+        let outcome = kalshi_side(outcome, swap);
         let mut st = self.c.prepare_cached("SELECT bid, ask, ts_ms, est FROM kalshi_quotes WHERE event = ?1 AND outcome = ?2 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1").ok()?;
         st.query_row(params![ev, outcome, t], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0))).optional().ok()?
     }
 }
 
 impl Quotes for KalshiQuotes<'_> {
+    fn depth(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<crate::engine::Depth> {
+        let (ev, swap) = self.event(match_id)?;
+        let mut st = self
+            .c
+            .prepare_cached("SELECT bid_size, ask_size, bid_depth, ask_depth FROM kalshi_quotes WHERE event = ?1 AND outcome = ?2 AND est = 0 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1")
+            .ok()?;
+        st.query_row(params![ev, kalshi_side(outcome, swap), t], depth_row).optional().ok()?
+    }
     fn at(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<Q> {
         let row = self.row(match_id, outcome, t).filter(|r| t - r.2 <= STALE_MS);
         if let Some((b, a, ts, false)) = row {
@@ -416,9 +457,9 @@ impl Quotes for KalshiQuotes<'_> {
                 ts.extend(it.filter_map(|x| x.ok()));
             }
         }
-        if let Some(ev) = self.event(match_id) {
+        if let Some((ev, swap)) = self.event(match_id) {
             if let Ok(mut st) = self.c.prepare_cached("SELECT ts_ms FROM kalshi_quotes WHERE event = ?1 AND outcome = ?2 AND ts_ms > ?3 AND ts_ms <= ?4") {
-                if let Ok(it) = st.query_map(params![ev, outcome, from, to], |r| r.get::<_, Ms>(0)) {
+                if let Ok(it) = st.query_map(params![ev, kalshi_side(outcome, swap), from, to], |r| r.get::<_, Ms>(0)) {
                     ts.extend(it.filter_map(|x| x.ok()));
                 }
             }
@@ -429,8 +470,34 @@ impl Quotes for KalshiQuotes<'_> {
     }
 }
 
+/// The match's outcome name as Kalshi's own listing calls it (home and away trade places
+/// when the event is listed the other way round; the draw never moves).
+pub(crate) fn kalshi_side(outcome: &str, swap: bool) -> &str {
+    match (swap, outcome) {
+        (true, "home") => "away",
+        (true, "away") => "home",
+        (_, o) => o,
+    }
+}
+
+/// A source stopped being seen for this outcome (collector restart, event dropped from the
+/// feed) and came back inside (from, to]: an `open` row with earlier rows before it. A
+/// "move" measured across that gap is whatever happened while nobody was watching.
+fn reopened(c: &Connection, book: &str, match_id: i64, outcome: &str, from: Ms, to: Ms) -> bool {
+    let Ok(mut st) = c.prepare_cached(
+        "SELECT 1 FROM changes o WHERE o.match_id = ?1 AND o.book = ?2 AND o.market = '1x2' AND o.outcome = ?3
+           AND o.kind = 'open' AND o.ts_ms > ?4 AND o.ts_ms <= ?5
+           AND EXISTS (SELECT 1 FROM changes p WHERE p.match_id = ?1 AND p.book = ?2 AND p.market = '1x2'
+                         AND p.outcome = ?3 AND p.ts_ms < o.ts_ms)
+         LIMIT 1",
+    ) else {
+        return false;
+    };
+    st.exists(params![match_id, book, outcome, from, to]).unwrap_or(false)
+}
+
 /// Brands that share one odds feed count as ONE confirmation (same trading desk, same prices).
-fn platform(book: &str) -> &str {
+pub(crate) fn platform(book: &str) -> &str {
     match book {
         "linebet" | "melbet" | "betwinner" | "megapari" | "paripesa" | "22bet" | "22bit" | "1xbit" => "1xbet",
         "unibet" | "leovegas" | "paf" => "kambi",
@@ -504,6 +571,45 @@ struct Buy<'a> {
     quote_age_ms: Ms,
     edge: f64,
     src: &'static str,
+    /// Contracts bought (all of the stake unless the recorded book was thinner).
+    contracts: f64,
+    depth_known: bool,
+}
+
+/// Entries on one match closer than this are one move.
+const SAME_MOVE_MS: Ms = 120_000;
+/// With a known book, a fill under this many dollars is not a trade.
+const MIN_FILL: f64 = 10.0;
+
+/// Buy for `stake` at `price` with `best` contracts resting there and `near` within 2c
+/// (including `best`); the rest of `near` fills 2c worse, anything beyond is not filled.
+/// Returns (contracts, average price).
+fn fill_buy(stake: f64, price: f64, best: f64, near: f64) -> (f64, f64) {
+    let a = (stake / price).min(best.max(0.0));
+    let b = ((stake - a * price) / (price + 0.02)).min((near - best).max(0.0)).max(0.0);
+    let n = a + b;
+    (n, if n > 0.0 { (a * price + b * (price + 0.02)) / n } else { price })
+}
+
+/// Has the market caught up, judged on the price we would actually sell at? Selling Yes hits
+/// the bid, selling No hits the Yes ask. The move counts from the mid before the trigger, with
+/// half the entry spread allowed, so a normal quote passes as the old mid test did but a spread
+/// that blows out (mid on target, bid collapsed) does not.
+fn caught_up(q: &Q, dir: f64, pre_mid: f64, need: f64, entry_spread: f64) -> bool {
+    let px = if dir > 0.0 { q.0 } else { q.1 };
+    (px - pre_mid) * dir >= need - entry_spread / 2.0
+}
+
+/// Sell `n` contracts at `price` with `best` resting there and `near` within 2c; the rest of
+/// `near` 2c lower, anything beyond 5c lower. Returns the average price.
+fn fill_sell(n: f64, price: f64, best: f64, near: f64) -> f64 {
+    if n <= 0.0 {
+        return price;
+    }
+    let a = n.min(best.max(0.0));
+    let b = (n - a).min((near - best).max(0.0));
+    let c = n - a - b;
+    ((a * price + b * (price - 0.02) + c * (price - 0.05)) / n).max(0.0)
 }
 
 fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, String> {
@@ -557,6 +663,13 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                 skip("no_data");
                 continue;
             };
+            // Either side came back from a gap between "before" and the fill: the "move" and the
+            // market's "delay" are both just what changed while it was not being recorded.
+            let t_end = td + confirm_ms + fill_ms;
+            if reopened(&c, tb, e.match_id, &e.outcome, t0 - PRE_MS, t_end) || reopened(&c, base, e.match_id, &e.outcome, t0 - PRE_MS, t_end) {
+                skip("data_gap");
+                continue;
+            }
             // The bookmaker's move as it stands when we act (it may have partly reverted).
             let bm = (b_now - b_pre) * dir;
             if bm < 0.01 {
@@ -645,8 +758,36 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                 skip("price_ran");
                 continue;
             }
-            entries.push(Buy { e, trigger: tb.clone(), tf, pre_mid, book_move: bm, followed: followed.max(0.0), entry, books, spread, quote_age_ms: age, edge, src: q.3 });
+            // What rested on our side when the order landed: buying Yes takes asks, buying No
+            // takes Yes bids. Unknown for hours recorded before depth was kept.
+            let side = quotes.depth(e.match_id, &e.outcome, tf).and_then(|d| if dir > 0.0 { d.ask_size.zip(d.ask_depth) } else { d.bid_size.zip(d.bid_depth) });
+            let (contracts, entry) = match side {
+                Some((best, near)) => fill_buy(stake, entry, best, near),
+                None => (stake / entry, entry),
+            };
+            if side.is_some() && contracts * entry < MIN_FILL {
+                skip("book_thin");
+                continue;
+            }
+            entries.push(Buy { e, trigger: tb.clone(), tf, pre_mid, book_move: bm, followed: followed.max(0.0), entry, contracts, depth_known: side.is_some(), books, spread, quote_age_ms: age, edge, src: q.3 });
         }
+        // One position per move: entries on the same match within 2 minutes are the same event
+        // (home, draw and away all reprice on one goal; two book triggers can name one move).
+        // Keep the one with the best expected gain.
+        entries.sort_by_key(|en| en.tf);
+        let mut kept: Vec<Buy> = Vec::new();
+        for en in entries {
+            match kept.iter_mut().rev().find(|k| k.e.match_id == en.e.match_id && en.tf - k.tf < SAME_MOVE_MS) {
+                Some(k) => {
+                    *why.entry("same_move").or_default() += 1;
+                    if en.edge > k.edge {
+                        *k = en;
+                    }
+                }
+                None => kept.push(en),
+            }
+        }
+        let entries = kept;
 
         // ---- exit: first quote where the market has made `catch` of the move, else give up;
         // the sale lands fill_ms later at that moment's bid, minus slippage.
@@ -661,14 +802,20 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                     continue;
                 }
                 let path = quotes.path(e.match_id, &e.outcome, en.tf, give_up);
-                let hit = path.iter().find(|q| ((q.0 + q.1) / 2.0 - en.pre_mid) * dir >= catch * en.book_move).map(|q| q.2);
+                let hit = path.iter().find(|q| caught_up(q, dir, en.pre_mid, catch * en.book_move, en.spread)).map(|q| q.2);
                 let (t_sell, reason) = match hit {
                     Some(t) => (t, "caught up"),
                     None => (give_up, "gave up"),
                 };
                 let Some(qs) = quotes.at(e.match_id, &e.outcome, t_sell + fill_ms) else { continue };
                 let exit = (if dir > 0.0 { qs.0 } else { 1.0 - qs.1 }) - slip;
-                let n = stake / en.entry;
+                let n = en.contracts;
+                // Selling Yes hits bids; selling No hits Yes asks. Known depth: what does not fit
+                // in the book within 2c is sold 5c lower.
+                let exit = match quotes.depth(e.match_id, &e.outcome, t_sell + fill_ms).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) }) {
+                    Some((best, near)) if en.depth_known => fill_sell(n, exit, best, near),
+                    _ => exit,
+                };
                 let pnl = n * (exit - en.entry) - fee(n, en.entry) - fee(n, exit.max(0.0));
                 trades.push(Trade {
                     ts: en.tf,
@@ -692,6 +839,7 @@ fn simulate(path: &std::path::Path, r: &Rankings, s: &SimQ) -> Result<Value, Str
                     quote_age_ms: en.quote_age_ms,
                     edge: en.edge,
                     src: en.src,
+                    filled: en.depth_known.then(|| (n * en.entry / stake).min(1.0)),
                 });
             }
             trades.sort_by_key(|t| t.ts);
@@ -750,6 +898,7 @@ fn summarise(hold: i64, stake: f64, trades: &[Trade], all: bool) -> Value {
     let mut by_trigger: BTreeMap<String, Group> = BTreeMap::new();
     let mut by_lead: BTreeMap<String, Group> = BTreeMap::new();
     let mut by_reason: BTreeMap<String, Group> = BTreeMap::new();
+    let mut by_depth: BTreeMap<String, Group> = BTreeMap::new();
     for t in trades {
         // How far behind the market really was, known only afterwards.
         let bucket = match t.lead_ms {
@@ -759,7 +908,7 @@ fn summarise(hold: i64, stake: f64, trades: &[Trade], all: bool) -> Value {
             Some(l) if l < 10_000 => "2-10 s behind",
             Some(_) => "10 s+ behind",
         };
-        for (m, k) in [(&mut by_sport, t.sport.clone()), (&mut by_trigger, t.trigger.clone()), (&mut by_lead, bucket.to_string()), (&mut by_reason, t.reason.to_string())] {
+        for (m, k) in [(&mut by_sport, t.sport.clone()), (&mut by_trigger, t.trigger.clone()), (&mut by_lead, bucket.to_string()), (&mut by_reason, t.reason.to_string()), (&mut by_depth, (if t.filled.is_some() { "book depth known" } else { "depth not recorded" }).to_string())] {
             let g = m.entry(k).or_default();
             g.trades += 1;
             g.wins += (t.pnl > 0.0) as usize;
@@ -790,6 +939,7 @@ fn summarise(hold: i64, stake: f64, trades: &[Trade], all: bool) -> Value {
         "by_trigger": groups(by_trigger),
         "by_lead": groups(by_lead),
         "by_reason": groups(by_reason),
+        "by_depth": groups(by_depth),
         "recent": trades.iter().rev().take(if all { usize::MAX } else { 60 }).collect::<Vec<_>>(),
     })
 }
@@ -847,7 +997,7 @@ pub async fn kalshi_backfill(app: &Arc<App>, days: i64) -> Result<Value, String>
             for k in cv["candlesticks"].as_array().into_iter().flatten() {
                 let px = |side: &str| crate::books::num(&k[side]["close_dollars"]).or_else(|| crate::books::num(&k[side]["close"]).map(|c| c / 100.0)).filter(|x| *x > 0.0 && *x < 1.0);
                 let Some(ts) = k["end_period_ts"].as_i64() else { continue };
-                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true };
+                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true, depth: Default::default() };
                 if app.tx.send(w).await.is_ok() {
                     rows += 1;
                 }
@@ -862,6 +1012,38 @@ pub async fn kalshi_backfill(app: &Arc<App>, days: i64) -> Result<Value, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fills_stop_at_the_book() {
+        // $100 at 50c with 100 at the best and 150 within 2c: 100 @ 0.50, then $50 @ 0.52 = 96.15.
+        let (n, avg) = fill_buy(100.0, 0.50, 100.0, 150.0);
+        assert!((n - 150.0).abs() < 1e-9, "only 150 rest within 2c, got {n}");
+        assert!((avg - (50.0 + 50.0 * 0.52) / 150.0).abs() < 1e-9);
+        // Plenty of book: the whole stake at the best price.
+        let (n, avg) = fill_buy(100.0, 0.50, 1000.0, 1000.0);
+        assert!((n - 200.0).abs() < 1e-9 && (avg - 0.50).abs() < 1e-9);
+        // Selling 200 into 50 at the best and 100 within 2c: 50 @ .60, 50 @ .58, 100 @ .55.
+        let p = fill_sell(200.0, 0.60, 50.0, 100.0);
+        assert!((p - (50.0 * 0.60 + 50.0 * 0.58 + 100.0 * 0.55) / 200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn catch_up_is_judged_on_the_sell_price() {
+        // Bought Yes after a 10-pt book move from a 0.50 mid, entry spread 2c; need 7.5 pts.
+        // Normal quote 0.57/0.59: bid moved 7 pts, within half a spread of 7.5 -> caught up.
+        assert!(caught_up(&(0.57, 0.59, 0, "book"), 1.0, 0.50, 0.075, 0.02));
+        // Spread blew out 0.33/0.95: mid 0.64 is on target but the bid fell -> not caught up.
+        assert!(!caught_up(&(0.33, 0.95, 0, "book"), 1.0, 0.50, 0.075, 0.02));
+        // Bought No (Yes falling): judged on the Yes ask.
+        assert!(caught_up(&(0.41, 0.43, 0, "book"), -1.0, 0.50, 0.075, 0.02));
+        assert!(!caught_up(&(0.05, 0.60, 0, "book"), -1.0, 0.50, 0.075, 0.02));
+    }
+
+    #[test]
+    fn depth_from_levels() {
+        let d = crate::engine::Depth::from_levels(&[(0.40, 10.0), (0.39, 5.0), (0.30, 99.0)], &[(0.42, 7.0), (0.44, 3.0), (0.50, 50.0)]);
+        assert_eq!((d.bid_size, d.bid_depth, d.ask_size, d.ask_depth), (Some(10.0), Some(15.0), Some(7.0), Some(10.0)));
+    }
 
     #[test]
     fn kalshi_fee_rounds_up_to_the_cent() {

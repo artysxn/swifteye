@@ -257,7 +257,16 @@ img.sp-ic { object-fit: cover; }
 .src.sm img { width: 15px; height: 15px; border-radius: 4px; }
 .logos { display: inline-flex; }
 .logos img { width: 18px; height: 18px; border-radius: 5px; box-shadow: 0 0 0 2px var(--bg); }
-.logos img + img { margin-left: -4px; }
+.logos > span + span { margin-left: -4px; }
+.logos { align-items: center; }
+.logos .more { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--text-2); box-shadow: none; }
+.tbl.fixed { table-layout: fixed; }
+.tbl.fixed th, .tbl.fixed td { padding-left: 10px; padding-right: 10px; }
+.tbl.fixed th:first-child, .tbl.fixed td:first-child { padding-left: 0; }
+.tbl.fixed th:last-child, .tbl.fixed td:last-child { padding-right: 0; }
+.tbl.fixed td:not(.match) { overflow: hidden; text-overflow: ellipsis; }
+.tbl.fixed td.wrap { white-space: normal; }
+.tbl.fixed td.match { min-width: 0; }
 
 /* ================================================================ tables */
 .tbl { width: 100%; border-collapse: separate; border-spacing: 0; }
@@ -278,6 +287,9 @@ img.sp-ic { object-fit: cover; }
 .tbl th.r, .tbl td.r { text-align: right; }
 .tbl .c { text-align: center; }
 .tbl td.match { white-space: normal; min-width: 220px; }
+.match-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.match-cell > .sp-ic { margin-right: 0; width: 22px; height: 22px; }
+.match-cell > .sp-ic .ic { font-size: 20px; }
 .match-name { font-weight: 550; }
 .match-sub { font-size: 12px; color: var(--text-3); margin-top: 1px; }
 .scroll { overflow: auto; }
@@ -450,3 +462,38 @@ a[data-tip], a[data-tipsrc], button[data-tip], tr[data-tipq], .more[data-tip] { 
 b.pos { color: var(--up, #3ddc97); }
 b.neg { color: var(--down, #ff6b6b); }
 tr.on td { background: var(--bg-2); }
+
+/* ---- Telegram, bells, Arbitrage Scout, market-size filter (pages4.js) */
+.bell { display: inline-flex; align-items: center; color: var(--text-3); padding: 2px; border-radius: 6px; }
+.bell .ic { font-size: 18px; }
+.bell:hover { color: var(--text); background: var(--bg-2); }
+.bell.on { color: var(--accent); }
+.match-link { color: inherit; text-decoration: none; }
+.match-link:hover { color: var(--accent); text-decoration: underline; }
+.tg-logo { flex: none; vertical-align: middle; }
+.nav a[data-route] svg.tg-nav { width: 18px; height: 18px; flex: none; margin: 0 1px; }
+.tg-msg { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; }
+.tg-msg.err { color: var(--down); }
+.legs { display: grid; gap: 4px; }
+.legs > div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.leg-o { min-width: 54px; font-weight: 600; }
+.sz { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tierbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: -12px 0 18px; }
+.tierbar label { display: flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
+.tierbar .input { width: 92px; height: 30px; }
+
+/* ---- Site search (pages5.js) */
+.nav-search { position: relative; display: flex; align-items: center; gap: 8px; margin: -8px 4px 16px; padding: 0 10px; height: 34px; border-radius: 9px; background: var(--bg-2); border: 1px solid var(--line); }
+.nav-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.nav-search > .ic { font-size: 17px; color: var(--text-3); }
+.nav-search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: inherit; }
+.nav-search kbd { font: 600 10px/1 var(--font, inherit); color: var(--text-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 2px 5px; }
+.search-pop { display: none; position: absolute; left: 0; top: 40px; width: 460px; max-height: 70vh; overflow-y: auto; z-index: 60; padding: 6px; border-radius: 12px; background: var(--bg-1, var(--bg-2)); border: 1px solid var(--line-2); box-shadow: 0 18px 50px rgba(0, 0, 0, .45); }
+.search-pop.show { display: block; }
+.sp-group { padding: 8px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.sp-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.sp-item .ic { font-size: 17px; color: var(--text-3); }
+.sp-item.on, .sp-item:hover { background: var(--bg-3); }
+.sp-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-side { flex: none; font-size: 12px; }
+.tbl.raw td { padding-top: 6px; padding-bottom: 6px; font-size: 12px; }

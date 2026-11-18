@@ -1,15 +1,21 @@
 mod api;
+mod arb;
+mod arbtrack;
 mod books;
 mod clock;
+mod data;
 mod engine;
 mod kalacct;
 mod lag;
 mod matcher;
 mod model;
 mod pmacct;
+mod predmeta;
 mod rank;
 mod snipe;
 mod store;
+mod suspect;
+mod telegram;
 
 use engine::{Engine, Write};
 use model::*;
@@ -149,6 +155,9 @@ async fn main() -> anyhow::Result<()> {
 
     start_books(&app);
     snipe::spawn_warmer(app.clone());
+    telegram::spawn(app.clone());
+    arbtrack::spawn(app.clone());
+    suspect::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);

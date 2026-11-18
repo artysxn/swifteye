@@ -93,6 +93,37 @@ pub struct BookState {
     pub status: BookStatus,
 }
 
+/// Order-book size behind a top-of-book quote, in contracts (Polymarket shares / Kalshi
+/// contracts, $1 each at settlement). `*_depth` = everything within 2 cents of that best price.
+/// None = the book was not known.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Depth {
+    pub bid_size: Option<f64>,
+    pub ask_size: Option<f64>,
+    pub bid_depth: Option<f64>,
+    pub ask_depth: Option<f64>,
+}
+
+impl Depth {
+    /// From price levels (price, size), the best bid and the best ask.
+    pub fn from_levels(bids: &[(f64, f64)], asks: &[(f64, f64)]) -> Depth {
+        let bb = bids.iter().map(|l| l.0).fold(None, |m: Option<f64>, p| Some(m.map_or(p, |x| x.max(p))));
+        let ba = asks.iter().map(|l| l.0).fold(None, |m: Option<f64>, p| Some(m.map_or(p, |x| x.min(p))));
+        let at = |lv: &[(f64, f64)], p: Option<f64>| p.map(|p| lv.iter().filter(|l| (l.0 - p).abs() < 1e-6).map(|l| l.1).sum::<f64>());
+        Depth {
+            bid_size: at(bids, bb),
+            ask_size: at(asks, ba),
+            bid_depth: bb.map(|b| bids.iter().filter(|l| l.0 >= b - 0.02 - 1e-9).map(|l| l.1).sum()),
+            ask_depth: ba.map(|a| asks.iter().filter(|l| l.0 <= a + 0.02 + 1e-9).map(|l| l.1).sum()),
+        }
+    }
+    /// Changed by more than rounding (sizes to whole contracts).
+    pub fn differs(&self, o: &Depth) -> bool {
+        let r = |x: Option<f64>| x.map(|v| v.round() as i64);
+        r(self.bid_size) != r(o.bid_size) || r(self.ask_size) != r(o.ask_size) || r(self.bid_depth) != r(o.bid_depth) || r(self.ask_depth) != r(o.ask_depth)
+    }
+}
+
 /// Rows the store must persist.
 pub enum Write {
     Change(Change),
@@ -108,6 +139,7 @@ pub enum Write {
         bid: Option<f64>,
         ask: Option<f64>,
         last: Option<f64>,
+        depth: Depth,
     },
     /// Kalshi top of book for one contract (probabilities). `est` = rebuilt from Kalshi's
     /// 1-minute candles for hours recorded before real quotes were kept.
@@ -119,6 +151,7 @@ pub enum Write {
         bid: Option<f64>,
         ask: Option<f64>,
         est: bool,
+        depth: Depth,
     },
 }
 

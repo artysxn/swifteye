@@ -14,7 +14,8 @@ P.sec = (icon, title, body, tools = '', tip = '') =>
 P.stat = (id, icon, label, tip = '', hero = false) =>
   `<div class="stat ${hero ? 'key' : ''}" ${tip ? `data-tip="${esc(tip)}"` : ''}><div class="stat-label">${ic(icon)}${label}</div><div class="stat-value" id="${id}"><span class="skeleton">00.0</span></div><div class="stat-foot" id="${id}F"></div></div>`;
 P.stats = (...items) => `<div class="stats">${items.join('')}</div>`;
-P.matchCell = (home, away, league) => `<div class="match-name">${SE.vs(home, away)}</div><div class="match-sub">${esc(league || '')}</div>`;
+P.matchCell = (home, away, league, sport, matchId) =>
+  `<div class="match-cell">${sport ? SE.sportIcon(sport) : ''}<div><div class="match-name">${matchId != null ? `<a class="match-link" href="#/match/${+matchId}">${SE.vs(home, away)}</a>` : SE.vs(home, away)}</div><div class="match-sub">${esc(league || '')}</div></div></div>`;
 P.set = (id, html, foot) => { const e = $('#' + id); if (e) e.innerHTML = html; if (foot !== undefined) { const f = $('#' + id + 'F'); if (f) f.innerHTML = foot; } };
 
 // Words used in tooltips everywhere.
@@ -45,9 +46,10 @@ P.fair = (p) => {
 P.summarise = (row) => {
   const books = Object.entries(row.books || {}).filter(([, v]) => v && typeof v === 'object');
   const best = {}, fairs = [];
-  let pm = null;
+  let pm = null, hasK = false;
   for (const [b, p] of books) {
     if (b === PM) { pm = p; continue; }
+    if (b === 'kalshi') { hasK = true; continue; }
     for (const o of ['home', 'draw', 'away']) if (p[o] && (!best[o] || p[o] > best[o].price)) best[o] = { price: p[o], book: b };
     const f = P.fair(p);
     if (f) fairs.push(f);
@@ -56,7 +58,8 @@ P.summarise = (row) => {
   const pmFair = P.fair(pm);
   let gap = null, gapSide = null;
   if (cons && pmFair) for (const o of ['home', 'draw', 'away']) { const g = pmFair[o] - cons[o]; if (gap == null || Math.abs(g) > Math.abs(gap)) { gap = g; gapSide = o; } }
-  return { best, pm, pmFair, cons, gap, gapSide, n: books.length, books: books.map(([b]) => b), hasPm: !!pm, nBooks: fairs.length };
+  const nMakers = books.filter(([b]) => b !== PM && b !== 'kalshi').length;
+  return { best, pm, pmFair, cons, gap, gapSide, n: books.length, books: books.map(([b]) => b), hasPm: !!pm, hasPred: !!pm || hasK, nBooks: fairs.length, nMakers, covered: (!!pm || hasK) && nMakers >= 1 };
 };
 P.bestCell = (b, row, o) => (b
   ? `<span class="src sm" ${SE.qattr({ b: b.book, h: row.home, a: row.away, m: '1x2', o, p: b.price })}>${SE.logo(b.book)}${SE.fmtOdds(b.price)}</span>`
@@ -255,7 +258,7 @@ SE.pages.dashboard = {
     }
 
     const mt = SE.table($('#oMatches'), [
-      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league) },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport) },
       { key: 's', label: 'Status', tip: 'Score and clock when live, kick-off time before.', fmt: (r) => SE.status(r) },
       { key: 'b', label: 'Sources', tip: 'Sources listing this match. Hover a logo for that source\'s speed.', fmt: (r) => SE.logos(r.sum.books) },
       { key: 'g', label: 'Gap', cls: 'r', tip: G.gap, fmt: (r) => (r.sum.gap == null ? '<span class="faint">-</span>' : `<span class="${Math.abs(r.sum.gap) >= 0.03 ? (r.sum.gap < 0 ? 'up' : 'down') : 'muted'}">${SE.fmtPts(r.sum.gap)}</span>`) },
@@ -263,7 +266,7 @@ SE.pages.dashboard = {
     async function loadMatches() {
       const b = await api('/board?market=1x2&min_books=1');
       for (const r of b.rows) names.set(r.id, r);
-      const rows = b.rows.map((r) => ({ ...r, sum: P.summarise(r) })).sort((x, y) => y.sum.n - x.sum.n);
+      const rows = b.rows.map((r) => ({ ...r, sum: P.summarise(r) })).filter((r) => P.sportOk(r.sport)).sort((x, y) => y.sum.n - x.sum.n);
       mt.set(rows);
       P.set('oLive', rows.length, `${rows.filter((r) => r.sum.hasPm).length} on Polymarket`);
     }
@@ -385,7 +388,7 @@ SE.pages.rankings = {
 SE.pages.snipe = {
   title: 'Snipe window',
   render(el) {
-    el.innerHTML = P.head('Snipe window', '<div id="pS"></div><div id="pR"></div><div id="pJ"></div>') +
+    el.innerHTML = P.head('Snipe window', '<div id="pS"></div><div id="pG"></div><div id="pR"></div><div id="pJ"></div>') +
       `<div class="note" style="margin:-8px 0 22px">Paper money only: nothing is traded. When a bookmaker moves, the model checks the prediction market at that moment and buys ONLY if it is still delayed (it has made little of the bookmaker\'s move) and the gain if it catches up beats spread and fees. It sells at the bid as soon as the price catches up, or gives up after the set time.</div>` +
       P.sec('tune', 'Setup', `<div class="sn-setup">
           <div><div class="note">Trigger</div><div id="pT"></div></div>
@@ -414,9 +417,10 @@ SE.pages.snipe = {
       </div>` +
       P.sec('receipt_long', 'Recent paper trades', '<div id="pTr"></div>', '<div id="pTrB"></div>');
 
-    const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 0, ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket' };
+    const st = { hours: 24, jump: SE.pref('minJump'), trigger: 'first', reaction: 1000, hold: 'auto', fill: 250, slip: 1, ca: 75, stake: 100, fee: 0, ks: 0.02, leadB: 'polymarket', grpB: 'polymarket', trB: 'polymarket', game: '' };
     let data = null, eq = null;
-    P.sportSelect($('#pS'), () => load());
+    const gs = P.gameSelect($('#pG'), (v) => { st.game = v; load(); });
+    P.sportSelect($('#pS'), () => { st.game = ''; gs.load(); load(); });
     SE.seg($('#pR'), [[6, '6h'], [24, '24h'], [72, '3d'], [168, '7d']], st.hours, (v) => { st.hours = +v; load(); });
     SE.seg($('#pJ'), [[0.02, '2 pts'], [0.04, '4 pts'], [0.06, '6 pts'], [0.1, '10 pts']], st.jump, (v) => { st.jump = +v; load(); });
     const segs = () => {
@@ -521,7 +525,8 @@ SE.pages.snipe = {
       const xs = [...new Set(curves.flatMap((x) => x.c.map((p) => p[0])))].sort((a, b) => a - b);
       const al = SE.alignSeries(curves.map((x) => x.c));
       const colour = { polymarket: '#7aa7ff', kalshi: '#5ff0a8' };
-      eq = SE.chartKeep($('#pEq'), eq, xs, curves.map((x, i) => ({ label: name(x.b), book: x.b, color: colour[x.b], values: al.values[i], linear: true, width: 2 })), { yFmt: (v) => (v == null ? '' : money(v)) }, $('#pEqL'));
+      const span = xs.length ? xs[xs.length - 1] - xs[0] : 0;
+      eq = SE.chartKeep($('#pEq'), eq, xs, curves.map((x, i) => ({ label: name(x.b), book: x.b, color: colour[x.b], values: al.values[i], linear: true, width: 2 })), { yFmt: (v) => (v == null ? '' : money(v)), xPad: span < 3600000 ? 1800000 : 0 }, $('#pEqL'));
       if (!eq) $('#pEq').innerHTML = `<div class="empty">${ic('show_chart')}No completed paper trades in this range.</div>`;
       // ---- holds
       const hs = base('polymarket')?.holds.map((h) => h.hold_s) || [];
@@ -540,7 +545,7 @@ SE.pages.snipe = {
 
     async function load() {
       $('#pTiles').innerHTML = `<div class="empty">${ic('hourglass_top')}Simulating…</div>`;
-      const q = `/snipe?since=${P.rangeSince(st.hours)}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
+      const q = `/snipe?since=${P.rangeSince(st.hours)}&min_jump=${st.jump}&window_s=${SE.pref('windowS')}${P.sportQ()}${st.game ? '&match=' + st.game : ''}&trigger=${st.trigger}&reaction_ms=${st.reaction}&stake=${st.stake}&pm_fee_bps=${st.fee}&catch_pct=${st.ca}&fill_ms=${st.fill}&slip_c=${st.slip}`;
       const d = await api(q).catch((e) => { $('#pTiles').innerHTML = `<div class="empty">${ic('error')}${esc(String(e.message || e))}</div>`; return null; });
       if (!d) return;
       data = d;
@@ -602,9 +607,10 @@ SE.pages.latency = {
     async function load() {
       const since = P.rangeSince(range);
       const p = `since=${since}&min_jump=${jump}&window_s=${win}&clock=${clock}${game ? '&match=' + game : ''}`;
-      const [sum, ev, bb, feed] = await Promise.all([
+      const [sum, ev, bb, feed, bk] = await Promise.all([
         api('/lag?' + p), api('/lag/events?limit=3000&' + p), api('/lag/books?' + p).catch(() => ({ summary: [] })),
         SE.sql(`SELECT book, ts_ms - book_ts_ms AS d FROM changes WHERE book_ts_ms IS NOT NULL AND kind = 'move' AND ts_ms >= ${since}${game ? ' AND match_id = ' + (+game) : ''} ORDER BY id DESC LIMIT 60000`, 60000),
+        api('/books').catch(() => null),
       ]);
       const f = sum.summary.find((s) => s.trigger === 'polymarket' && s.book === 'first book');
       P.set('yK1', f?.median_delay_ms != null ? SE.fmtRel(f.median_delay_ms) : '<span class="faint">-</span>', f ? `${f.followed} of ${f.jumps} Polymarket moves` : '');
@@ -616,9 +622,12 @@ SE.pages.latency = {
       const books = rows.filter((r) => r.b !== PM);
       P.set('yK2', books.length ? `${SE.book(books[0].b)} <small>${SE.fmtSpan(books[0].med)}</small>` : '<span class="faint">-</span>');
       const max = Math.max(1, ...rows.map((r) => r.p90 || 0));
-      $('#yFeed').innerHTML = rows.length ? rows.map((r) => `<div class="race-row" style="grid-template-columns:150px minmax(0,1fr) 70px 70px" data-tip="${esc(`<h4>${SE.logo(r.b)}${esc(SE.bookName(r.b))}</h4>${SE.kv([['Median', SE.fmtSpan(r.med)], ['Fastest tenth', SE.fmtSpan(r.p10)], ['Slowest tenth from', SE.fmtSpan(r.p90)], ['Samples', SE.fmtInt(r.n)]])}`)}">
+      const stamped = new Set(rows.map((r) => r.b));
+      const unstamped = (bk?.books || []).map((x) => x.name).filter((n) => !stamped.has(n)).sort();
+      $('#yFeed').innerHTML = (rows.length ? rows.map((r) => `<div class="race-row" style="grid-template-columns:150px minmax(0,1fr) 70px 70px" data-tip="${esc(`<h4>${SE.logo(r.b)}${esc(SE.bookName(r.b))}</h4>${SE.kv([['Median', SE.fmtSpan(r.med)], ['Fastest tenth', SE.fmtSpan(r.p10)], ['Slowest tenth from', SE.fmtSpan(r.p90)], ['Samples', SE.fmtInt(r.n)]])}`)}">
           ${SE.book(r.b)}<div class="bar"><b style="left:${(Math.max(0, r.p10) / max) * 100}%;width:${(Math.max(1, r.p90 - Math.max(0, r.p10)) / max) * 100}%;background:${SE.bookColor(r.b)};opacity:.3"></b><b style="left:${(Math.max(0, r.med) / max) * 100}%;width:3px;background:${SE.bookColor(r.b)}"></b></div>
-          <b class="r">${SE.fmtSpan(r.med)}</b><span class="r faint">${SE.fmtSpan(r.p90)}</span></div>`).join('') : '<div class="empty">No stamped changes in this range.</div>';
+          <b class="r">${SE.fmtSpan(r.med)}</b><span class="r faint">${SE.fmtSpan(r.p90)}</span></div>`).join('') : '<div class="empty">No stamped changes in this range.</div>') +
+        (unstamped.length ? `<div class="faint" style="margin-top:10px;font-size:12px">No source stamp (receive time only): ${unstamped.map((n) => esc(SE.bookName(n))).join(', ')}</div>` : '');
       pmT.set(sum.summary);
       const names = [...new Set(bb.summary.flatMap((s) => [s.trigger_book, s.follower_book]))].sort();
       const cell = new Map(bb.summary.map((s) => [s.trigger_book + '>' + s.follower_book, s]));

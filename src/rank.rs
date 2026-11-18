@@ -155,23 +155,8 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
                 continue;
             }
         }
-        let mut series: BTreeMap<(String, String), Series> = BTreeMap::new();
-        let mut st = c.prepare_cached(
-            "SELECT book, outcome, ts_ms, book_ts_ms, new_price FROM changes
-             WHERE match_id = ?1 AND market = '1x2' AND ts_ms BETWEEN ?2 AND ?3 ORDER BY ts_ms, id",
-        )?;
-        let rows = st.query_map(params![mid, lo, hi], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<f64>>(4)?))
-        })?;
-        for row in rows {
-            let (book, outcome, ts, bts, price) = row?;
-            let Some(price) = price.filter(|x| *x > 1.0) else { continue };
-            let t = if p.source_clock { bts.unwrap_or(ts) } else { ts };
-            series.entry((book, outcome)).or_default().push((t, 1.0 / price));
-        }
-        for s in series.values_mut() {
-            s.sort_by_key(|x| x.0);
-        }
+        let (series, breaks) = crate::lag::load_series(&c, *mid, lo, hi, p.source_clock, |_| true)?;
+        let none: Vec<Ms> = Vec::new();
 
         for outcome in ["home", "draw", "away"] {
             let srcs: Vec<(&String, &Series)> = series.iter().filter(|((_, o), _)| o == outcome).map(|((b, _), s)| (b, s)).collect();
@@ -181,7 +166,8 @@ pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
 
             let mut anchors: Vec<(Ms, f64, f64, &String)> = Vec::new();
             for (b, s) in &srcs {
-                for (t, from, to) in jumps(s, p.min_jump, p.settle_ms) {
+                let brk = breaks.get(&((*b).clone(), outcome.to_string())).unwrap_or(&none);
+                for (t, from, to) in jumps(s, brk, p.min_jump, p.settle_ms) {
                     anchors.push((t, from, to, *b));
                 }
             }

@@ -78,12 +78,73 @@ CREATE TABLE IF NOT EXISTS kalshi_quotes(
   est INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS kalshi_quotes_ev ON kalshi_quotes(event, outcome, ts_ms);
+
+-- Pre-match arbitrage opportunities (match + market + line) as the live scan saw them come
+-- and go. end_reason: gone | kickoff (the match started) | restart. censored = 1: already
+-- open in the first scan after a start, so its real start is unknown.
+CREATE TABLE IF NOT EXISTS arb_history(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL,
+  match_id INTEGER NOT NULL,
+  sport TEXT, home TEXT, away TEXT, league TEXT,
+  market TEXT NOT NULL,
+  line REAL,
+  books TEXT,
+  legs TEXT,
+  first_ms INTEGER NOT NULL,
+  last_ms INTEGER NOT NULL,
+  end_ms INTEGER,
+  end_reason TEXT,
+  open_profit REAL,
+  peak_profit REAL,
+  censored INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS arb_history_end ON arb_history(end_ms);
+
+-- Suspicious-match detection (suspect.rs). One row per Polymarket CS2 game: how heavily it was
+-- bet (from Polymarket's trade history) and its score against normal lower-tier games.
+CREATE TABLE IF NOT EXISTS cs2_activity(
+  event_id TEXT PRIMARY KEY,
+  slug TEXT, title TEXT, home TEXT, away TEXT, league TEXT,
+  start_ms INTEGER,
+  vrs_home INTEGER, vrs_away INTEGER, tier1 INTEGER NOT NULL DEFAULT 0,
+  volume REAL, trades INTEGER, bets INTEGER, big_dog INTEGER, big_fav INTEGER, big_share REAL, drift REAL,
+  score REAL,
+  final INTEGER NOT NULL DEFAULT 0,
+  updated_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS cs2_activity_start ON cs2_activity(start_ms);
+-- Other machines' databases merged into this one (data.rs).
+CREATE TABLE IF NOT EXISTS merges(
+  id INTEGER PRIMARY KEY,
+  path TEXT NOT NULL,
+  bytes INTEGER,
+  finished_ms INTEGER,
+  result TEXT
+);
+-- Pre-match bookmaker line moves that crossed the threshold (latest state per match + outcome).
+CREATE TABLE IF NOT EXISTS line_moves(
+  match_id INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  sport TEXT, home TEXT, away TEXT, league TEXT, start_ms INTEGER,
+  open_p REAL, now_p REAL, move REAL,
+  platforms INTEGER, agree INTEGER,
+  moved_ms INTEGER,
+  first_ms INTEGER, updated_ms INTEGER,
+  PRIMARY KEY(match_id, outcome)
+);
 "#;
 
 pub fn open(path: &Path) -> Result<Connection> {
     let c = Connection::open(path)?;
     c.busy_timeout(Duration::from_secs(5))?;
     c.execute_batch(SCHEMA)?;
+    // Order-book size columns (added Nov 2026); "duplicate column" on later starts is fine.
+    for t in ["pm_quotes", "kalshi_quotes"] {
+        for col in ["bid_size", "ask_size", "bid_depth", "ask_depth"] {
+            let _ = c.execute(&format!("ALTER TABLE {t} ADD COLUMN {col} REAL"), []);
+        }
+    }
     Ok(c)
 }
 
@@ -198,16 +259,18 @@ fn flush(c: &mut Connection, buf: &mut Vec<Write>) -> Result<()> {
              ON CONFLICT(id) DO UPDATE SET sr_id=COALESCE(matches.sr_id, excluded.sr_id)",
         )?;
         let mut ins_pm = tx.prepare_cached(
-            "INSERT INTO pm_quotes(ts_ms,server_ts_ms,match_id,event_id,outcome,bid,ask,last) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO pm_quotes(ts_ms,server_ts_ms,match_id,event_id,outcome,bid,ask,last,bid_size,ask_size,bid_depth,ask_depth) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         )?;
-        let mut ins_k = tx.prepare_cached("INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est) VALUES(?1,?2,?3,?4,?5,?6,?7)")?;
+        let mut ins_k = tx.prepare_cached(
+            "INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est,bid_size,ask_size,bid_depth,ask_depth) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        )?;
         for w in buf.drain(..) {
             match w {
-                Write::PmQuote { ts_ms, server_ts_ms, match_id, event_id, outcome, bid, ask, last } => {
-                    ins_pm.execute(params![ts_ms, server_ts_ms, match_id, event_id, outcome.as_str(), bid, ask, last])?;
+                Write::PmQuote { ts_ms, server_ts_ms, match_id, event_id, outcome, bid, ask, last, depth: d } => {
+                    ins_pm.execute(params![ts_ms, server_ts_ms, match_id, event_id, outcome.as_str(), bid, ask, last, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth])?;
                 }
-                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est } => {
-                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64])?;
+                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est, depth: d } => {
+                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth])?;
                 }
                 Write::Change(ch) => {
                     ins_change.execute(params![

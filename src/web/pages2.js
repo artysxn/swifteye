@@ -8,34 +8,42 @@ const PM = P.PM, G = P.G;
 SE.pages.live = {
   title: 'Matches',
   render(el) {
-    el.innerHTML = P.head('Matches', `<span class="search">${ic('search')}<input class="input" id="lQ" placeholder="Team or league"></span><div id="lS"></div><div id="lC"></div><div id="lO"></div>`) + '<div id="lT"></div>';
-    let status = 'all', comp = '', sortBy = 'kick';
+    el.innerHTML = P.head('Matches', `<span class="search">${ic('search')}<input class="input" id="lQ" placeholder="Team or league"></span><div id="lSp"></div><div id="lS"></div><div id="lCov"></div><div id="lO"></div>`) + '<div id="lTier"></div><div id="lT"></div>';
+    let status = 'all', cov = 'all', sortBy = 'kick';
+    P.sportSelect($('#lSp'), () => load());
+    SE.tier.bar($('#lTier'), () => load());
+    if (SE.pendingQuery) { $('#lQ').value = SE.pendingQuery; SE.pendingQuery = null; }
     SE.seg($('#lS'), [['all', 'All'], ['live', 'Live'], ['pre', 'Pre-match']], status, (v) => { status = v; load(); });
-    const cSel = SE.select($('#lC'), { options: [['', 'All competitions']], value: '', search: true, width: '230px', onChange: (v) => { comp = v; load(); } });
-    SE.select($('#lO'), { options: [['kick', 'Sort: kick-off'], ['sources', 'Sort: most sources'], ['gap', 'Sort: biggest gap'], ['change', 'Sort: last change']], value: sortBy, onChange: (v) => { sortBy = v; load(); } });
+    SE.seg($('#lCov'), [
+      ['all', 'Any source', 'Every match currently in scope.'],
+      ['covered', 'PM or Kalshi + a book', 'Only matches listed by Polymarket or Kalshi, and by at least one bookmaker.'],
+    ], cov, (v) => { cov = v; load(); });
+    SE.select($('#lO'), { options: [['kick', 'Sort: kick-off'], ['sources', 'Sort: most sources'], ['gap', 'Sort: biggest gap'], ['change', 'Sort: last change'], ['size', 'Sort: market size']], value: sortBy, onChange: (v) => { sortBy = v; load(); } });
     const t = SE.table($('#lT'), [
-      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league), sort: (r) => r.home },
+      { key: 'b', label: '', tip: 'Telegram alerts for this match', fmt: (r) => SE.bell(r.id) },
+      { key: 'm', label: 'Match', cls: 'match', fmt: (r) => P.matchCell(r.home, r.away, r.league, r.sport), sort: (r) => r.home },
       { key: 's', label: 'Status', tip: 'Score and clock when live; kick-off time before.', fmt: (r) => SE.status(r), sort: (r) => r.start_ms },
       { key: 'n', label: 'Sources', tip: 'Sources listing this match. Hover a logo for its speed ranking.', fmt: (r) => SE.logos(r.sum.books), sort: (r) => r.sum.n },
       { key: 'h', label: 'Best 1', cls: 'r', tip: 'Highest home-win price among bookmakers.', fmt: (r) => P.bestCell(r.sum.best.home, r, 'home'), sort: (r) => r.sum.best.home?.price },
       { key: 'd', label: 'Best X', cls: 'r', tip: 'Highest draw price among bookmakers.', fmt: (r) => P.bestCell(r.sum.best.draw, r, 'draw'), sort: (r) => r.sum.best.draw?.price },
       { key: 'a', label: 'Best 2', cls: 'r', tip: 'Highest away-win price among bookmakers.', fmt: (r) => P.bestCell(r.sum.best.away, r, 'away'), sort: (r) => r.sum.best.away?.price },
-      { key: 'p', label: 'Polymarket', cls: 'r', tip: 'Polymarket 1, X and 2 as odds from the mid price.', fmt: (r) => (r.sum.pm ? `<span class="trio">${['home', 'draw', 'away'].map((o) => `<span ${SE.qattr({ b: PM, h: r.home, a: r.away, m: '1x2', o, p: r.sum.pm[o] })}>${SE.fmtOdds(r.sum.pm[o]) || '-'}</span>`).join('')}</span>` : '<span class="faint">-</span>') },
+      { key: 'p', label: 'Polymarket', cls: 'r', w: 165, tip: 'Polymarket 1, X and 2 as odds from the mid price.', fmt: (r) => (r.sum.pm ? `<span class="trio">${['home', 'draw', 'away'].map((o) => `<span ${SE.qattr({ b: PM, h: r.home, a: r.away, m: '1x2', o, p: r.sum.pm[o] })}>${SE.fmtOdds(r.sum.pm[o]) || '-'}</span>`).join('')}</span>` : '<span class="faint">-</span>') },
       { key: 'g', label: 'Largest gap', cls: 'r', tip: G.gap, fmt: (r) => (r.sum.gap == null ? '<span class="faint">-</span>' : `<span class="${Math.abs(r.sum.gap) >= 0.03 ? (r.sum.gap < 0 ? 'up' : 'down') : 'muted'}">${SE.fmtPts(r.sum.gap)} pts</span> <span class="faint">${SE.outcomeLabel(r.sum.gapSide)}</span>`), sort: (r) => (r.sum.gap == null ? null : Math.abs(r.sum.gap)) },
       { key: 'u', label: 'Last change', cls: 'r', fmt: (r) => `<span class="muted">${SE.fmtAgo(r.last_change_ms)}</span>`, sort: (r) => r.last_change_ms },
     ], { empty: 'No matches yet. They appear once Polymarket or Kalshi and a bookmaker both list a game.', emptyIcon: 'sports_soccer', onClick: (r) => SE.go('#/match/' + r.id) });
     async function load() {
-      const b = await api('/board?market=1x2&min_books=1');
+      const [b] = await Promise.all([api('/board?market=1x2&min_books=1'), SE.tier.ensure()]);
       const q = $('#lQ').value.trim().toLowerCase();
       let rows = b.rows.map((r) => ({ ...r, sum: P.summarise(r) }));
-      const comps = [...new Set(rows.map((r) => r.league).filter(Boolean))].sort();
-      cSel.set([['', 'All competitions'], ...comps.map((c) => [c, c])]);
       if (q) rows = rows.filter((r) => `${r.home} ${r.away} ${r.league}`.toLowerCase().includes(q));
       if (status !== 'all') rows = rows.filter((r) => (status === 'live') === !!r.live);
-      if (comp) rows = rows.filter((r) => r.league === comp);
-      const key = { kick: (r) => r.start_ms || 0, sources: (r) => -r.sum.n, gap: (r) => -(Math.abs(r.sum.gap ?? 0)), change: (r) => -(r.last_change_ms || 0) }[sortBy];
+      rows = rows.filter((r) => P.sportOk(r.sport));
+      if (cov === 'covered') rows = rows.filter((r) => r.sum.covered);
+      rows = rows.filter((r) => SE.tier.pass(r.id));
+      const key = { kick: (r) => r.start_ms || 0, sources: (r) => -r.sum.n, gap: (r) => -(Math.abs(r.sum.gap ?? 0)), change: (r) => -(r.last_change_ms || 0), size: (r) => -Math.max(0, ...Object.values(SE.tier.meta[r.id] || {}).map((x) => x.volume_24h || 0)) }[sortBy];
       rows.sort((a, b) => (b.live - a.live) * (sortBy === 'kick' ? 1 : 0) || key(a) - key(b));
       t.set(rows);
+      SE.paintBells();
     }
     $('#lQ').addEventListener('input', SE.debounce(load, 150));
     load();
@@ -66,7 +74,7 @@ SE.pages.match = {
       const score = detail.books.map((b) => b.event.score).find(Boolean) || '';
       const clock = detail.books.map((b) => b.event.clock).find(Boolean) || '';
       document.title = `${m.home || ev.home} v ${m.away || ev.away} | Swifteye`;
-      $('#mHead').innerHTML = `<a class="back" href="#/live">${ic('chevron_left')}Matches</a>
+      $('#mHead').innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><a class="back" href="#/live">${ic('chevron_left')}Matches</a>${SE.bell(id)}</div>
         <div class="hero"><div class="team">${esc(m.home || ev.home)}</div><div class="score"><b>${esc(detail.books.some((b) => b.event.live) ? score || 'v' : SE.fmtKick(m.start_ms || ev.start_ms))}</b><div>${detail.books.some((b) => b.event.live) ? esc(clock) + ' ' : 'Kick-off ' + SE.fmtIn(m.start_ms || ev.start_ms) + ' '}${esc(m.league || ev.league || '')}</div></div><div class="team away">${esc(m.away || ev.away)}</div></div>`;
       return true;
     }
@@ -266,7 +274,7 @@ SE.pages.sheet = {
       const trio = (fn) => `<span class="trio">${['home', 'draw', 'away'].map((o) => { const r = fn(o); return r ? `<span ${qa(r)}>${SE.fmtOdds(r.price) || 'off'}</span>` : '<span class="faint">-</span>'; }).join('')}</span>`;
       $('#sOut').innerHTML = `<div class="grp-head grp-cols" style="cursor:default"><span></span><span>Match</span><span>Status</span><span data-tip="Sources pricing this match">Sources</span><span data-tip="Best bookmaker price for 1, X and 2">Best 1 X 2</span><span data-tip="Polymarket 1, X and 2 from the mid price">Polymarket 1 X 2</span><span class="r">Updated</span></div>` +
         gl.map((g) => `<div class="grp ${open.has(g.id) ? 'open' : ''}" data-id="${g.id}">
-          <div class="grp-head">${ic('chevron_right', 'chev')}<div>${P.matchCell(g.head.home, g.head.away, g.head.league)}</div>
+          <div class="grp-head">${ic('chevron_right', 'chev')}<div>${P.matchCell(g.head.home, g.head.away, g.head.league, g.head.sport)}</div>
             <div>${SE.status({ live: g.rs.some((r) => r.live), score: g.head.score, clock: g.head.clock, start_ms: g.head.start_ms })}</div>${SE.logos(g.books)}
             <div>${trio((o) => g.best(o))}</div><div>${g.books.includes(PM) ? trio((o) => g.x12(PM, o)) : '<span class="faint">not listed</span>'}</div>
             <span class="r muted">${SE.fmtAgo(g.last)}</span></div>

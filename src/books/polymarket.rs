@@ -50,15 +50,34 @@ struct PmEvent {
     liquidity: f64,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Default)]
 struct Tok {
     bid: Option<f64>,
     ask: Option<f64>,
     last: Option<f64>,
     server_ts: Ms,
+    /// Full book from `book` snapshots and `price_change` level updates: price (x1000) -> size.
+    bids: std::collections::BTreeMap<i64, f64>,
+    asks: std::collections::BTreeMap<i64, f64>,
+    /// Depth last written, and when (size-only changes are written at most every 2 s).
+    depth: crate::engine::Depth,
+    depth_ms: Ms,
+}
+
+const DEPTH_EVERY_MS: Ms = 2_000;
+
+fn pkey(p: f64) -> i64 {
+    (p * 1000.0).round() as i64
 }
 
 impl Tok {
+    fn depth_now(&self) -> crate::engine::Depth {
+        if self.bids.is_empty() && self.asks.is_empty() {
+            return crate::engine::Depth::default();
+        }
+        let lv = |m: &std::collections::BTreeMap<i64, f64>| m.iter().map(|(k, s)| (*k as f64 / 1000.0, *s)).collect::<Vec<_>>();
+        crate::engine::Depth::from_levels(&lv(&self.bids), &lv(&self.asks))
+    }
     fn mid(&self) -> Option<f64> {
         let (b, a) = (self.bid?, self.ask?);
         if a <= b || a - b > MAX_SPREAD {
@@ -184,24 +203,45 @@ fn absorb(item: &Value, toks: &mut HashMap<String, Tok>, wanted: &std::collectio
             return;
         }
         let t = toks.entry(asset.to_string()).or_default();
-        let before = *t;
+        let before = (t.bid, t.ask, t.last);
         f(t);
         if ts > 0 {
             t.server_ts = ts;
         }
-        if t.bid != before.bid || t.ask != before.ask || t.last != before.last {
+        // Levels inside the spread are stale (an update we missed): the feed's best prices win.
+        if let Some(b) = t.bid {
+            let k = pkey(b);
+            t.bids.retain(|p, _| *p <= k);
+        }
+        if let Some(a) = t.ask {
+            let k = pkey(a);
+            t.asks.retain(|p, _| *p >= k);
+        }
+        let now = now_ms();
+        let d = t.depth_now();
+        let price_moved = (t.bid, t.ask, t.last) != before;
+        let size_moved = d.differs(&t.depth) && now - t.depth_ms >= DEPTH_EVERY_MS;
+        if price_moved || size_moved {
+            t.depth = d;
+            t.depth_ms = now;
             changed.push(asset.to_string());
         }
+    };
+    let levels = |v: &Value| -> std::collections::BTreeMap<i64, f64> {
+        v.as_array().into_iter().flatten().filter_map(|l| Some((pkey(num(&l["price"])?), num(&l["size"])?))).filter(|l| l.1 > 0.0).collect()
     };
     match item["event_type"].as_str().unwrap_or("") {
         "book" => {
             let asset = text(&item["asset_id"]);
-            let bid = item["bids"].as_array().into_iter().flatten().filter_map(|l| num(&l["price"])).fold(None, |m: Option<f64>, p| Some(m.map_or(p, |x| x.max(p))));
-            let ask = item["asks"].as_array().into_iter().flatten().filter_map(|l| num(&l["price"])).fold(None, |m: Option<f64>, p| Some(m.map_or(p, |x| x.min(p))));
+            let (bids, asks) = (levels(&item["bids"]), levels(&item["asks"]));
+            let bid = bids.keys().next_back().map(|k| *k as f64 / 1000.0);
+            let ask = asks.keys().next().map(|k| *k as f64 / 1000.0);
             let last = num(&item["last_trade_price"]);
             upd(&asset, &mut |t| {
                 t.bid = bid;
                 t.ask = ask;
+                t.bids = bids.clone();
+                t.asks = asks.clone();
                 if last.is_some() {
                     t.last = last;
                 }
@@ -211,7 +251,24 @@ fn absorb(item: &Value, toks: &mut HashMap<String, Tok>, wanted: &std::collectio
             for pc in item["price_changes"].as_array().into_iter().flatten() {
                 let asset = text(&pc["asset_id"]);
                 let (bid, ask) = (num(&pc["best_bid"]), num(&pc["best_ask"]));
+                // One level's new total size (0 = gone); side BUY = bids, SELL = asks.
+                let level = num(&pc["price"]).zip(num(&pc["size"]));
+                let side = pc["side"].as_str().unwrap_or("").to_ascii_uppercase();
                 upd(&asset, &mut |t| {
+                    if let Some((p, s)) = level {
+                        let book = match side.as_str() {
+                            "BUY" => Some(&mut t.bids),
+                            "SELL" => Some(&mut t.asks),
+                            _ => None,
+                        };
+                        if let Some(book) = book {
+                            if s > 0.0 {
+                                book.insert(pkey(p), s);
+                            } else {
+                                book.remove(&pkey(p));
+                            }
+                        }
+                    }
                     if pc.get("best_bid").is_some() {
                         t.bid = bid.filter(|x| *x > 0.0);
                     }
@@ -294,6 +351,7 @@ async fn apply(app: &Arc<App>, events: &[PmEvent], toks: &HashMap<String, Tok>, 
                 bid: t.bid,
                 ask: t.ask,
                 last: t.last,
+                depth: t.depth,
             });
         }
     }
@@ -343,6 +401,15 @@ async fn discover(http: &reqwest::Client, prematch_min: i64, cfg: &crate::Config
                     s => parse_two_way(e, Some(s)),
                 };
                 if let Some(pe) = pe {
+                    crate::predmeta::set(
+                        NAME,
+                        &pe.id,
+                        crate::predmeta::Size {
+                            liquidity: num(&e["liquidity"]).unwrap_or(0.0),
+                            volume: num(&e["volume"]).unwrap_or(0.0),
+                            volume_24h: num(&e["volume24hr"]).unwrap_or(0.0),
+                        },
+                    );
                     out.push(pe);
                 }
             }

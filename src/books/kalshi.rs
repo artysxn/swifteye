@@ -13,7 +13,7 @@
 //!   Price stored = decimal odds from the mid of the Yes bid/ask.
 
 use super::*;
-use crate::engine::Write;
+use crate::engine::{Depth, Write};
 use crate::kalacct::KalshiCreds;
 use crate::matcher::Names;
 use futures::{SinkExt, StreamExt};
@@ -51,19 +51,83 @@ struct Shared {
     ws_live: bool,
     /// contract ticker -> (event ticker, outcome), for recording quotes.
     tickers: HashMap<String, (String, Outcome)>,
-    /// Last recorded (bid, ask) per contract, so only changes are written.
-    recorded: HashMap<String, (Option<f64>, Option<f64>)>,
+    /// Last recorded (bid, ask, depth, when) per contract, so only changes are written
+    /// (size-only changes at most every 2 s).
+    recorded: HashMap<String, (Option<f64>, Option<f64>, Depth, Ms)>,
+    /// Order books from the `orderbook_delta` channel (needs the API key): resting Yes bids and
+    /// No bids, price in dollars x10000 -> contracts. A Yes ask is 1 - a No bid.
+    books: HashMap<String, KBook>,
 }
 
+#[derive(Default)]
+struct KBook {
+    yes: std::collections::BTreeMap<i64, f64>,
+    no: std::collections::BTreeMap<i64, f64>,
+}
+
+impl KBook {
+    fn depth(&self) -> Depth {
+        if self.yes.is_empty() && self.no.is_empty() {
+            return Depth::default();
+        }
+        let bids: Vec<(f64, f64)> = self.yes.iter().map(|(k, q)| (*k as f64 / 10_000.0, *q)).collect();
+        let asks: Vec<(f64, f64)> = self.no.iter().map(|(k, q)| (1.0 - *k as f64 / 10_000.0, *q)).collect();
+        Depth::from_levels(&bids, &asks)
+    }
+}
+
+/// Kalshi price levels: cents (45) or dollars ("0.4500").
+fn kprice(v: &Value) -> Option<i64> {
+    let p = num(v)?;
+    Some(((if p > 1.0 { p / 100.0 } else { p }) * 10_000.0).round() as i64)
+}
+
+/// [[price, qty], ...] from `yes_dollars` / `yes` style arrays.
+fn klevels(v: &Value) -> std::collections::BTreeMap<i64, f64> {
+    v.as_array().into_iter().flatten().filter_map(|l| Some((kprice(&l[0])?, num(&l[1])?))).filter(|l| l.1 > 0.0).collect()
+}
+
+const DEPTH_EVERY_MS: Ms = 2_000;
+
 impl Shared {
-    /// A `kalshi_quotes` row when this contract's top of book changed.
+    /// A `kalshi_quotes` row when this contract's top of book (or, at most every 2 s, the size
+    /// behind it) changed.
     fn record(&mut self, ticker: &str, bid: Option<f64>, ask: Option<f64>, server_ts: Option<Ms>) -> Option<Write> {
         let (event, outcome) = self.tickers.get(ticker)?.clone();
-        if self.recorded.get(ticker) == Some(&(bid, ask)) {
+        let depth = self.books.get(ticker).map(|b| b.depth()).unwrap_or_default();
+        let now = now_ms();
+        if let Some((b, a, d, t)) = self.recorded.get(ticker) {
+            let price_same = (*b, *a) == (bid, ask);
+            if price_same && (!depth.differs(d) || now - t < DEPTH_EVERY_MS) {
+                return None;
+            }
+        }
+        self.recorded.insert(ticker.to_string(), (bid, ask, depth, now));
+        Some(Write::KQuote { ts_ms: now, server_ts_ms: server_ts, event, outcome, bid, ask, est: false, depth })
+    }
+
+    /// Fold an `orderbook_snapshot` / `orderbook_delta` message; returns the ticker.
+    fn book_msg(&mut self, kind: &str, m: &Value) -> Option<String> {
+        let tk = text(&m["market_ticker"]);
+        if tk.is_empty() {
             return None;
         }
-        self.recorded.insert(ticker.to_string(), (bid, ask));
-        Some(Write::KQuote { ts_ms: now_ms(), server_ts_ms: server_ts, event, outcome, bid, ask, est: false })
+        let b = self.books.entry(tk.clone()).or_default();
+        if kind == "orderbook_snapshot" {
+            b.yes = if m["yes_dollars"].is_array() { klevels(&m["yes_dollars"]) } else { klevels(&m["yes"]) };
+            b.no = if m["no_dollars"].is_array() { klevels(&m["no_dollars"]) } else { klevels(&m["no"]) };
+        } else {
+            let p = kprice(&m["price_dollars"]).or_else(|| kprice(&m["price"]))?;
+            let d = num(&m["delta_fp"]).or_else(|| num(&m["delta"]))?;
+            let side = if m["side"].as_str() == Some("no") { &mut b.no } else { &mut b.yes };
+            let q = side.get(&p).copied().unwrap_or(0.0) + d;
+            if q > 0.0 {
+                side.insert(p, q);
+            } else {
+                side.remove(&p);
+            }
+        }
+        Some(tk)
     }
 }
 
@@ -212,6 +276,7 @@ async fn discover(
             let before = out.len();
             for e in v["events"].as_array().into_iter().flatten() {
                 if let Some(g) = parse_event(e, &series_title, sport) {
+                    crate::predmeta::set(NAME, &g.event, event_size(e));
                     if g.start_ms.is_some_and(|s| s >= lo && s <= hi) {
                         out.push(g);
                     }
@@ -231,6 +296,21 @@ async fn discover(
     out.sort_by(|a, b| a.event.cmp(&b.event));
     out.dedup_by(|a, b| a.event == b.event);
     Ok(out)
+}
+
+/// Liquidity and volume of an event, summed over its contracts, in dollars (Kalshi counts
+/// contracts; volume is valued at each contract's last price).
+fn event_size(e: &Value) -> crate::predmeta::Size {
+    let mut s = crate::predmeta::Size::default();
+    for m in e["markets"].as_array().into_iter().flatten() {
+        let px = prob(m, "last_price_dollars", "last_price").unwrap_or(0.5);
+        // Kalshi's liquidity fields are often zero now; open interest at the last price stands in.
+        let liq = num(&m["liquidity_dollars"]).or_else(|| num(&m["liquidity"]).map(|c| c / 100.0)).filter(|x| *x > 0.0);
+        s.liquidity += liq.or_else(|| num(&m["open_interest_fp"]).or_else(|| num(&m["open_interest"])).map(|n| n * px)).unwrap_or(0.0);
+        s.volume += num(&m["volume_fp"]).or_else(|| num(&m["volume"])).unwrap_or(0.0) * px;
+        s.volume_24h += num(&m["volume_24h_fp"]).or_else(|| num(&m["volume_24h"])).unwrap_or(0.0) * px;
+    }
+    s
 }
 
 /// Typical length of a game, to turn Kalshi's expected end into a kick-off.
@@ -366,7 +446,7 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
                 };
                 for chunk in want.chunks(200) {
                     id += 1;
-                    let msg = serde_json::json!({"id": id, "cmd": "subscribe", "params": {"channels": ["ticker"], "market_tickers": chunk}});
+                    let msg = serde_json::json!({"id": id, "cmd": "subscribe", "params": {"channels": ["ticker", "orderbook_delta"], "market_tickers": chunk}});
                     tx.send(Message::Text(msg.to_string().into())).await?;
                     subscribed.extend(chunk.iter().cloned());
                 }
@@ -399,6 +479,21 @@ async fn ws_session(shared: &Arc<Mutex<Shared>>, creds: &KalshiCreds, wtx: &toki
                                     let mut sh = shared.lock();
                                     sh.book.insert(tk.clone(), (bid, ask, ts));
                                     sh.record(&tk, bid, ask, ts)
+                                };
+                                if let Some(w) = w {
+                                    let _ = wtx.try_send(w);
+                                }
+                            }
+                            Some(kind @ ("orderbook_snapshot" | "orderbook_delta")) => {
+                                let w = {
+                                    let mut sh = shared.lock();
+                                    match sh.book_msg(kind, &v["msg"]) {
+                                        Some(tk) => {
+                                            let (bid, ask, ts) = sh.book.get(&tk).copied().unwrap_or((None, None, None));
+                                            sh.record(&tk, bid, ask, ts)
+                                        }
+                                        None => None,
+                                    }
                                 };
                                 if let Some(w) = w {
                                     let _ = wtx.try_send(w);
