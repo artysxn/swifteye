@@ -1571,6 +1571,14 @@ fn why_not(c: &Cand, p: &Policy, f: &Flt) -> Option<&'static str> {
 /// the replay failed it on (or that the replay never measured the move); for a replay-only
 /// trade, what the live bot logged for that move (`bot_signals`).
 pub fn parity(db: &std::path::Path, cfg: &crate::bots::SnipeCfg, real: bool, from: Ms) -> Value {
+    // This thread's filter goes back to what it was when the comparison is done.
+    let before = flt();
+    let out = parity_inner(db, cfg, real, from);
+    FLT.with(|x| x.set(before));
+    out
+}
+
+fn parity_inner(db: &std::path::Path, cfg: &crate::bots::SnipeCfg, real: bool, from: Ms) -> Value {
     let sim = bot_sim(cfg, true, false, Flt::live());
     if sim["building"].as_bool() == Some(true) {
         return sim;

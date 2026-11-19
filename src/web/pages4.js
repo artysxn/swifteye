@@ -148,8 +148,8 @@ SE.pages.telegram = {
         `<div class="end"><button class="more-b" data-open="${key}" data-tip="Options">${ic(open.has(key) ? 'expand_less' : 'tune')}</button>${sw('t-' + key, on)}</div></div>` +
         (open.has(key) ? `<div class="li-opts">${opts}</div>` : '');
       $('#tgList').innerHTML =
-        item('bot', 'smart_toy', 'Snipe bot trades', b.enabled !== false, `buys ${yes(b.buys !== false)} · sales ${yes(b.sells !== false)} · charts ${yes(b.charts !== false)}`,
-          opt('Buys', sw('bBuys', b.buys !== false)) + opt('Sales', sw('bSells', b.sells !== false)) + opt('Charts', sw('bCharts', b.charts !== false), 'The trade\'s price chart and the balance chart with each sale.')) +
+        item('bot', 'smart_toy', 'Snipe bot trades', b.enabled !== false, `buys ${yes(b.buys !== false)} · sales ${yes(b.sells !== false)} · charts ${yes(b.charts !== false)} · run updates ${yes(b.run_updates !== false)}`,
+          opt('Buys', sw('bBuys', b.buys !== false)) + opt('Sales', sw('bSells', b.sells !== false)) + opt('Charts', sw('bCharts', b.charts !== false), 'The trade\'s price chart and the balance chart with each sale.') + opt('Run updates', sw('bRun', b.run_updates !== false), 'During a real run: its start and end, an update every hour, warnings on the way to the loss stop.')) +
         item('odds', 'swap_vert', 'Odds moves', o.enabled, `${o.watched_only ? 'watched matches' : 'every match'} · ${o.min_move_pts}+ points`,
           opt('Matches', '<div id="tgWo"></div>') +
           opt('Smallest move', SE.num({ id: 'tgMin', value: o.min_move_pts, step: 0.5, min: 0.5, suf: 'pts', w: 96 }), 'Change in implied probability, in percentage points.') +
@@ -172,6 +172,7 @@ SE.pages.telegram = {
       on('bBuys', (t) => save({ bot_alerts: { buys: t.checked } }));
       on('bSells', (t) => save({ bot_alerts: { sells: t.checked } }));
       on('bCharts', (t) => save({ bot_alerts: { charts: t.checked } }));
+      on('bRun', (t) => save({ bot_alerts: { run_updates: t.checked } }));
       on('tgPaperT', (t) => save({ paper: { trades: t.checked } }));
       on('tgPaperA', (t) => save({ paper: { arbs: t.checked } }));
       on('tgPaperS', (t) => save({ paper: { standings: t.checked } }));
@@ -195,7 +196,7 @@ SE.pages.telegram = {
     }
 
     // ---------------------------------------------------------------- ask the bot
-    const ASK = [['/status', 'Status', 'monitor_heart'], ['/open', 'Open', 'hourglass_top'], ['/trades', 'Trades', 'receipt_long'], ['/run', 'Test run', 'timer'], ['/projected 24h', 'Projection', 'trending_up'], ['/log', 'Orders', 'list_alt']];
+    const ASK = [['/status', 'Status', 'monitor_heart'], ['/now', 'Update', 'query_stats'], ['/today', 'Today', 'today'], ['/open', 'Open', 'hourglass_top'], ['/trades', 'Trades', 'receipt_long'], ['/real', 'Real wallet', 'account_balance'], ['/paper', 'Paper wallet', 'savings'], ['/run', 'Real run', 'timer'], ['/safety', 'Safety stops', 'shield'], ['/twins', 'Twins', 'group'], ['/stats', 'Stats', 'insights'], ['/signals', 'Signals', 'bolt'], ['/rules', 'Rules', 'rule'], ['/health', 'Health', 'monitor_heart'], ['/projected 24h', 'Projection', 'trending_up'], ['/log', 'Orders', 'list_alt'], ['/help', 'All commands', 'help']];
     function drawAsk() {
       $('#tgAsk').innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">` + ASK.map(([c, l, i]) => `<button class="btn" data-ask="${esc(c)}" data-tip="${esc(c)}">${ic(i)}${l}</button>`).join('') +
         `<button class="btn ghost" data-push="/balance" data-tip="Sends the real balance chart to the chat.">${ic('show_chart')}Send chart</button></div>`;

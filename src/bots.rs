@@ -934,20 +934,61 @@ const GUARD_REFUSED_ORDERS: usize = 3;
 const GUARD_UNFILLED_BUYS: usize = 4;
 const GUARD_TWIN_GAP: f64 = 0.10;
 
-/// Why the running real test should stop now (None = all as expected).
-fn run_guard(app: &App, r: &Run) -> Option<String> {
+/// What the safety triggers look at for a run: its closed real trades (oldest first), the paper
+/// trades closed in the same hours, the real orders (refused, buys that found nothing, buys that
+/// filled) and the loss limit.
+fn guard_inputs(app: &App, r: &Run) -> Option<(Vec<Value>, Vec<Value>, (usize, usize, usize), f64)> {
     let c = crate::store::open_ro(&app.db_path).ok()?;
     let rows = |real: bool| -> Vec<Value> {
         c.prepare("SELECT data FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND ts_ms >= ?2 AND closed_ms IS NOT NULL ORDER BY closed_ms")
             .and_then(|mut st| st.query_map(params![real as i64, r.start_ms], |x| x.get::<_, String>(0)).map(|it| it.filter_map(|x| x.ok()).filter_map(|s| serde_json::from_str(&s).ok()).collect()))
             .unwrap_or_default()
     };
-    let real = rows(true);
     let count = |sql: &str| -> usize { c.query_row(sql, params![r.start_ms], |x| x.get::<_, i64>(0)).unwrap_or(0) as usize };
     let refused = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND COALESCE(json_extract(data, '$.error'), '') NOT IN ('', 'nothing filled')");
     let unfilled_buys = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND json_extract(data, '$.side') = 'buy' AND json_extract(data, '$.error') = 'nothing filled'");
     let filled_buys = count("SELECT COUNT(*) FROM bot_trades WHERE bot = 'snipe' AND real = 1 AND ts_ms >= ?1");
-    run_guard_on(&real, &rows(false), (refused, unfilled_buys, filled_buys), settings().snipe.c.daily_loss)
+    Some((rows(true), rows(false), (refused, unfilled_buys, filled_buys), settings().snipe.c.daily_loss))
+}
+
+/// Why the running real test should stop now (None = all as expected).
+fn run_guard(app: &App, r: &Run) -> Option<String> {
+    let (real, paper, orders, limit) = guard_inputs(app, r)?;
+    run_guard_on(&real, &paper, orders, limit)
+}
+
+/// Where the running test stands against each safety stop, for the Telegram /safety answer
+/// (None = no run going).
+pub fn run_guard_facts(app: &App) -> Option<Value> {
+    let r = settings().run?;
+    let (real, paper, (refused, unfilled_buys, filled_buys), limit) = guard_inputs(app, &r)?;
+    let pnl = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0);
+    let ret = |t: &Value| pnl(t) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
+    let gaps = twin_gaps(&real, &paper);
+    Some(json!({
+        "loss": -real.iter().map(pnl).sum::<f64>().min(0.0), "pnl": real.iter().map(pnl).sum::<f64>(), "loss_limit": limit,
+        "closed": real.len(), "wins": real.iter().filter(|t| pnl(t) > 0.0).count(),
+        "last_two_lost": real.len() >= 2 && real[real.len() - 2..].iter().all(|t| ret(t) < -0.05),
+        "last_lost": real.last().is_some_and(|t| ret(t) < -0.05),
+        "worst_return": real.iter().map(ret).fold(0.0f64, f64::min),
+        "refused": refused, "unfilled_buys": unfilled_buys, "filled_buys": filled_buys,
+        "twin_pairs": gaps.len(), "twin_gap": if gaps.is_empty() { None } else { Some(gaps.iter().sum::<f64>() / gaps.len() as f64) },
+        "limits": {"win_share": GUARD_WIN_SHARE, "win_min_trades": GUARD_WIN_MIN_TRADES, "one_trade_loss": GUARD_ONE_TRADE_LOSS, "refused": GUARD_REFUSED_ORDERS, "unfilled_buys": GUARD_UNFILLED_BUYS, "twin_gap": GUARD_TWIN_GAP},
+        "would_stop": run_guard_on(&real, &paper, (refused, unfilled_buys, filled_buys), limit),
+    }))
+}
+
+/// Real trades against their paper twins (the same move: same game and rule set, bought within
+/// 30 s): each pair's return on real money less the return on paper.
+pub fn twin_gaps(real: &[Value], paper: &[Value]) -> Vec<f64> {
+    let ret = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
+    real.iter()
+        .filter_map(|t| {
+            let (m, ts) = (t["match_id"].as_i64()?, t["ts"].as_i64()?);
+            let twin = paper.iter().find(|p| p["match_id"].as_i64() == Some(m) && p["set"] == t["set"] && (p["ts"].as_i64().unwrap_or(0) - ts).abs() <= 30_000)?;
+            Some(ret(t) - ret(twin))
+        })
+        .collect()
 }
 
 /// The triggers on closed real trades (oldest first), the paper trades of the same hours, and
@@ -979,14 +1020,7 @@ fn run_guard_on(real: &[Value], paper: &[Value], orders: (usize, usize, usize), 
     }
     // Real against its paper twin (the same move, bought within 30 s): real fills clearly worse
     // than paper means the paper model flatters the bot.
-    let gaps: Vec<f64> = real
-        .iter()
-        .filter_map(|t| {
-            let (m, ts) = (t["match_id"].as_i64()?, t["ts"].as_i64()?);
-            let twin = paper.iter().find(|p| p["match_id"].as_i64() == Some(m) && p["set"] == t["set"] && (p["ts"].as_i64().unwrap_or(0) - ts).abs() <= 30_000)?;
-            Some(ret(t) - ret(twin))
-        })
-        .collect();
+    let gaps = twin_gaps(real, paper);
     if gaps.len() >= 2 {
         let mean = gaps.iter().sum::<f64>() / gaps.len() as f64;
         if mean <= -GUARD_TWIN_GAP {

@@ -148,11 +148,14 @@ pub struct BotAlerts {
     pub sells: bool,
     /// The price chart with each sale, and the balance chart after it.
     pub charts: bool,
+    /// During a real run: its start and end, an update every hour, warnings on the way to the
+    /// loss stop and refused orders.
+    pub run_updates: bool,
 }
 
 impl Default for BotAlerts {
     fn default() -> Self {
-        BotAlerts { enabled: true, buys: true, sells: true, charts: true }
+        BotAlerts { enabled: true, buys: true, sells: true, charts: true, run_updates: true }
     }
 }
 
@@ -354,6 +357,15 @@ async fn bot_loop(app: Arc<App>) {
     }
     let mut menu_set = String::new();
     let mut tick: u64 = 0;
+    // The real run as last seen, to notice its start and end; the hourly update's next time;
+    // how far towards the loss stop a warning has gone out; the last real order looked at.
+    let next_hour = |t: Ms| t - t.rem_euclid(3_600_000) + 3_600_000;
+    let mut run_id: Option<Ms> = crate::bots::settings().run.map(|r| r.id);
+    let mut was_open = window_now(now_ms()).0;
+    let mut next_digest: Ms = next_hour(now_ms());
+    let mut warned: u8 = 0;
+    let mut last_order: i64 = crate::store::open_ro(&app.db_path).ok().and_then(|c| c.query_row("SELECT COALESCE(MAX(id), 0) FROM bot_orders", [], |r| r.get(0)).ok()).unwrap_or(0);
+    let mut refused_told: Ms = 0;
     loop {
         tokio::time::sleep(Duration::from_secs(20)).await;
         tick += 1;
@@ -364,20 +376,18 @@ async fn bot_loop(app: Arc<App>) {
         let c = cfg();
         // The command menu in Telegram (once per token).
         if !c.token.is_empty() && menu_set != c.token {
-            let cmds = json!({"commands": [
-                {"command": "balance", "description": "Chart of the bot's real balance (test run)"},
-                {"command": "balancepaper", "description": "Chart of the paper balance"},
-                {"command": "projected", "description": "What money turns into: /projected 24h [start]"},
-                {"command": "log", "description": "All real-money orders"},
-                {"command": "status", "description": "Mode, balances, today, open trades, test run"},
-                {"command": "open", "description": "Open trades"},
-                {"command": "trades", "description": "Last 10 closed trades"},
-                {"command": "run", "description": "The real test run"},
-                {"command": "chart", "description": "Chart of the last closed trade"},
-                {"command": "kill", "description": "Emergency: stop opening trades"},
-                {"command": "unkill", "description": "Resume trading"},
-                {"command": "pause", "description": "Updates off"},
-                {"command": "resume", "description": "Updates on"}]});
+            let menu: [(&str, &str); 34] = [
+                ("status", "Both wallets and whether it is trading"), ("now", "Update right now"), ("open", "Open trades"), ("today", "Today's results"),
+                ("real", "The real wallet"), ("paper", "The paper wallet"), ("account", "Cash on the Polymarket account"),
+                ("trades", "Last 10 closed trades"), ("last", "The last trade"), ("chart", "Chart of the last trade"), ("best", "Best trades"), ("worst", "Worst trades"),
+                ("week", "Last 7 days, day by day"), ("stats", "Win rate, average win and loss"), ("sports", "Results by sport"),
+                ("run", "The real run"), ("safety", "Where the run stands against each safety stop"), ("twins", "Real trades against their paper twins"),
+                ("compare", "Live trades against the replay"), ("extend", "Extend the run: /extend 2h"), ("stoprun", "End the real run now"), ("realoff", "Real money off"),
+                ("rules", "When it buys and sells"), ("settings", "Wallets, stakes, hours"), ("signals", "What it checked today and why it passed"), ("hours", "Trading hours"),
+                ("replay", "The replay of this setup"), ("projected", "What money turns into: /projected 24h"), ("balance", "Real balance chart"), ("balancepaper", "Paper balance chart"),
+                ("health", "Feeds, prices, replay"), ("kill", "Emergency: stop opening trades"), ("unkill", "Resume trading"), ("help", "Every command"),
+            ];
+            let cmds = json!({"commands": menu.iter().map(|(c, d)| json!({"command": c, "description": d})).collect::<Vec<_>>()});
             if call(&client(), &c.token, "setMyCommands", cmds).await.is_ok() {
                 menu_set = c.token.clone();
             }
@@ -405,25 +415,82 @@ async fn bot_loop(app: Arc<App>) {
         })
         .await
         .unwrap_or_default();
+        // ---- the real run: start, window, hourly update, loss warnings, end
+        let st = crate::bots::settings();
+        let now = now_ms();
+        let tell = c.bot_alerts.enabled && c.bot_alerts.run_updates;
+        match (run_id, &st.run) {
+            (was, Some(r)) if was != Some(r.id) => {
+                run_id = Some(r.id);
+                warned = 0;
+                next_digest = next_hour(now);
+                if tell {
+                    let _ = send("bot", &run_started_text(&app, r)).await;
+                }
+            }
+            (Some(id), None) => {
+                run_id = None;
+                let rep = crate::bots::runs(&app)["past"].as_array().and_then(|a| a.iter().find(|x| x["id"].as_i64() == Some(id)).cloned());
+                if let (true, Some(rep)) = (tell, rep) {
+                    let _ = send("bot", &run_ended_text(&app, &rep)).await;
+                }
+            }
+            _ => {}
+        }
+        let (open, closes) = window_now(now);
+        if st.run.is_some() && tell {
+            if open && !was_open {
+                let _ = send("bot", &format!("🔔 <b>Trading window open</b>{}
+💼 {}
+💼 {}", closes.map(|t| format!(" until {}", hhmm(t))).unwrap_or_default(), wallet_line(&app, true), wallet_line(&app, false))).await;
+                next_digest = next_hour(now);
+            }
+            if open && now >= next_digest {
+                let _ = send("bot", &digest_text(&app, "Hourly update")).await;
+            }
+            if let Some(f) = crate::bots::run_guard_facts(&app) {
+                let (loss, limit) = (f["loss"].as_f64().unwrap_or(0.0), f["loss_limit"].as_f64().unwrap_or(0.0));
+                let level = if limit > 0.0 && loss >= 0.75 * limit { 2 } else if limit > 0.0 && loss >= 0.5 * limit { 1 } else { 0 };
+                if level > warned {
+                    let _ = send("bot", &format!("⚠️ <b>Real wallet is down {}</b>
+The run stops itself at −{}. /safety shows every stop, /stoprun ends it now.", dollars(loss), dollars(limit))).await;
+                }
+                warned = warned.max(level);
+            }
+        }
+        if now >= next_digest {
+            next_digest = next_hour(now);
+        }
+        was_open = open;
+        // ---- real orders Polymarket refused (at most one message in 5 minutes: a sale retries)
+        let refused: Vec<(i64, Value)> = crate::store::open_ro(&app.db_path)
+            .ok()
+            .and_then(|c| {
+                let mut q = c.prepare("SELECT id, data FROM bot_orders WHERE id > ?1 AND ok = 0 ORDER BY id").ok()?;
+                let it = q.query_map([last_order], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).ok()?;
+                Some(it.filter_map(|x| x.ok()).filter_map(|(id, d)| Some((id, serde_json::from_str(&d).ok()?))).collect())
+            })
+            .unwrap_or_default();
+        for (id, d) in refused {
+            last_order = last_order.max(id);
+            let err = d["error"].as_str().unwrap_or("");
+            if err.is_empty() || err == "nothing filled" || !tell || now - refused_told < 300_000 {
+                continue;
+            }
+            refused_told = now;
+            let _ = send("bot", &format!("⚠️ <b>Polymarket refused a real {}</b>
+{}", if d["side"].as_str().unwrap_or("").starts_with("buy") { "buy" } else { "sale" }, esc(&err.chars().take(200).collect::<String>()))).await;
+        }
         for (id, v) in rows {
-            let tag = if v["real"].as_bool() == Some(true) { "💵 REAL" } else { "📝 paper" };
-            let name = format!("{} v {}", esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")));
-            let side = format!("{} {}", if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { "Yes" } else { "No" }, outcome_name(v["outcome"].as_str().unwrap_or("")));
-            let n = v["contracts"].as_f64().unwrap_or(0.0);
-            let entry = v["entry"].as_f64().unwrap_or(0.0);
+            // While a real run is going the paper wallet speaks in single lines without charts:
+            // the real trades are the news.
+            let compact = !is_real(&v) && st.run.is_some();
             if id > last_id {
                 last_id = id;
                 if !(c.bot_alerts.enabled && c.bot_alerts.buys) {
                     continue;
                 }
-                let (target, give) = pays_at(&v);
-                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢\n💰 Cash in {}: when Polymarket reaches {}¢ (≈{}); at the latest {} (gives up)",
-                    buy_type(&v), entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0,
-                    eta_text(&app, v["ts"].as_i64().unwrap_or(0)),
-                    target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into()),
-                    target.map(|x| money_s(n * (x - entry))).unwrap_or_default(),
-                    give.map(hhmm).unwrap_or_default());
-                let _ = send("bot", &text).await;
+                let _ = send("bot", &buy_text(&v, compact)).await;
             }
             if let Some(cl) = v["closed_ms"].as_i64() {
                 if cl > closed_seen {
@@ -431,14 +498,15 @@ async fn bot_loop(app: Arc<App>) {
                     if !(c.bot_alerts.enabled && c.bot_alerts.sells) {
                         continue;
                     }
-                    let pnl = v["pnl"].as_f64().unwrap_or(0.0);
-                    let caption = format!("{} <b>Snipe sold</b> · {tag}\n{}\n{name} · {side}\n{n:.0}: {:.1}¢ → {:.1}¢ ({}) · <b>{}${:.2}</b>",
-                        if pnl >= 0.0 { "✅" } else { "❌" }, buy_type(&v), entry * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")),
-                        if pnl >= 0.0 { "+" } else { "-" }, pnl.abs());
+                    if compact {
+                        let _ = send("bot", &sell_text(&v, true)).await;
+                        continue;
+                    }
+                    let caption = sell_text(&v, false);
                     let a2 = app.clone();
                     let v2 = v.clone();
                     let chart = if c.bot_alerts.charts { tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten() } else { None };
-                    let value = bot_balance(&app, v["real"].as_bool() == Some(true));
+                    let value = bot_balance(&app, is_real(&v));
                     let sent = match chart {
                         Some(cfgj) => {
                             let (ch, cap) = with_value(cfgj, &caption, &value);
@@ -450,7 +518,7 @@ async fn bot_loop(app: Arc<App>) {
                         let _ = send("bot", &format!("{caption}\n💼 {}", esc(&value))).await;
                     }
                     let a3 = app.clone();
-                    let real = v["real"].as_bool() == Some(true);
+                    let real = is_real(&v);
                     if c.bot_alerts.charts {
                         if let Ok(Some((ch, cap))) = tokio::task::spawn_blocking(move || balance_chart(&a3, real)).await {
                             let _ = send_chart(&ch, &cap).await;
@@ -470,31 +538,6 @@ fn pays_at(v: &Value) -> (Option<f64>, Option<Ms>) {
     let target = pre.zip(mv).map(|(pre, _)| if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { pre + need - sp / 2.0 } else { 1.0 - pre + need - sp / 2.0 });
     let give = v["ts"].as_i64().zip(v["give_up_s"].as_i64()).map(|(t, g)| t + g * 1000);
     (target.map(|x| x.clamp(0.0, 1.0)), give)
-}
-
-/// What kind of snipe this is, from the price paid and what moved:
-/// price band (long shot / mid / favourite / near-certain) · direction · outcome kind.
-fn buy_type(v: &Value) -> String {
-    let e = v["entry"].as_f64().unwrap_or(0.0);
-    let band = match e {
-        x if x < 0.30 => "🎲 Long shot (<30¢)",
-        x if x < 0.70 => "⚖️ Mid-price (30–70¢)",
-        x if x <= 0.90 => "⭐ Favourite (70–90¢)",
-        _ => "🔒 Near-certain (>90¢)",
-    };
-    let o = v["outcome"].as_str().unwrap_or("");
-    let what = match (o, v["dir"].as_f64().unwrap_or(1.0) > 0.0) {
-        ("draw", true) => "draw got likelier",
-        ("draw", false) => "draw ruled out (bought No)",
-        (_, true) => "side got likelier",
-        (_, false) => "side faded (bought No)",
-    };
-    let set = match v["set"].as_str() {
-        Some("wider") => " · wider set (small stake)",
-        Some("safe") => " · safe set",
-        _ => "",
-    };
-    format!("{band} · {what}{set}")
 }
 
 /// How long a winning snipe usually takes to cash in: the median time from buy to sale of the
@@ -596,20 +639,7 @@ async fn account_value(app: &App, real: bool) -> String {
 /// The bot's own balance: during a real test run, its bankroll plus the run's results;
 /// otherwise its real bankroll plus its real results; for a paper trade, the paper wallet.
 fn bot_balance(app: &App, real: bool) -> String {
-    let st = crate::bots::settings();
-    let Ok(c) = crate::store::open_ro(&app.db_path) else { return String::new() };
-    if let Some(run) = &st.run {
-        let rep = crate::bots::run_report(app, run, now_ms());
-        let p = rep["pnl"].as_f64().unwrap_or(0.0);
-        return format!("Bot balance ${:.2} (test run: ${:.0} {})", run.bankroll + p, run.bankroll, money_s(p));
-    }
-    if real {
-        let (closed, open, ..) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true);
-        format!("Bot balance ${:.2} (${:.0} bankroll {}, ${open:.2} in open trades)", st.snipe.c.bankroll + closed, st.snipe.c.bankroll, money_s(closed))
-    } else {
-        let (closed, open, ..) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, false);
-        format!("Paper bot balance ${:.2} (${:.0} start {}, ${open:.2} in open trades)", st.snipe.c.start + closed, st.snipe.c.start, money_s(closed))
-    }
+    wallet_line(app, real)
 }
 
 /// The bot's balance over time: starts at its money (the test run's bankroll, else its real bankroll;
@@ -932,6 +962,12 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
             None => reply(http, &c.token, chat, "No balance history yet.").await,
         };
     }
+    if cmd == "/account" {
+        return reply(http, &c.token, chat, &account_text(app).await).await;
+    }
+    if let Some(t) = toggle(&cmd, &arg) {
+        return reply(http, &c.token, chat, &t).await;
+    }
     if cmd == "/chart" {
         // The last closed snipe trade, charted.
         let last: Option<Value> = crate::store::open_ro(&app.db_path).ok().and_then(|c| {
@@ -958,43 +994,48 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
         };
     }
     let msg = match cmd.as_str() {
-        "/status" => bot_status(app),
-        "/open" => trade_list(app, true, 10),
-        "/trades" => trade_list(app, false, 10),
-        "/run" => run_text(app),
         "/extend" => match arg.trim().trim_end_matches(|c: char| c.is_ascii_alphabetic()).parse::<i64>().map_err(anyhow::Error::from).and_then(|h| crate::bots::extend_run(app, h)) {
-            Ok(v) => format!("Test run extended; now ends {}", hhmm(v["end_ms"].as_i64().unwrap_or(0))),
-            Err(e) => format!("Use: /extend 4h (1-48 h) · {}", esc(&e.to_string())),
+            Ok(v) => format!("⏱ Run extended. It now ends {}.", hhmm(v["end_ms"].as_i64().unwrap_or(0))),
+            Err(e) => format!("Use: /extend 2h (1 to 48 hours)\n{}", esc(&e.to_string())),
         },
-        "/projected" => projected(app, &arg),
-        "/log" => real_log(app, arg.parse::<i64>().unwrap_or(20).clamp(1, 60)),
+        "/stoprun" => match crate::bots::stop_run(app, "stopped from Telegram") {
+            Ok(_) => "🏁 Real run stopped. Real money is off; open real positions are still sold. The summary follows.".into(),
+            Err(_) => "No real run going.".into(),
+        },
+        "/realoff" => {
+            let done = if crate::bots::settings().run.is_some() { crate::bots::stop_run(app, "stopped from Telegram").map(|_| ()) } else { crate::bots::set_real(app, crate::bots::SNIPE, false, "").map(|_| ()) };
+            match done {
+                Ok(()) => "📝 Real money is off. Open real positions are still sold; paper keeps trading.".into(),
+                Err(e) => format!("Could not: {}", esc(&format!("{e:#}"))),
+            }
+        }
         "/kill" => match crate::bots::update(app, &json!({"kill": true})) {
-            Ok(_) => "🛑 Kill switch ON: the bot opens no new trades (open ones still get sold). /unkill to resume.".into(),
+            Ok(_) => "🛑 <b>Kill switch on</b>
+No new trades, paper or real. Open ones are still sold. /unkill resumes.".into(),
             Err(e) => format!("Could not: {e:#}"),
         },
         "/unkill" => match crate::bots::update(app, &json!({"kill": false})) {
-            Ok(_) => "Kill switch off: the bot trades again.".into(),
+            Ok(_) => "▶️ Kill switch off. The bot trades again.".into(),
             Err(e) => format!("Could not: {e:#}"),
         },
         "/pause" => {
             CFG.lock().enabled = false;
             save(&cfg());
-            "Updates paused (the bot keeps trading). /resume to get them again.".into()
+            "🔕 Messages paused. The bot keeps trading. /resume brings them back.".into()
         }
         "/resume" => {
             CFG.lock().enabled = true;
             save(&cfg());
-            "Updates on.".into()
+            "🔔 Messages on.".into()
         }
-        _ => HELP.into(),
+        other => preview(app, &format!("{other} {arg}")).unwrap_or_else(|| HELP.into()),
     };
     reply(http, &c.token, chat, &msg).await
 }
 
-const HELP: &str = "<b>Snipe bot</b>\n/extend 4h — extend the running test run\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the real test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
 
 fn money_s(x: f64) -> String {
-    format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())
+    format!("{}{}", if x < 0.0 { "-" } else { "+" }, dollars(x.abs()))
 }
 
 /// "24h", "3d", "1w", "90m" (default hours) -> days.
@@ -1102,20 +1143,11 @@ fn real_log(app: &App, n: i64) -> String {
 
 fn bot_status(app: &App) -> String {
     let s = crate::bots::settings();
-    let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
-    let mode = if s.kill { "🛑 KILLED" } else if !s.snipe.c.enabled { "off" } else if s.snipe.c.real { "💵 REAL" } else { "📝 paper" };
-    let (pc, po, pd, pn, pw) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, false);
-    let (rc, ro, rd, rn, rw) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, true);
-    let r = crate::adaptive::active_rules();
-    let mut t = format!(
-        "<b>Snipe bot</b> · {mode}\n📝 Paper: ${:.2} ({}), today {}, {pn} trades {pw} won, ${po:.2} open\n💵 Real: {} total, today {}, {rn} trades {rw} won, ${ro:.2} open, ${:.2} free of ${:.0}\nRules: {}+ books, {:.0} pt move, ≤{:.0}% followed, gain ≥{:.0}¢, give up {} min\nStake {:.0}% (max ${:.0}), daily loss stop ${:.0}",
-        s.snipe.c.start + pc, money_s(pc), money_s(pd), money_s(rc), money_s(rd), crate::bots::real_free(&c, crate::bots::SNIPE), s.snipe.c.bankroll,
-        r.min_books.max(crate::adaptive::Flt::live().fams.unwrap_or(1)), r.min_move * 100.0, r.max_followed.min(crate::adaptive::SAFE_MAX_FOLLOWED) * 100.0, r.min_edge * 100.0,
-        (if s.snipe.give_up_s > 0 { s.snipe.give_up_s } else { r.give_up_s }) / 60, s.snipe.pct * 100.0, s.snipe.c.max_trade, s.snipe.c.daily_loss
-    );
+    let mode = if s.kill { "🛑 stopped (kill switch)" } else if !s.snipe.c.enabled { "switched off" } else if s.snipe.c.real { "💵 real and 📝 paper" } else { "📝 paper only" };
+    let mut t = format!("🤖 <b>Snipe bot</b> · {mode}\n{}\n{}\n{}", wallet_block(app, true), wallet_block(app, false), window_text().lines().next().unwrap_or(""));
     if let Some(run) = &s.run {
         let rep = crate::bots::run_report(app, run, now_ms());
-        t.push_str(&format!("\n⏱ Test run until {}: {} trades, {}", hhmm(run.end_ms), rep["trades"], money_s(rep["pnl"].as_f64().unwrap_or(0.0))));
+        t.push_str(&format!("\n⏱ Real run until {} · {}", hhmm(run.end_ms), money_s(rep["pnl"].as_f64().unwrap_or(0.0))));
     }
     t
 }
@@ -1150,32 +1182,22 @@ fn dmhm(ms: Ms) -> String {
 }
 
 fn trade_list(app: &App, open: bool, n: i64) -> String {
-    let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
-    let sql = if open {
-        "SELECT data, real FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NULL ORDER BY ts_ms DESC LIMIT ?1"
-    } else {
-        "SELECT data, real FROM bot_trades WHERE bot = 'snipe' AND closed_ms IS NOT NULL ORDER BY closed_ms DESC LIMIT ?1"
-    };
-    let rows: Vec<(Value, bool)> = c
-        .prepare(sql)
-        .and_then(|mut st| st.query_map([n], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))).map(|it| it.filter_map(|x| x.ok()).filter_map(|(d, real)| serde_json::from_str(&d).ok().map(|v| (v, real != 0))).collect()))
-        .unwrap_or_default();
-    if rows.is_empty() {
-        return if open { "No open trades.".into() } else { "No closed trades yet.".into() };
+    let rows = snipe_rows(app, 0);
+    let mut v: Vec<&Value> = rows.iter().filter(|v| v["closed_ms"].is_i64() != open).collect();
+    if v.is_empty() {
+        return if open { "⏳ Nothing open.".into() } else { "🧾 No closed trades yet.".into() };
     }
-    rows.iter()
-        .map(|(v, real)| {
-            let side = format!("{} {}", if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { "Yes" } else { "No" }, outcome_name(v["outcome"].as_str().unwrap_or("")));
-            let head = format!("{} {} v {} · {side}", if *real { "💵" } else { "📝" }, esc(v["home"].as_str().unwrap_or("")), esc(v["away"].as_str().unwrap_or("")));
-            if open {
-                format!("{head}\n   {:.0} @ {:.1}¢ (${:.2})", v["contracts"].as_f64().unwrap_or(0.0), v["entry"].as_f64().unwrap_or(0.0) * 100.0, v["cost"].as_f64().unwrap_or(0.0))
-            } else {
-                let p = v["pnl"].as_f64().unwrap_or(0.0);
-                format!("{} {head}\n   {:.1}¢ → {:.1}¢ ({}) <b>{}</b>", if p >= 0.0 { "✅" } else { "❌" }, v["entry"].as_f64().unwrap_or(0.0) * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")), money_s(p))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    v.sort_by_key(|x| std::cmp::Reverse(if open { x["ts"].as_i64() } else { x["closed_ms"].as_i64() }));
+    let mut t = String::from(if open { "⏳ <b>Open trades</b>" } else { "🧾 <b>Last trades</b>" });
+    for x in v.into_iter().take(n as usize) {
+        if open {
+            let (give, entry) = (pays_at(x).1, x["entry"].as_f64().unwrap_or(0.0));
+            t.push_str(&format!("\n{} · {} · {} · {:.0} at {} ({}){}", tag(is_real(x)), game(x), bet(x), x["contracts"].as_f64().unwrap_or(0.0), cents(entry), dollars(x["cost"].as_f64().unwrap_or(0.0)), give.map(|g| format!(" · gives up {}", hhmm(g))).unwrap_or_default()));
+        } else {
+            t.push_str(&format!("\n{} {}", if x["pnl"].as_f64().unwrap_or(0.0) >= 0.0 { "✅" } else { "❌" }, sell_text(x, true)));
+        }
+    }
+    t
 }
 
 fn run_text(app: &App) -> String {
@@ -1183,17 +1205,687 @@ fn run_text(app: &App) -> String {
     let (r, live) = match (&g["current"], g["past"].get(0)) {
         (Value::Object(_), _) => (g["current"].clone(), true),
         (_, Some(p)) => (p.clone(), false),
-        _ => return "No test run yet. Start one on the Bots page.".into(),
+        _ => return "⏱ No real run yet. Start one on the Bots page.".into(),
     };
-    let sig = r["signals"].as_array().map(|a| a.iter().take(4).map(|x| format!("{} {}", x["result"].as_str().unwrap_or("").replace('_', " "), x["n"])).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+    let (bank, pnl) = (r["bankroll"].as_f64().unwrap_or(0.0), r["pnl"].as_f64().unwrap_or(0.0));
+    let (closed, wins, open) = (r["closed"].as_u64().unwrap_or(0), r["wins"].as_u64().unwrap_or(0), r["open"].as_u64().unwrap_or(0));
+    let mut t = format!(
+        "⏱ <b>Real run</b> · {}\n{} to {}\n💵 <b>{}</b> · {closed} trades · {wins} won{}\n💼 {} → {}",
+        if live { "running".to_string() } else { esc(r["ended"].as_str().unwrap_or("ended")) },
+        dmhm(r["start_ms"].as_i64().unwrap_or(0)), hhmm(r["end_ms"].as_i64().unwrap_or(0)),
+        money_s(pnl), if open > 0 { format!(" · {open} open") } else { String::new() }, dollars(bank), dollars(bank + pnl)
+    );
+    let sig: Vec<String> = r["signals"].as_array().map(|a| a.iter().take(3).map(|x| format!("{} {}", x["n"], sig_name(x["result"].as_str().unwrap_or("")).to_lowercase())).collect()).unwrap_or_default();
+    if !sig.is_empty() {
+        t.push_str(&format!("\n📡 {}", esc(&sig.join(" · "))));
+    }
+    if live {
+        t.push_str("\n/safety shows the stops · /stoprun ends it");
+    }
+    t
+}
+
+// ---------------------------------------------------------------- snipe bot: message texts
+
+fn tag(real: bool) -> &'static str {
+    if real { "💵 Real" } else { "📝 Paper" }
+}
+
+/// "62¢" / "62.5¢"
+fn cents(x: f64) -> String {
+    let c = x * 100.0;
+    if (c - c.round()).abs() < 0.05 { format!("{c:.0}¢") } else { format!("{c:.1}¢") }
+}
+
+/// "$1,084.20"
+fn dollars(x: f64) -> String {
+    let whole = x.abs().trunc() as i64;
+    let frac = ((x.abs() - whole as f64) * 100.0).round() as i64;
+    let (whole, frac) = if frac >= 100 { (whole + 1, 0) } else { (whole, frac) };
+    let s = whole.to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    format!("{}${out}.{frac:02}", if x < 0.0 { "-" } else { "" })
+}
+
+/// "45 s" / "3 min" / "1 h 05 min"
+fn held(ms: Ms) -> String {
+    let s = (ms / 1000).max(0);
+    if s < 90 {
+        format!("{s} s")
+    } else if s < 3600 {
+        format!("{} min", (s + 30) / 60)
+    } else {
+        format!("{} h {:02} min", s / 3600, (s % 3600) / 60)
+    }
+}
+
+fn game(v: &Value) -> String {
+    format!("{} v {}", esc(v["home"].as_str().unwrap_or("?")), esc(v["away"].as_str().unwrap_or("?")))
+}
+
+/// What was bought, in words: "Home to win", "Against Home" (bought No), "Draw", "No draw".
+fn bet(v: &Value) -> String {
+    let yes = v["dir"].as_f64().unwrap_or(1.0) > 0.0;
+    let team = match v["outcome"].as_str().unwrap_or("") {
+        "home" => v["home"].as_str().unwrap_or("home"),
+        "away" => v["away"].as_str().unwrap_or("away"),
+        "draw" => return if yes { "Draw".into() } else { "No draw".into() },
+        o => o,
+    };
+    if yes { format!("{} to win", esc(team)) } else { format!("Against {}", esc(team)) }
+}
+
+fn is_real(v: &Value) -> bool {
+    v["real"].as_bool() == Some(true)
+}
+
+/// A buy. `compact`: one line (the paper wallet while a real run is going).
+fn buy_text(v: &Value, compact: bool) -> String {
+    let (n, entry, cost) = (v["contracts"].as_f64().unwrap_or(0.0), v["entry"].as_f64().unwrap_or(0.0), v["cost"].as_f64().unwrap_or(0.0));
+    if compact {
+        return format!("{} bought · {} · {} · {n:.0} at {} ({})", tag(is_real(v)), game(v), bet(v), cents(entry), dollars(cost));
+    }
+    let mut t = format!("🟢 <b>Bought</b> · {}\n<b>{}</b>\n{} · {n:.0} shares at {} · {}", tag(is_real(v)), game(v), bet(v), cents(entry), dollars(cost));
+    let (target, give) = pays_at(v);
+    if let Some(x) = target {
+        t.push_str(&format!("\n🎯 Sells at {} ({})", cents(x), money_s(n * (x - entry))));
+        if let Some(g) = give {
+            t.push_str(&format!(" · gives up {}", hhmm(g)));
+        }
+    }
+    let set = if v["set"] == "wider" { "Wider set" } else { "Safe set" };
+    t.push_str(&format!("\n<i>{set} · {} feeds moved · expected gain {}</i>", v["books"][1].as_u64().unwrap_or(0), cents(v["edge"].as_f64().unwrap_or(0.0))));
+    t
+}
+
+/// A sale. `compact`: one line.
+fn sell_text(v: &Value, compact: bool) -> String {
+    let pnl = v["pnl"].as_f64().unwrap_or(0.0);
+    let (entry, exit) = (v["entry"].as_f64().unwrap_or(0.0), v["exit"].as_f64().unwrap_or(0.0));
+    let why = esc(v["reason"].as_str().unwrap_or(""));
+    if compact {
+        return format!("{} sold <b>{}</b> · {} · {} → {} · {why}", tag(is_real(v)), money_s(pnl), game(v), cents(entry), cents(exit));
+    }
+    let took = v["exit_ts"].as_i64().zip(v["ts"].as_i64()).map(|(a, b)| format!(" · held {}", held(a - b))).unwrap_or_default();
+    format!("{} <b>Sold {}</b> · {}\n<b>{}</b>\n{} · {} → {}{took} · {why}", if pnl >= 0.0 { "✅" } else { "❌" }, money_s(pnl), tag(is_real(v)), game(v), bet(v), cents(entry), cents(exit))
+}
+
+/// (closed result, open cost, today's result, closed trades, won, open positions, wallet money)
+fn wallet(app: &App, real: bool) -> (f64, f64, f64, usize, usize, i64, f64) {
+    let s = crate::bots::settings();
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return (0.0, 0.0, 0.0, 0, 0, 0, 0.0) };
+    let (closed, open, day, n, w) = crate::bots::snipe_ledger(&c, crate::bots::SNIPE, real);
+    let since = if real { s.snipe.c.real_since } else { s.snipe.c.paper_since };
+    let open_n: i64 = c.query_row("SELECT COUNT(*) FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND closed_ms IS NULL AND ts_ms >= ?2", params![real as i64, since], |r| r.get(0)).unwrap_or(0);
+    (closed, open, day, n, w, open_n, if real { s.snipe.c.bankroll } else { s.snipe.c.start })
+}
+
+/// "Real wallet $41.20 (+$1.20)"
+fn wallet_line(app: &App, real: bool) -> String {
+    let (closed, _, _, _, _, _, money) = wallet(app, real);
+    format!("{} wallet {} ({})", if real { "Real" } else { "Paper" }, dollars(money + closed), money_s(closed))
+}
+
+/// Two lines for one wallet in an update.
+fn wallet_block(app: &App, real: bool) -> String {
+    let (closed, open, _, n, w, open_n, money) = wallet(app, real);
+    let mut t = format!("{} <b>{}</b> ({})\n      {n} trades · {w} won", tag(real), dollars(money + closed), money_s(closed));
+    if open_n > 0 {
+        t.push_str(&format!(" · {open_n} open ({})", dollars(open)));
+    }
+    t
+}
+
+/// Every snipe trade of both wallets since `since` (each wallet no earlier than its own start),
+/// oldest first, with "real" and "closed_ms" added.
+fn snipe_rows(app: &App, since: Ms) -> Vec<Value> {
+    let s = crate::bots::settings();
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return Vec::new() };
+    let Ok(mut st) = c.prepare("SELECT data, real, closed_ms FROM bot_trades WHERE bot = 'snipe' AND ts_ms >= (CASE WHEN real = 1 THEN ?1 ELSE ?2 END) ORDER BY ts_ms") else { return Vec::new() };
+    st.query_map(params![since.max(s.snipe.c.real_since), since.max(s.snipe.c.paper_since)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<Ms>>(2)?)))
+        .map(|it| {
+            it.filter_map(|x| x.ok())
+                .filter_map(|(d, real, cl)| {
+                    let mut v: Value = serde_json::from_str(&d).ok()?;
+                    v["real"] = json!(real != 0);
+                    v["closed_ms"] = json!(cl);
+                    Some(v)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[derive(Default, Clone, Copy)]
+struct Tally {
+    closed: usize,
+    wins: usize,
+    pnl: f64,
+    staked: f64,
+    open: usize,
+    win_sum: f64,
+    loss_sum: f64,
+}
+
+fn tally<'a>(rows: impl Iterator<Item = &'a Value>) -> Tally {
+    let mut t = Tally::default();
+    for v in rows {
+        match v["pnl"].as_f64().filter(|_| v["closed_ms"].is_i64()) {
+            Some(p) => {
+                t.closed += 1;
+                t.pnl += p;
+                t.staked += v["cost"].as_f64().unwrap_or(0.0);
+                if p > 0.0 {
+                    t.wins += 1;
+                    t.win_sum += p;
+                } else {
+                    t.loss_sum += p;
+                }
+            }
+            None => t.open += 1,
+        }
+    }
+    t
+}
+
+impl Tally {
+    /// "+$3.20 · 5 trades · 4 won · 1 open"
+    fn line(&self) -> String {
+        if self.closed + self.open == 0 {
+            return "no trades".into();
+        }
+        let mut t = format!("<b>{}</b> · {} trades · {} won", money_s(self.pnl), self.closed, self.wins);
+        if self.open > 0 {
+            t.push_str(&format!(" · {} open", self.open));
+        }
+        t
+    }
+    fn roi(&self) -> String {
+        if self.staked > 0.0 { format!("{:+.1}% per $ staked", self.pnl / self.staked * 100.0) } else { "-".into() }
+    }
+}
+
+/// Midnight (the messages' clock) of the day `ms` falls in.
+fn day_start(ms: Ms) -> Ms {
+    let (d, _) = local(ms);
+    ms - ms.rem_euclid(1000) - ((d.hour() as Ms * 60 + d.minute() as Ms) * 60 + d.second() as Ms) * 1000
+}
+
+/// The trading window now: (open now, when it next opens or closes).
+fn window_now(now: Ms) -> (bool, Option<Ms>) {
+    let Some([a, b]) = crate::bots::settings().snipe.hours() else { return (true, None) };
+    let day = now - now.rem_euclid(86_400_000);
+    let h = |x: u8| day + x as Ms * 3_600_000;
+    let inside = if a < b { now >= h(a) && now < h(b) } else { now >= h(a) || now < h(b) };
+    let next = if inside {
+        if a < b || now < h(b) { h(b) } else { h(b) + 86_400_000 }
+    } else if now < h(a) {
+        h(a)
+    } else {
+        h(a) + 86_400_000
+    };
+    (inside, Some(next))
+}
+
+fn window_text() -> String {
+    let now = now_ms();
+    match (crate::bots::settings().snipe.hours(), window_now(now)) {
+        (Some([a, b]), (open, Some(next))) => {
+            let day = now - now.rem_euclid(86_400_000);
+            let span = format!("{} to {}", hhmm(day + a as Ms * 3_600_000), hhmm(day + b as Ms * 3_600_000));
+            if open { format!("🕐 <b>Trading now</b> · closes {} ({} left)\nEvery day {span}", hhmm(next), held(next - now)) } else { format!("🕐 <b>Closed</b> · opens {} (in {})\nEvery day {span}", hhmm(next), held(next - now)) }
+        }
+        _ => "🕐 Trades all day.".into(),
+    }
+}
+
+/// Signals the bot checked since `since`: (all, bought).
+fn signals_since(app: &App, since: Ms) -> (i64, i64) {
+    crate::store::open_ro(&app.db_path)
+        .ok()
+        .and_then(|c| c.query_row("SELECT COUNT(*), COALESCE(SUM(result = 'entered'), 0) FROM bot_signals WHERE ts_ms >= ?1", [since], |r| Ok((r.get(0)?, r.get(1)?))).ok())
+        .unwrap_or((0, 0))
+}
+
+fn twins_line(f: &Value) -> Option<String> {
+    let n = f["twin_pairs"].as_u64().unwrap_or(0);
+    let gap = f["twin_gap"].as_f64()?;
+    Some(format!("👥 Real vs paper twins: {n} pair{} · real {:+.1} pts", if n == 1 { "" } else { "s" }, gap * 100.0))
+}
+
+/// The update sent every hour of a real run (and the /now answer).
+fn digest_text(app: &App, title: &str) -> String {
+    let s = crate::bots::settings();
+    let now = now_ms();
+    let mut t = format!("📊 <b>{title}</b> · {}\n{}\n{}", hhmm(now), wallet_block(app, true), wallet_block(app, false));
+    let (all, bought) = signals_since(app, now - 3_600_000);
+    t.push_str(&format!("\n📡 Last hour: {all} moves checked · {bought} bought"));
+    if let Some(f) = crate::bots::run_guard_facts(app) {
+        if let Some(l) = twins_line(&f) {
+            t.push_str(&format!("\n{l}"));
+        }
+        if let Some(r) = &s.run {
+            t.push_str(&format!("\n⏱ Run ends {} · stops at −{} (now {})", hhmm(r.end_ms), dollars(f["loss_limit"].as_f64().unwrap_or(0.0)), money_s(f["pnl"].as_f64().unwrap_or(0.0))));
+        }
+    } else if s.snipe.c.real {
+        t.push_str("\n💵 Real money is on (no end time).");
+    }
+    t
+}
+
+fn run_started_text(app: &App, r: &crate::bots::Run) -> String {
+    let s = crate::bots::settings();
+    let now = now_ms();
+    let (open, next) = window_now(now);
+    let when = match (open, next) {
+        (true, Some(n)) => format!("Trading now until {}", hhmm(n.min(r.end_ms))),
+        (false, Some(n)) => format!("Trades from {}", hhmm(n)),
+        _ => "Trades all day".into(),
+    };
     format!(
-        "<b>Test run</b> · {}\n{} → {}\nResult {} on ${:.2} staked\n{} trades: {} closed, {} won, {} open\nSignals: {}",
-        if live { "running" } else { r["ended"].as_str().unwrap_or("ended") },
-        hhmm(r["start_ms"].as_i64().unwrap_or(0)), hhmm(r["end_ms"].as_i64().unwrap_or(0)),
-        money_s(r["pnl"].as_f64().unwrap_or(0.0)), r["staked"].as_f64().unwrap_or(0.0),
-        r["trades"], r["closed"], r["wins"], r["open"], esc(&sig)
+        "⏱ <b>Real run started</b>\n💵 Real wallet {} · up to {} a trade · stops at −{}\n📝 Paper wallet {} trades every move beside it\n🕐 {when} · ends {}\n\nAn update comes every hour. /safety shows the stops, /stoprun ends the run.",
+        dollars(r.bankroll), dollars(s.snipe.real_stake(r.bankroll)), dollars(s.snipe.c.daily_loss), dollars(wallet(app, false).6 + wallet(app, false).0), hhmm(r.end_ms)
     )
 }
+
+/// The summary when a real run is over, from its stored report.
+fn run_ended_text(app: &App, rep: &Value) -> String {
+    let (start, to) = (rep["start_ms"].as_i64().unwrap_or(0), rep["to"].as_i64().unwrap_or_else(now_ms));
+    let rows = snipe_rows(app, start);
+    let in_run = |v: &&Value| v["ts"].as_i64().is_some_and(|t| t >= start && t <= to);
+    let real = tally(rows.iter().filter(|v| is_real(v)).filter(in_run));
+    let paper = tally(rows.iter().filter(|v| !is_real(v)).filter(in_run));
+    let why = match rep["ended"].as_str().unwrap_or("ended") {
+        "time up" => "time is up".to_string(),
+        x => esc(x),
+    };
+    let mut t = format!("🏁 <b>Real run ended</b> · {why}\n💵 Real  {} ({})\n📝 Paper {} ({})", real.line(), real.roi(), paper.line(), paper.roi());
+    let closed = |real_side: bool| -> Vec<Value> { rows.iter().filter(|v| is_real(v) == real_side && v["closed_ms"].is_i64()).filter(in_run).cloned().collect() };
+    let gaps = crate::bots::twin_gaps(&closed(true), &closed(false));
+    if !gaps.is_empty() {
+        t.push_str(&format!("\n👥 Twins: {} pair{} · real {:+.1} pts against paper", gaps.len(), if gaps.len() == 1 { "" } else { "s" }, gaps.iter().sum::<f64>() / gaps.len() as f64 * 100.0));
+    }
+    if real.open > 0 {
+        t.push_str(&format!("\n⏳ {} real position{} still open: sold as usual.", real.open, if real.open == 1 { "" } else { "s" }));
+    }
+    t.push_str(&format!("\n💼 {}", wallet_line(app, true)));
+    t
+}
+
+// ---------------------------------------------------------------- snipe bot: command answers
+
+fn wallet_text(app: &App, real: bool) -> String {
+    let s = crate::bots::settings();
+    let (closed, open, day, n, w, open_n, money) = wallet(app, real);
+    let since = if real { s.snipe.c.real_since } else { s.snipe.c.paper_since };
+    let mut t = format!("{} <b>{} wallet</b>\nBalance <b>{}</b> ({}{})\nToday {} · {n} trades · {w} won", if real { "💵" } else { "📝" }, if real { "Real" } else { "Paper" }, dollars(money + closed), money_s(closed), if since > 0 { format!(" since {}", dmhm(since)) } else { String::new() }, money_s(day));
+    t.push_str(&if open_n > 0 { format!("\nOpen: {open_n} ({})", dollars(open)) } else { "\nNothing open".into() });
+    if real {
+        let free = crate::store::open_ro(&app.db_path).map(|c| crate::bots::real_free(&c, crate::bots::SNIPE)).unwrap_or(0.0);
+        t.push_str(&format!("\nStake {:.0}% of the wallet, at most {} · loss stop {}\nFree to trade {}", s.snipe.r_pct * 100.0, dollars(s.snipe.r_max_trade), dollars(s.snipe.c.daily_loss), dollars(free)));
+        t.push_str(&match (&s.run, s.snipe.c.real) {
+            (Some(r), _) => format!("\n⏱ Real run on until {}", hhmm(r.end_ms)),
+            (None, true) => "\nReal money is ON (no end time)".into(),
+            (None, false) => "\nReal money is off".into(),
+        });
+    } else {
+        t.push_str(&format!("\nStake {:.0}% of the balance, at most {} · wider set at most {}", s.snipe.pct * 100.0, dollars(s.snipe.c.max_trade), dollars(s.snipe.b_max_trade)));
+    }
+    t
+}
+
+fn today_text(app: &App) -> String {
+    let rows = snipe_rows(app, day_start(now_ms()));
+    let side = |real: bool, set: Option<&str>| tally(rows.iter().filter(|v| is_real(v) == real && set.is_none_or(|s| v["set"] == s)));
+    let (r, p) = (side(true, None), side(false, None));
+    let mut t = format!("📅 <b>Today</b>\n💵 Real  {}\n📝 Paper {}", r.line(), p.line());
+    if p.closed + p.open > 0 {
+        t.push_str(&format!("\n      safe set {} · wider set {}", money_s(side(false, Some("safe")).pnl), money_s(side(false, Some("wider")).pnl)));
+    }
+    let (all, _) = signals_since(app, day_start(now_ms()));
+    t.push_str(&format!("\n📡 {all} moves checked\n{}", window_text().lines().next().unwrap_or("")));
+    t
+}
+
+fn week_text(app: &App) -> String {
+    let now = now_ms();
+    let first = day_start(now) - 6 * 86_400_000;
+    let rows = snipe_rows(app, first);
+    let mut t = String::from("🗓 <b>Last 7 days</b>");
+    let (mut tr, mut tp) = (Tally::default(), Tally::default());
+    for k in 0..7 {
+        let (a, b) = (first + k * 86_400_000, first + (k + 1) * 86_400_000);
+        let of = |real: bool| tally(rows.iter().filter(|v| is_real(v) == real && v["closed_ms"].as_i64().is_some_and(|c| c >= a && c < b)));
+        let (r, p) = (of(true), of(false));
+        if r.closed + p.closed == 0 {
+            continue;
+        }
+        tr.pnl += r.pnl;
+        tr.closed += r.closed;
+        tp.pnl += p.pnl;
+        tp.closed += p.closed;
+        let (d, _) = local(a + 43_200_000);
+        t.push_str(&format!("\n{:02}/{:02}  💵 {} ({})  📝 {} ({})", d.day(), u8::from(d.month()), money_s(r.pnl), r.closed, money_s(p.pnl), p.closed));
+    }
+    if tr.closed + tp.closed == 0 {
+        return "🗓 No closed trades in the last 7 days.".into();
+    }
+    t.push_str(&format!("\n<b>Total</b>  💵 {} ({})  📝 {} ({})", money_s(tr.pnl), tr.closed, money_s(tp.pnl), tp.closed));
+    t
+}
+
+/// A signal result in plain words.
+fn sig_name(k: &str) -> String {
+    match k {
+        "entered" => "Bought",
+        "move_too_small" => "Move too small",
+        "outside_hours" => "Outside trading hours",
+        "too_few_books" | "too_few_feeds" => "Only one feed moved",
+        "consensus_did_not_move" => "The market as a whole did not move",
+        "polymarket_does_not_lag" => "Polymarket is not behind in this game",
+        "already_moved" => "Polymarket already moved",
+        "no_market_price" => "No Polymarket price",
+        "no_book_price" => "No bookmaker price",
+        "no_consensus" => "Too few bookmakers priced it",
+        "data_gap" => "Gap in the recorded prices",
+        "book_reverted" => "Bookmaker moved back",
+        "basketball" => "Live basketball (skipped)",
+        "price_too_high" => "Price above 90¢",
+        "gap_too_small" => "Expected gain too small",
+        "spread_too_wide" => "Spread too wide",
+        "price_ran" => "Price moved before the buy",
+        "no_cash" => "No free money for it",
+        "too_thin" => "Too little for sale",
+        "gone_at_match" => "Offer gone when the order matched",
+        "real_not_filled" => "Real order did not fill",
+        "real_order_failed" => "Real order failed",
+        "already_in_game" => "Real money already in this game",
+        "feed_quiet" => "Polymarket price feed went quiet",
+        "wider_set_daily_stop" => "Wider set stopped for today",
+        "after_pause" => "Right after a pause in play",
+        "price_out_of_range" => "Price too close to 0 or 100",
+        "price_above_set_limit" => "Price above the wider set's 40¢",
+        "weak_feed" => "Triggered by a weak feed",
+        "no_live_book" => "No live order book",
+        "no_offer" => "Nothing for sale",
+        "no_account_cash" => "No cash on the account",
+        "swingy_game" => "Game swings too much",
+        "gap_usual_size" => "Gap is its usual size",
+        _ => return k.replace('_', " "),
+    }
+    .to_string()
+}
+
+fn signals_text(app: &App) -> String {
+    let since = day_start(now_ms());
+    let rows: Vec<(String, i64)> = crate::store::open_ro(&app.db_path)
+        .ok()
+        .and_then(|c| {
+            let mut st = c.prepare("SELECT result, COUNT(*) FROM bot_signals WHERE ts_ms >= ?1 GROUP BY 1 ORDER BY 2 DESC").ok()?;
+            let it = st.query_map([since], |r| Ok((r.get(0)?, r.get(1)?))).ok()?;
+            Some(it.filter_map(|x| x.ok()).collect())
+        })
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return "📡 No moves checked today yet.".into();
+    }
+    let total: i64 = rows.iter().map(|x| x.1).sum();
+    let mut t = format!("📡 <b>Signals today</b> · {total} moves checked");
+    for (k, n) in rows.iter().take(12) {
+        t.push_str(&format!("\n{} {n} · {}", if k == "entered" { "🟢" } else { "▫️" }, sig_name(k)));
+    }
+    t
+}
+
+fn safety_text(app: &App) -> String {
+    let Some(f) = crate::bots::run_guard_facts(app) else {
+        let s = crate::bots::settings();
+        return format!("🛡 No real run going, so nothing to stop.\nA run stops itself after −{}, two losses in a row, too few winners, one trade losing nearly its whole stake, refused orders, or real fills clearly worse than paper.", dollars(s.snipe.c.daily_loss));
+    };
+    let l = &f["limits"];
+    let ok = |bad: bool| if bad { "⚠️" } else { "✅" };
+    let (closed, wins) = (f["closed"].as_u64().unwrap_or(0), f["wins"].as_u64().unwrap_or(0));
+    let (loss, limit) = (f["loss"].as_f64().unwrap_or(0.0), f["loss_limit"].as_f64().unwrap_or(0.0));
+    let in_row = if f["last_two_lost"] == true { 2 } else if f["last_lost"] == true { 1 } else { 0 };
+    let worst = f["worst_return"].as_f64().unwrap_or(0.0);
+    let mut t = format!("🛡 <b>Safety stops</b> · real run\n{} Lost {} of {}\n{} Losses in a row: {in_row} of 2\n{} Winners: {wins} of {closed} (needs {:.0}% once there are {})\n{} Worst trade {:.0}% (stops at −{:.0}%)\n{} Refused orders: {} of {}\n{} Buys that found nothing: {} (stops at {} if most)",
+        ok(loss >= limit * 0.5), dollars(loss), dollars(limit),
+        ok(in_row >= 1),
+        ok(closed >= 3 && (wins as f64) < 0.7 * closed as f64), l["win_share"].as_f64().unwrap_or(0.0) * 100.0, l["win_min_trades"],
+        ok(worst <= -0.5), worst * 100.0, l["one_trade_loss"].as_f64().unwrap_or(0.0) * 100.0,
+        ok(f["refused"].as_u64().unwrap_or(0) >= 1), f["refused"], l["refused"],
+        ok(f["unfilled_buys"].as_u64().unwrap_or(0) >= 3), f["unfilled_buys"], l["unfilled_buys"]);
+    t.push_str(&match f["twin_gap"].as_f64() {
+        Some(g) => format!("\n{} Real vs paper twins: {:+.1} pts over {} (stops at −{:.0})", ok(g <= -0.05), g * 100.0, f["twin_pairs"], l["twin_gap"].as_f64().unwrap_or(0.0) * 100.0),
+        None => "\n✅ Real vs paper twins: no pairs yet".into(),
+    });
+    if let Some(w) = f["would_stop"].as_str() {
+        t.push_str(&format!("\n🛑 Stopping now: {}", esc(w)));
+    }
+    t
+}
+
+fn settings_text() -> String {
+    let s = crate::bots::settings();
+    let sn = &s.snipe;
+    format!(
+        "⚙️ <b>Settings</b>\n💵 Real wallet {} · stake {:.0}%, at most {} · loss stop {}\n📝 Paper balance {} · stake {:.0}%, at most {} · most open {}\n📝 Wider set {} · stake {:.0}%, at most {} · daily stop {}\n⏳ Gives up after {} min · size by edge {}\n{}\n{}",
+        dollars(sn.c.bankroll), sn.r_pct * 100.0, dollars(sn.r_max_trade), dollars(sn.c.daily_loss),
+        dollars(sn.c.start), sn.pct * 100.0, dollars(sn.c.max_trade), dollars(sn.c.max_open),
+        if sn.b_enabled { "on" } else { "off" }, sn.b_pct * 100.0, dollars(sn.b_max_trade), dollars(sn.b_daily_loss),
+        sn.give_up_s / 60, if sn.edge_sizing { "on" } else { "off" },
+        window_text().lines().last().unwrap_or(""),
+        if s.kill { "🛑 Kill switch ON" } else if !sn.c.enabled { "Bot switched off" } else if sn.c.real { "💵 Real money ON" } else { "📝 Paper only" }
+    )
+}
+
+fn rules_text() -> String {
+    let r = crate::adaptive::active_rules();
+    let b = crate::adaptive::policy_b();
+    let (fs, fw) = (crate::adaptive::Flt::live(), crate::adaptive::Flt::wider());
+    format!(
+        "📐 <b>When it buys</b>\nA bookmaker moves and Polymarket has not followed yet.\n\n<b>Safe set</b> (real and paper)\n• {}+ independent feeds moved {:.0}+ points\n• Polymarket made at most {:.0}% of the move\n• Polymarket followed {:.0}%+ of earlier jumps in this game\n• expected gain {}+ · spread up to {}\n• price up to 90¢ · no live basketball\n\n<b>Wider set</b> (paper only)\n• {}+ feeds moved {:.0}+ points · followed {:.0}%+ of earlier jumps\n• expected gain {}+ · price up to 40¢\n\n<b>When it sells</b>\nWhen Polymarket has caught up, or after {} min.",
+        r.min_books.max(fs.fams.unwrap_or(1)), r.min_move * 100.0, r.max_followed.min(crate::adaptive::SAFE_MAX_FOLLOWED) * 100.0, fs.follow.unwrap_or(0.0) * 100.0, cents(r.min_edge), cents(r.max_spread),
+        b.min_books.max(fw.fams.unwrap_or(1)), b.min_move * 100.0, fw.follow.unwrap_or(0.0) * 100.0, cents(b.min_edge),
+        (if crate::bots::settings().snipe.give_up_s > 0 { crate::bots::settings().snipe.give_up_s } else { r.give_up_s }) / 60
+    )
+}
+
+fn stats_text(app: &App) -> String {
+    let rows = snipe_rows(app, 0);
+    let mut t = String::from("📈 <b>Results so far</b> (each wallet since its start)");
+    for real in [true, false] {
+        let x = tally(rows.iter().filter(|v| is_real(v) == real));
+        if x.closed == 0 {
+            t.push_str(&format!("\n{} no closed trades", tag(real)));
+            continue;
+        }
+        let losses = x.closed - x.wins;
+        t.push_str(&format!(
+            "\n{} {}\n      {:.0}% won · {}\n      average win {} · average loss {}",
+            tag(real), x.line(), x.wins as f64 / x.closed as f64 * 100.0, x.roi(),
+            if x.wins > 0 { money_s(x.win_sum / x.wins as f64) } else { "-".into() }, if losses > 0 { money_s(x.loss_sum / losses as f64) } else { "-".into() }
+        ));
+    }
+    t
+}
+
+fn sports_text(app: &App) -> String {
+    let rows = snipe_rows(app, 0);
+    let mut by: std::collections::BTreeMap<String, (Tally, Tally)> = Default::default();
+    for v in rows.iter().filter(|v| v["closed_ms"].is_i64()) {
+        let e = by.entry(v["sport"].as_str().unwrap_or("other").to_string()).or_default();
+        let x = if is_real(v) { &mut e.0 } else { &mut e.1 };
+        x.closed += 1;
+        x.pnl += v["pnl"].as_f64().unwrap_or(0.0);
+    }
+    if by.is_empty() {
+        return "🏟 No closed trades yet.".into();
+    }
+    let mut v: Vec<_> = by.into_iter().collect();
+    v.sort_by(|a, b| (b.1 .0.pnl + b.1 .1.pnl).partial_cmp(&(a.1 .0.pnl + a.1 .1.pnl)).unwrap_or(std::cmp::Ordering::Equal));
+    let mut t = String::from("🏟 <b>By sport</b>");
+    for (s, (r, p)) in v {
+        t.push_str(&format!("\n{}  💵 {} ({})  📝 {} ({})", esc(&s), money_s(r.pnl), r.closed, money_s(p.pnl), p.closed));
+    }
+    t
+}
+
+fn extremes_text(app: &App, best: bool) -> String {
+    let mut rows: Vec<Value> = snipe_rows(app, 0).into_iter().filter(|v| v["closed_ms"].is_i64()).collect();
+    if rows.is_empty() {
+        return "No closed trades yet.".into();
+    }
+    rows.sort_by(|a, b| a["pnl"].as_f64().unwrap_or(0.0).partial_cmp(&b["pnl"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+    if best {
+        rows.reverse();
+    }
+    let mut t = format!("{} <b>{} trades</b>", if best { "🏆" } else { "🥶" }, if best { "Best" } else { "Worst" });
+    for v in rows.iter().take(5) {
+        t.push_str(&format!("\n{}", sell_text(v, true)));
+    }
+    t
+}
+
+fn last_text(app: &App) -> String {
+    let rows = snipe_rows(app, 0);
+    match rows.iter().filter(|v| v["closed_ms"].is_i64()).max_by_key(|v| v["closed_ms"].as_i64()) {
+        Some(v) => format!("{}\n💼 {}", sell_text(v, false), wallet_line(app, is_real(v))),
+        None => "No closed trades yet.".into(),
+    }
+}
+
+fn twins_text(app: &App) -> String {
+    let since = crate::bots::settings().run.map(|r| r.start_ms).unwrap_or_else(|| day_start(now_ms()));
+    let rows = snipe_rows(app, since);
+    let ret = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
+    let mut t = String::from("👥 <b>Real against its paper twins</b>");
+    let mut gaps = Vec::new();
+    for r in rows.iter().filter(|v| is_real(v) && v["closed_ms"].is_i64()) {
+        let Some(p) = rows.iter().find(|p| !is_real(p) && p["closed_ms"].is_i64() && p["match_id"] == r["match_id"] && p["set"] == r["set"] && (p["ts"].as_i64().unwrap_or(0) - r["ts"].as_i64().unwrap_or(0)).abs() <= 30_000) else { continue };
+        gaps.push(ret(r) - ret(p));
+        t.push_str(&format!(
+            "\n{}\n      buy {} / {} · sale {} / {} · return {:+.1}% / {:+.1}%",
+            game(r), cents(r["entry"].as_f64().unwrap_or(0.0)), cents(p["entry"].as_f64().unwrap_or(0.0)), cents(r["exit"].as_f64().unwrap_or(0.0)), cents(p["exit"].as_f64().unwrap_or(0.0)), ret(r) * 100.0, ret(p) * 100.0
+        ));
+    }
+    if gaps.is_empty() {
+        return "👥 No real trade with a closed paper twin yet.".into();
+    }
+    t.push_str(&format!("\n<b>Average</b>: real {:+.1} pts against paper over {} pair{} (real / paper above)", gaps.iter().sum::<f64>() / gaps.len() as f64 * 100.0, gaps.len(), if gaps.len() == 1 { "" } else { "s" }));
+    t
+}
+
+/// Live trades against the replay over the last 24 hours (both wallets).
+fn compare_text(app: &App) -> String {
+    let s = crate::bots::settings();
+    let cfg = s.run.as_ref().map(|r| r.prev.clone()).unwrap_or(s.snipe.clone());
+    let mut t = String::from("🔬 <b>Live against the replay</b> · last 24 h");
+    for real in [true, false] {
+        let p = crate::adaptive::parity(&app.db_path, &cfg, real, now_ms() - 86_400_000);
+        if p["building"] == true {
+            return "🔬 The replay is still loading after a restart. Try again in a few minutes.".into();
+        }
+        let x = &p["summary"];
+        t.push_str(&format!("\n{} {} live · {} replay · {} the same trade", tag(real), x["live_trades"], x["replay_trades"], x["both"]));
+        if x["both"].as_u64().unwrap_or(0) > 0 {
+            let c = |k: &str| x[k].as_f64().map(|v| format!("{:+.1}¢", v * 100.0)).unwrap_or("-".into());
+            t.push_str(&format!("\n      live minus replay: buy {} · sale {} · return {}", c("entry_diff"), c("exit_diff"), x["return_diff"].as_f64().map(|v| format!("{:+.1} pts", v * 100.0)).unwrap_or("-".into())));
+        }
+    }
+    t.push_str("\n<i>The same trade on both sides, at close prices, means the replay can be trusted.</i>");
+    t
+}
+
+fn health_text(app: &App) -> String {
+    let now = now_ms();
+    let quiet = now - crate::venue::alive_ms(crate::venue::V::Pm);
+    let c = crate::store::open_ro(&app.db_path).ok();
+    let q = |sql: &str| -> Option<Ms> { c.as_ref()?.query_row(sql, [], |r| r.get::<_, Option<Ms>>(0)).ok().flatten() };
+    let last_quote = q("SELECT MAX(ts_ms) FROM pm_quotes WHERE id > (SELECT MAX(id) - 500 FROM pm_quotes)");
+    let last_book = q("SELECT MAX(ts_ms) FROM changes WHERE id > (SELECT MAX(id) - 500 FROM changes)");
+    let ad = crate::adaptive::view(app);
+    let ago = |t: Option<Ms>| t.map(|t| format!("{} ago", held(now - t))).unwrap_or("never".into());
+    let ok = |good: bool| if good { "✅" } else { "⚠️" };
+    let s = crate::bots::settings();
+    format!(
+        "🩺 <b>Health</b>\n{} Polymarket feed: last message {} ago\n{} Polymarket prices saved {}\n{} Bookmaker prices saved {}\n{} Replay: {}\n{} Bot: {}\n{}",
+        ok(quiet < 15_000), held(quiet),
+        ok(last_quote.is_some_and(|t| now - t < 60_000)), ago(last_quote),
+        ok(last_book.is_some_and(|t| now - t < 60_000)), ago(last_book),
+        ok(ad["status"] == "ready"), esc(ad["status"].as_str().filter(|x| !x.is_empty()).unwrap_or("loading")),
+        ok(!s.kill && s.snipe.c.enabled), if s.kill { "kill switch on" } else if !s.snipe.c.enabled { "switched off" } else if s.snipe.c.real { "trading real money" } else { "trading paper" },
+        window_text().lines().next().unwrap_or("")
+    )
+}
+
+fn timing_text() -> String {
+    let t = crate::timing::get();
+    format!(
+        "⏲ <b>Order timing</b> (measured on {} real orders)\nSigning {} ms · reply {} ms\nMatching delay on live games {:.2} s\nOrder leaves {:.1} s after the bookmaker move\nShares can be sold {:.1} s after a buy",
+        t.n_pm, t.pm_prep_ms, t.pm_order_ms, t.pm_live_delay_ms as f64 / 1000.0, (1_500 + t.pm_send_lag_ms) as f64 / 1000.0, t.pm_settle_ms as f64 / 1000.0
+    )
+}
+
+fn replay_text() -> String {
+    let Some((x, at)) = crate::bots::sim_cached("snipe-wf").or_else(|| crate::bots::sim_cached("snipe-plan")) else { return "🧪 No replay computed yet. Open the Replay tab on the Bots page once.".into() };
+    let n = x["trades"].as_f64().unwrap_or(0.0);
+    format!(
+        "🧪 <b>Replay of this setup</b> · {:.1} days of data\n<b>{}</b> on {} · {} trades · {:.0}% won\n{:+.1}% per $ staked · worst drop {}\n<i>Computed {}. Past data, picked rules: an upper bound, not a forecast.</i>",
+        x["days"].as_f64().unwrap_or(0.0), money_s(x["pnl"].as_f64().unwrap_or(0.0)), dollars(x["start"].as_f64().unwrap_or(0.0)), x["trades"],
+        if n > 0.0 { x["wins"].as_f64().unwrap_or(0.0) / n * 100.0 } else { 0.0 }, x["roi"].as_f64().unwrap_or(0.0) * 100.0, dollars(x["max_drawdown"].as_f64().unwrap_or(0.0)), dmhm(at)
+    )
+}
+
+async fn account_text(app: &App) -> String {
+    let s = crate::bots::settings();
+    let pm = crate::pmacct::load(&app.db_path);
+    let cash = crate::exec::pm_cash(&crate::books::http_client(), &pm).await;
+    let (closed, open, ..) = wallet(app, true);
+    match cash {
+        Ok(c) => format!(
+            "🏦 <b>Polymarket account</b>\nCash {}\nBot's real wallet {} ({} in open trades)\nReserve never touched {}\nThe real wallet can be at most {}",
+            dollars(c), dollars(s.snipe.c.bankroll + closed), dollars(open), dollars(s.pm_reserve), dollars((c - s.pm_reserve).max(0.0))
+        ),
+        Err(e) => format!("🏦 Could not read the Polymarket balance: {}", esc(&format!("{e:#}").chars().take(160).collect::<String>())),
+    }
+}
+
+fn alerts_text() -> String {
+    let b = cfg().bot_alerts;
+    let on = |x: bool| if x { "on" } else { "off" };
+    format!("🔔 <b>Messages</b>\nBuys {} · sales {} · charts {} · run updates {}\nChange with /buys, /sells, /charts, /updates followed by on or off.", on(b.buys), on(b.sells), on(b.charts), on(b.run_updates))
+}
+
+/// "/buys off" and the like: Some(answer) when the command is one of the switches.
+fn toggle(cmd: &str, arg: &str) -> Option<String> {
+    let on = match arg.trim().to_lowercase().as_str() {
+        "on" | "1" | "yes" => true,
+        "off" | "0" | "no" => false,
+        _ => return matches!(cmd, "/buys" | "/sells" | "/charts" | "/updates").then(|| format!("Use: {cmd} on  or  {cmd} off\n\n{}", alerts_text())),
+    };
+    {
+        let mut g = CFG.lock();
+        match cmd {
+            "/buys" => g.bot_alerts.buys = on,
+            "/sells" => g.bot_alerts.sells = on,
+            "/charts" => g.bot_alerts.charts = on,
+            "/updates" => g.bot_alerts.run_updates = on,
+            _ => return None,
+        }
+        save(&g);
+    }
+    Some(alerts_text())
+}
+
+const HELP: &str = "<b>Swifteye snipe bot</b>\n\n<b>Now</b>\n/status · /now · /open · /today · /hours\n\n<b>Wallets</b>\n/real · /paper · /account · /balance · /balancepaper\n\n<b>Results</b>\n/trades · /last · /chart · /best · /worst · /week · /stats · /sports\n\n<b>Real run</b>\n/run · /safety · /twins · /compare · /extend 2h · /stoprun · /realoff\n\n<b>How it works</b>\n/rules · /settings · /signals · /replay · /projected 24h · /timing · /log · /health\n\n<b>Controls</b>\n/kill · /unkill · /pause · /resume · /alerts\n/buys, /sells, /charts, /updates on|off\n\n<i>Starting real money and raising its amount is only on the Bots page.</i>";
+
 
 fn arb_text(a: &crate::arb::Arb) -> String {
     let legs = a
@@ -1407,12 +2099,33 @@ pub fn preview(app: &App, cmd: &str) -> Option<String> {
     let (cmd, arg) = cmd.trim().split_once(' ').map(|(a, b)| (a, b.trim())).unwrap_or((cmd.trim(), ""));
     Some(match cmd {
         "/status" => bot_status(app),
-        "/open" => trade_list(app, true, 10),
-        "/trades" => trade_list(app, false, 10),
+        "/now" => digest_text(app, "Update"),
+        "/open" => trade_list(app, true, 20),
+        "/trades" => trade_list(app, false, arg.parse::<i64>().unwrap_or(10).clamp(1, 30)),
+        "/last" => last_text(app),
+        "/best" => extremes_text(app, true),
+        "/worst" => extremes_text(app, false),
+        "/today" => today_text(app),
+        "/week" => week_text(app),
+        "/stats" => stats_text(app),
+        "/sports" => sports_text(app),
+        "/real" => wallet_text(app, true),
+        "/paper" => wallet_text(app, false),
         "/run" => run_text(app),
+        "/safety" => safety_text(app),
+        "/twins" => twins_text(app),
+        "/compare" => compare_text(app),
+        "/rules" => rules_text(),
+        "/settings" => settings_text(),
+        "/signals" => signals_text(app),
+        "/hours" => window_text(),
+        "/replay" => replay_text(),
+        "/timing" => timing_text(),
+        "/health" => health_text(app),
+        "/alerts" => alerts_text(),
         "/projected" => projected(app, if arg.is_empty() { "24h" } else { arg }),
         "/log" => real_log(app, arg.parse::<i64>().unwrap_or(20).clamp(1, 60)),
-        "/help" => HELP.into(),
+        "/help" | "/commands" => HELP.into(),
         _ => return None,
     })
 }
@@ -1475,3 +2188,41 @@ fn standings(app: &App) -> String {
     out.push_str(&format!("\nArbitrage: {} taken, ${:.2} locked", a["trades"].as_u64().unwrap_or(0), a["locked_profit"].as_f64().unwrap_or(0.0)));
     out
 }
+
+#[cfg(test)]
+mod bot_text_tests {
+    use super::*;
+
+    #[test]
+    fn money_and_time_words() {
+        assert_eq!(dollars(1084.2), "$1,084.20");
+        assert_eq!(dollars(12.0), "$12.00");
+        assert_eq!((money_s(1668.07), money_s(-5.67), money_s(0.0)), ("+$1,668.07".to_string(), "-$5.67".to_string(), "+$0.00".to_string()));
+        assert_eq!(dollars(-0.999), "-$1.00");
+        assert_eq!(dollars(1_234_567.891), "$1,234,567.89");
+        assert_eq!((cents(0.62), cents(0.625), cents(0.0)), ("62¢".to_string(), "62.5¢".to_string(), "0¢".to_string()));
+        assert_eq!((held(45_000), held(185_000), held(3_900_000)), ("45 s".to_string(), "3 min".to_string(), "1 h 05 min".to_string()));
+    }
+
+    #[test]
+    fn trade_texts() {
+        let v = json!({"home": "A <b>", "away": "B", "outcome": "home", "dir": -1.0, "contracts": 19.0, "entry": 0.62, "cost": 12.0, "exit": 0.75, "pnl": 2.4, "reason": "caught up",
+            "real": true, "set": "safe", "books": [2, 2], "edge": 0.09, "pre_mid": 0.4, "move": 0.14, "spread": 0.02, "catch": 1.0, "ts": 1_000_000, "give_up_s": 900, "exit_ts": 1_060_000, "closed_ms": 1_060_000});
+        let b = buy_text(&v, false);
+        assert!(b.contains("Bought") && b.contains("Real") && b.contains("A &lt;b&gt; v B") && b.contains("Against A") && b.contains("19 shares at 62¢") && b.contains("$12.00") && b.contains("Sells at"));
+        let s = sell_text(&v, false);
+        assert!(s.contains("Sold +$2.40") && s.contains("62¢ → 75¢") && s.contains("held 60 s") && s.contains("caught up"));
+        assert!(!buy_text(&v, true).contains('\n') && !sell_text(&v, true).contains('\n'));
+        let t = tally([v.clone(), json!({"cost": 5.0, "real": true})].iter());
+        assert_eq!((t.closed, t.wins, t.open), (1, 1, 1));
+        assert!(t.line().contains("+$2.40") && t.line().contains("1 open"));
+    }
+
+    #[test]
+    fn every_listed_command_is_in_the_help() {
+        for c in ["/status", "/now", "/open", "/today", "/hours", "/real", "/paper", "/account", "/balance", "/trades", "/last", "/chart", "/best", "/worst", "/week", "/stats", "/sports", "/run", "/safety", "/twins", "/compare", "/extend", "/stoprun", "/realoff", "/rules", "/settings", "/signals", "/replay", "/projected", "/timing", "/log", "/health", "/kill", "/unkill", "/pause", "/resume", "/alerts", "/buys", "/sells", "/charts", "/updates"] {
+            assert!(HELP.contains(c), "{c} missing from the help");
+        }
+    }
+}
+
