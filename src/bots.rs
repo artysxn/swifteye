@@ -265,6 +265,11 @@ pub fn snipe_game_room(c: &Connection, match_id: i64, real: bool) -> f64 {
     (settings().game_cap - open).max(0.0)
 }
 
+/// Open real snipe positions in a game.
+pub fn real_open_in_game(c: &Connection, match_id: i64) -> i64 {
+    c.query_row("SELECT COUNT(*) FROM bot_trades WHERE match_id = ?1 AND closed_ms IS NULL AND bot = ?2 AND real = 1", params![match_id, SNIPE], |r| r.get(0)).unwrap_or(0)
+}
+
 /// Start of today (UTC), ms.
 fn today() -> Ms {
     let now = now_ms();

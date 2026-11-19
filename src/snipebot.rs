@@ -42,6 +42,12 @@ const MIN_JUMP: f64 = 0.04;
 const SAME_MOVE_MS: Ms = 120_000;
 /// Time for the store to have written what the stream already delivered.
 const STORE_LAG_MS: Ms = 400;
+/// No trade when Polymarket's price socket has been silent this long: the book in memory and the
+/// recorded quotes may be old, and an old quote looks exactly like a market that lags.
+const FEED_QUIET_MS: Ms = 15_000;
+/// After a real buy that reported no fill (or an error), wait this long and look at the account:
+/// a reply can be lost or the wait for the matching delay can run out while the order still fills.
+const RECHECK_MS: u64 = 4_000;
 
 #[derive(Default)]
 struct State {
@@ -430,6 +436,11 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     // r_max_trade), paper the paper wallet's. During a test run the paper side reads the copy
     // kept for after the run (the same numbers but for the Real switch).
     let sn = if real { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
+    let quiet = now_ms() - venue::alive_ms(venue::V::Pm);
+    if quiet > FEED_QUIET_MS {
+        note(bot, "feed_quiet", json!({"match_id": f.m, "outcome": f.o.as_str(), "quiet_ms": quiet}));
+        return;
+    }
     let Some((token, asks, _, fee)) = our_book(f.m, f.o, f.dir) else {
         note(bot, "no_live_book", f.json());
         return;
@@ -445,6 +456,12 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     // Stake: share of this bot's own balance (x edge), within its caps, cash and the game cap.
     let (cash, balance, open, room) = {
         let Ok(c) = crate::store::open_ro(&app.db_path) else { return };
+        // Real money: one open position a game. A second move in the same game is the same bet
+        // again, and three of them would be most of a small wallet riding on one match.
+        if real && bots::real_open_in_game(&c, f.m) > 0 {
+            note(bot, "already_in_game", f.json());
+            return;
+        }
         let (closed, open, _, _, _) = bots::snipe_ledger(&c, bot, real);
         let bal = sn.c.start + closed;
         // Real: this bot's own bankroll (not the whole account); paper: its paper cash.
@@ -475,6 +492,12 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     if real {
         let pm = crate::pmacct::load(&app.db_path);
         let http = crate::books::http_client();
+        // What the account holds of this token before the order (read on the side, so the order
+        // is not delayed): the base for finding a fill the reply did not report.
+        let before = {
+            let (h, p, t) = (http.clone(), pm.clone(), token.clone());
+            tokio::spawn(async move { crate::exec::pm_shares(&h, &p, &t).await.ok() })
+        };
         // Same account as the arbitrage bot: one order at a time, only with free cash.
         let mut wallet = match crate::exec::claim(venue::V::Pm, &app.db_path, &http, n * max_px * 1.02).await {
             Ok(w) => w,
@@ -496,15 +519,33 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
                 n = (x.filled * 100.0 + 1e-6).floor() / 100.0;
                 avg = x.avg;
             }
-            Ok(x) => {
-                bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x, "error": "nothing filled"}));
-                note(bot, "real_not_filled", f.json());
-                return;
-            }
-            Err(e) => {
-                bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "error": format!("{e:#}")}));
-                note(bot, "real_order_failed", f.json());
-                return;
+            other => {
+                let (why, err) = match &other {
+                    Ok(x) => {
+                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x, "error": "nothing filled"}));
+                        ("real_not_filled", String::new())
+                    }
+                    Err(e) => {
+                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "error": format!("{e:#}")}));
+                        ("real_order_failed", format!("{e:#}"))
+                    }
+                };
+                // Did it fill after all? Shares on the account now, less what was there before.
+                tokio::time::sleep(Duration::from_millis(RECHECK_MS)).await;
+                let base = before.await.ok().flatten();
+                let have = crate::exec::pm_shares(&http, &pm, &token).await.ok();
+                let extra = base.zip(have).map(|(b, h)| ((h - b) * 100.0 + 1e-6).floor() / 100.0).unwrap_or(0.0);
+                if extra < 1.0 {
+                    note(bot, why, f.json());
+                    return;
+                }
+                // The order did buy: track it like any trade so it is watched and sold. The price
+                // is not known from the reply: the limit is the most it can have cost.
+                n = extra;
+                avg = max_px;
+                bots::log_order(app, bot, "polymarket", true, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "recovered": true, "after": why, "error_was": err}));
+                bots::event(format!("{bot}: a real buy reported as not filled DID fill ({n} shares of {} {}): tracked and will be sold as usual", f.home, f.o.as_str()));
+                let _ = crate::telegram::send("bot", &format!("⚠️ A real buy was reported as not filled but the account got {n} shares ({} {}). The bot is tracking it and will sell it as usual.", f.home, f.o.as_str())).await;
             }
         }
     } else {

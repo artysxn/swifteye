@@ -37,6 +37,7 @@ const SIG = {
   price_above_set_limit: 'Price above the wider set\'s 40¢', gap_too_small: 'Expected gain too small', spread_too_wide: 'Spread too wide', price_out_of_range: 'Price too close to 0 or 100',
   price_ran: 'Price moved before the buy', no_cash: 'No free money for it', too_thin: 'Too little for sale', after_pause: 'Right after a pause in play', weak_feed: 'Triggered by a weak feed',
   wider_set_daily_stop: 'Wider set stopped for today', real_not_filled: 'Order did not fill', real_order_failed: 'Order failed', no_account_cash: 'No cash on the account',
+  already_in_game: 'Real money already in this game', feed_quiet: 'Polymarket price feed went quiet',
   gone_at_match: 'Offer gone when the order matched', no_live_book: 'No live order book', no_offer: 'Nothing for sale', gap_usual_size: 'Gap is its usual size', swingy_game: 'Game swings too much',
 };
 const sigName = (k) => SIG[k] || k.replace(/_/g, ' ');
