@@ -48,14 +48,14 @@
 //! simulation. A trade's dollars are priced from it at any stake.
 
 use crate::model::*;
-use crate::rank::{RankEvent, KALSHI};
+use crate::rank::KALSHI;
 use crate::snipe::{self, Quotes, Q};
 use crate::App;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -87,15 +87,15 @@ const CAP: f64 = 0.02;
 pub const EVERY_MS: Ms = 4 * 3_600_000;
 const FIRST_AFTER_MS: Ms = 8 * 3_600_000;
 const EXIT_HORIZON_MS: Ms = 35 * 60_000;
-const REBUILD_MS: Ms = 5 * 60_000;
+const REBUILD_MS: Ms = 30 * 60_000;
 const PAUSE_WINDOW_MS: Ms = 120_000;
 
 // ---- choosing
 /// Method version: stored with every run; a change recomputes the history.
-const VERSION: u32 = 16;
+const VERSION: u32 = 17;
 /// Version of the candidate measurements on disk (bump only when `Cand` or its measuring changes;
 /// rule or filter changes re-pick the rules but keep the measurements).
-const CAND_VERSION: u32 = 15;
+const CAND_VERSION: u32 = 16;
 const MIN_N: usize = 30;
 /// Standard errors subtracted from the average return.
 const SE_K: f64 = 2.0;
@@ -146,6 +146,15 @@ pub struct Policy {
 /// The safe set never buys when Polymarket has already made more than this share of the move,
 /// whatever the rule-picker chose for a window (it once allowed 25%: the replay's total loss).
 pub const SAFE_MAX_FOLLOWED: f64 = 0.10;
+/// The smallest bookmaker move the replay measures and the live bot takes. Every bookmaker update
+/// is a trigger (hundreds a minute): smaller moves tested worse and measuring them all takes hours.
+pub const LIVE_MIN_MOVE: f64 = 0.07;
+/// Bookmakers moving the same way within this long of the first one are one move.
+pub const MOVE_MS: Ms = 90_000;
+/// A bookmaker update this far from that bookmaker's previous price is a trigger (snipebot).
+const TRIGGER_JUMP: f64 = 0.04;
+/// How long after a sale with no book the result is looked for.
+const AFTER_BOOK_MS: Ms = 10 * 60_000;
 
 /// The wider set's rules of the move: 2+ feeds, 7-point move, Polymarket followed 10% at most,
 /// 2c expected gain, 4c spread, sell on the full catch-up, give up after 15 minutes.
@@ -223,8 +232,25 @@ impl Default for Bank {
 }
 
 /// The current paper balance settings.
+/// The rules to trade are known: pinned in the settings, or the picker's choice has been loaded
+/// from disk (20 s after start; much longer after a method change, when it is recomputed).
+pub fn rules_ready() -> bool {
+    crate::bots::settings().snipe.pin_rules || ST.lock().runs.iter().any(|r| r.base == PM)
+}
+
+/// The rules tested on the live path on 17-19 Nov 2026 (tools/live_eval.py and the replay agree
+/// on them trade for trade): 10+ point move, Polymarket followed at most 5%, 4c+ expected gain,
+/// spread at most 4c, sell at full catch-up, no buy after a pause. The give-up time comes from
+/// the settings.
+pub fn pinned_rules() -> Policy {
+    Policy { min_books: 1, max_followed: 0.05, min_edge: 0.04, max_spread: 0.04, min_move: 0.10, catch: 1.0, give_up_s: 300, skip_after_pause: true, walk_book: true }
+}
+
 /// The Polymarket rules the bot trades now: the last pick, else the defaults.
 pub fn active_rules() -> Policy {
+    if crate::bots::settings().snipe.pin_rules {
+        return pinned_rules();
+    }
     ST.lock().runs.iter().filter(|r| r.base == PM).last().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(PM)))
 }
 
@@ -311,6 +337,19 @@ pub struct Flt {
     pub skip_feeds: bool,
     /// Trade only between these UTC hours [from, to).
     pub hours: Option<[u8; 2]>,
+    /// Skip when Polymarket already sat this far from the bookmakers' consensus before the move,
+    /// on the side bought (see `gap_before`). The trade assumes the two agreed and the bookmakers
+    /// moved first; a wide gap beforehand means Polymarket moved first and the books are the
+    /// slow side (19 Nov 02:49 UTC, Azuma Visaya: 25 points apart, then -63%).
+    #[serde(default)]
+    pub gap: Option<f64>,
+}
+
+/// How far the bookmakers' consensus stood above Polymarket's price BEFORE the move, in the
+/// direction bought (positive = Polymarket was already under the books for the side we buy).
+/// None when the Polymarket price before the move is not known.
+pub fn gap_before(cx: &crate::consensus::Ctx, dir: f64, pre_mid: f64) -> Option<f64> {
+    (pre_mid > 0.0).then(|| (cx.cons_now - cx.cons_move * dir - pre_mid) * dir)
 }
 
 impl Flt {
@@ -318,7 +357,7 @@ impl Flt {
     /// gap moved 3+ pts, Polymarket followed 30%+ of earlier jumps in the game, <= 90c): 53
     /// trades in 1.8 days, all won, +29%/$, median hold 58 s.
     pub fn picked() -> Flt {
-        Flt { cap: true, fams: Some(2), cons: Some(0.03), follow: Some(0.3), no_basketball: true, ..Default::default() }
+        Flt { cap: true, fams: Some(2), cons: Some(0.03), follow: Some(0.3), no_basketball: true, gap: Some(0.10), ..Default::default() }
     }
     /// The safe set as the live bot runs it: `picked` inside the trading hours of the settings.
     pub fn live() -> Flt {
@@ -328,14 +367,14 @@ impl Flt {
     /// of earlier jumps, bought at 40c or less, not triggered by the feeds that lost there.
     /// Rules of the move itself: `policy_b`.
     pub fn wider() -> Flt {
-        Flt { cap: true, fams: Some(2), follow: Some(0.2), no_basketball: true, max_px: Some(0.40), skip_feeds: true, hours: crate::bots::settings().snipe.hours(), ..Default::default() }
+        Flt { cap: true, fams: Some(2), follow: Some(0.2), no_basketball: true, max_px: Some(0.40), skip_feeds: true, hours: crate::bots::settings().snipe.hours(), gap: Some(0.10), ..Default::default() }
     }
     fn keep(&self, c: &Cand) -> bool {
         // The price the live bot tests: the offer plus its 1c margin.
-        self.check(&c.sport, &c.trigger, c.tf, c.px - SLIP_BUY + SLIP, c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx).is_none()
+        self.check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)).is_none()
     }
     /// Why a move fails the filters (None = passes). `tr` = [pm_tr, b_tr5, b_tr10, b_rng].
-    pub fn check(&self, sport: &str, trigger: &str, t: Ms, px: f64, bm: [f64; 2], tr: [f64; 4], cx: &crate::consensus::Ctx) -> Option<&'static str> {
+    pub fn check(&self, sport: &str, trigger: &str, t: Ms, px: f64, bm: [f64; 2], tr: [f64; 4], cx: &crate::consensus::Ctx, gap: Option<f64>) -> Option<&'static str> {
         let [pm_tr, b_tr5, b_tr10, b_rng] = tr;
         if let Some([a, b]) = self.hours {
             let h = (t.rem_euclid(86_400_000) / 3_600_000) as u8;
@@ -370,6 +409,9 @@ impl Flt {
         if self.z.is_some_and(|k| cx.z < k) {
             return Some("swingy_consensus");
         }
+        if self.gap.zip(gap).is_some_and(|(k, g)| g >= k) {
+            return Some("polymarket_already_apart");
+        }
         if self.cap && px > 0.90 {
             return Some("price_too_high");
         }
@@ -402,6 +444,11 @@ fn flt() -> Flt {
 }
 
 impl Cand {
+    /// The price the live gate tests against its limits: the dearer of the two tests' offers
+    /// (+1c). Blocks measured before those were kept: the fill price.
+    fn gate_px(&self) -> f64 {
+        if self.dec[0] > 0.0 { self.dec[0].max(self.dec[1]) } else { self.px - SLIP_BUY + SLIP }
+    }
     fn exit(&self, ci: usize, gi: usize) -> Option<Exit> {
         let f = flt();
         if f.stop.is_none() && !f.revert {
@@ -463,6 +510,37 @@ struct Cand {
     b_tr10: f64,
     /// The trigger book's price range over the 10 min before the move.
     b_rng: f64,
+    /// The bookmaker update that triggered (the live bot's move time).
+    #[serde(default)]
+    t0: Ms,
+    /// Share of the move Polymarket made since the FIRST bookmaker of this move moved (the live
+    /// bot's `followed_since_start`): a slow book updating late is not a fresh move.
+    #[serde(default)]
+    fol_start: f64,
+    /// How long after the first bookmaker of the move this one moved.
+    #[serde(default)]
+    late_ms: Ms,
+    /// The rules can pass this move but the order cannot fill (the price ran before it landed,
+    /// nothing rests within 2c, no book): no trade, but the live bot has used the move up and
+    /// locked the game, so the replay must see it too.
+    #[serde(default)]
+    nofill: bool,
+    /// The price tested at each of the two tests (best offer + 1c), as the live gate sees it.
+    #[serde(default)]
+    dec: [f64; 2],
+    /// Polymarket's mid price 10 s before the move (0 = not kept).
+    #[serde(default)]
+    pre_mid: f64,
+}
+
+/// What a candidate is measured for: one outcome of one game moving one way.
+struct Mv<'a> {
+    match_id: i64,
+    sport: &'a str,
+    home: &'a str,
+    away: &'a str,
+    outcome: &'a str,
+    direction: i8,
 }
 
 fn fee(pm: bool, n: f64, p: f64) -> f64 {
@@ -518,9 +596,9 @@ pub(crate) fn after_pause(c: &Connection, book: &str, match_id: i64, outcome: &s
 
 /// One move measured exactly as the simulator does, with only what is known at each moment.
 /// None when no rule in the grid could take it (or prices are missing).
-fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms, base: &str, now: Ms, tm: (Ms, Ms)) -> Option<Cand> {
+fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &Mv, tb: &str, t0: Ms, base: &str, now: Ms, tm: (Ms, Ms)) -> Option<Cand> {
     let pm = base == PM;
-    let (mid, o) = (e.match_id, e.outcome.as_str());
+    let (mid, o) = (e.match_id, e.outcome);
     let dir = e.direction as f64;
     let (td, td2) = (t0 + tm.0, t0 + tm.0 + tm.1);
     let tmg = crate::timing::get();
@@ -535,8 +613,15 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     let tf = td2 + fd;
     let b_pre = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS)?;
     let (b1, b2) = (snipe::book_prob(c, tb, mid, o, td)?, snipe::book_prob(c, tb, mid, o, td2)?);
-    let (q0, q1, q2, qf) = (q.at(mid, o, t0 - snipe::PRE_MS)?, q.at(mid, o, td)?, q.at(mid, o, td2)?, q.at(mid, o, tf)?);
-    if snipe::reopened(c, tb, mid, o, t0 - snipe::PRE_MS, tf) || snipe::reopened(c, base, mid, o, t0 - snipe::PRE_MS, tf) {
+    let (q0, q1, q2) = (q.at(mid, o, t0 - snipe::PRE_MS)?, q.at(mid, o, td)?, q.at(mid, o, td2)?);
+    let qf = q.at(mid, o, tf);
+    // A gap in the recording up to the second test fails the rules (as live); one between the
+    // test and the fill only means no fill is known.
+    if snipe::reopened(c, tb, mid, o, t0 - snipe::PRE_MS, td2) || snipe::reopened(c, base, mid, o, t0 - snipe::PRE_MS, td2) {
+        return None;
+    }
+    let gap_fill = snipe::reopened(c, tb, mid, o, td2, tf) || snipe::reopened(c, base, mid, o, td2, tf);
+    if !pm && (qf.is_none() || gap_fill) {
         return None;
     }
     if !pm && (q1.3 == "assumed" || q2.3 == "assumed") {
@@ -547,13 +632,13 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     let (pm_tr, b_tr5, b_tr10, b_rng) = trends(c, q, tb, mid, o, dir, t0, pre_mid, b_pre, b2);
     let series = crate::consensus::Series::load_for(c, base, mid, o, t0 - 31 * 60_000, tf + GIVE[GIVE.len() - 1] * 1000 + 60_000);
     let cx = series.ctx(dir, t0 - snipe::PRE_MS, td2)?;
-    if bm1 < MOVE[0] || bm2 < 0.01 {
+    if bm1 < (if pm { LIVE_MIN_MOVE } else { MOVE[0] }) || bm2 < 0.01 {
         return None;
     }
     let fol = |x: &Q, bm: f64| ((x.0 + x.1) / 2.0 - pre_mid) * dir / bm;
     let (f1, f2) = (fol(&q1, bm1), fol(&q2, bm2));
     let (s1, s2) = (q1.1 - q1.0, q2.1 - q2.0);
-    let loose_f = *FOLLOWED.last().unwrap();
+    let loose_f = if pm { SAFE_MAX_FOLLOWED } else { *FOLLOWED.last().unwrap() };
     let loose_s = *SPREAD.last().unwrap() + 1e-9;
     if f1 > loose_f || f2 > loose_f || s1 > loose_s || s2 > loose_s {
         return None;
@@ -574,16 +659,50 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     if !(0..3).any(|k| e1[k] >= EDGE[0] && e2[k] >= EDGE[0]) {
         return None;
     }
-    if dec(&qf) > d2 + CAP {
-        return None; // price ran before the fill
-    }
-    let entry0 = dec(&qf) - SLIP + SLIP_BUY;
     // What rested on our side when the order landed: buying Yes takes asks, buying No takes Yes
     // bids. Unknown for hours recorded before depth was kept.
     let side = q.depth(mid, o, tf).and_then(|d| if dir > 0.0 { d.ask_size.zip(d.ask_depth) } else { d.bid_size.zip(d.bid_depth) });
-    if side.is_some_and(|(_, near)| near * entry0 < snipe::MIN_FILL) {
-        return None; // not even $10 within 2c: no order size fills
+    // No fill: no book at the fill, the price ran before it, or not even $10 rests within 2c.
+    let nofill = gap_fill || qf.is_none_or(|x| dec(&x) > d2 + CAP || side.is_some_and(|(_, near)| near * (dec(&x) - SLIP + SLIP_BUY) < snipe::MIN_FILL));
+    if nofill {
+        if !pm {
+            return None;
+        }
+        return Some(Cand {
+            match_id: mid,
+            sport: e.sport.to_string(),
+            home: e.home.to_string(),
+            away: e.away.to_string(),
+            outcome: e.outcome.to_string(),
+            dir: e.direction,
+            trigger: tb.to_string(),
+            pm,
+            tf,
+            books: [cx.fam_moved, cx.fam_moved],
+            bm: [bm1, bm2],
+            fol: [f1, f2],
+            sp: [s1, s2],
+            edge: [e1, e2],
+            px: d2 - SLIP + SLIP_BUY,
+            buy: None,
+            pause: after_pause(c, tb, mid, o, t0),
+            exits: [[None; 5]; 3],
+            stop_exits: [[[None; 5]; 3]; 5],
+            cx,
+            pm_tr,
+            b_tr5,
+            b_tr10,
+            b_rng,
+            t0,
+            fol_start: f2,
+            late_ms: 0,
+            nofill: true,
+            dec: [d1, d2],
+            pre_mid,
+        });
     }
+    let qf = qf?;
+    let entry0 = dec(&qf) - SLIP + SLIP_BUY;
     // Every sale: catch-up judged on the price we would sell at; else the give-up time.
     let path = q.path(mid, o, tf, tf + GIVE[GIVE.len() - 1] * 1000);
     let mut exits = [[None; 5]; 3];
@@ -624,25 +743,33 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
             if t_sell + fs > now {
                 continue;
             }
-            let Some(qs) = q.at(mid, o, t_sell + fs) else { continue };
-            let px = (if dir > 0.0 { qs.0 } else { 1.0 - qs.1 }) - SLIP;
+            // The sale. With no two-sided book at that moment (the game is over, or one side is
+            // empty) the live bot keeps looking, and books the result once the price shows one:
+            // these are the trades that lose the whole stake, and they count.
+            let (ts_x, px, booked) = match q.at(mid, o, t_sell + fs) {
+                Some(qs) => (t_sell + fs, (if dir > 0.0 { qs.0 } else { 1.0 - qs.1 }) - SLIP, false),
+                None => match after_book(q, mid, o, dir, t_sell + fs, now) {
+                    Some(x) => x,
+                    None => continue,
+                },
+            };
             // Selling Yes hits bids; selling No hits Yes asks.
-            let sell = if side.is_some() {
-                q.depth(mid, o, t_sell + fs).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
+            let sell = if side.is_some() && !booked {
+                q.depth(mid, o, ts_x).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
             } else {
                 None
             };
-            let x = Some(Exit { ts: t_sell + fs, px, sell, caught });
+            let x = Some(Exit { ts: ts_x, px, sell, caught });
             if si < EXV.len() { stop_exits[si][ci][gi] = x } else { exits[ci][gi] = x }
         }
     }
     }
     Some(Cand {
         match_id: mid,
-        sport: e.sport.clone(),
-        home: e.home.clone(),
-        away: e.away.clone(),
-        outcome: e.outcome.clone(),
+        sport: e.sport.to_string(),
+        home: e.home.to_string(),
+        away: e.away.to_string(),
+        outcome: e.outcome.to_string(),
         dir: e.direction,
         trigger: tb.to_string(),
         pm,
@@ -663,7 +790,42 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
         b_tr5,
         b_tr10,
         b_rng,
+        t0,
+        fol_start: f2,
+        late_ms: 0,
+        nofill: false,
+        dec: [d1, d2],
+        pre_mid,
     })
+}
+
+/// A position whose book is gone or one-sided at `t`: (when, price per contract, booked?) of what
+/// the live bot ends up with. The next two-sided book it can sell into; or what the one side
+/// still there pays; or the result (1 or 0) once the last recorded price shows one (97c+ / 3c-,
+/// as snipebot::settled). None = not known (yet).
+fn after_book(q: &mut dyn Quotes, mid: i64, o: &str, dir: f64, t: Ms, now: Ms) -> Option<(Ms, f64, bool)> {
+    let end = (t + AFTER_BOOK_MS).min(now);
+    let mut t = t;
+    while t <= end {
+        if let Some(x) = q.at(mid, o, t) {
+            return Some((t, (if dir > 0.0 { x.0 } else { 1.0 - x.1 }) - SLIP, false));
+        }
+        if let Some((b, a, ts)) = q.raw(mid, o, t) {
+            if b.is_some_and(|b| b >= 0.97) {
+                return Some((t, if dir > 0.0 { 1.0 } else { 0.0 }, true));
+            }
+            if a.is_some_and(|a| a <= 0.03) {
+                return Some((t, if dir > 0.0 { 0.0 } else { 1.0 }, true));
+            }
+            // One side only: sell into it if it is ours to sell into.
+            let s = if dir > 0.0 { b } else { a.map(|a| 1.0 - a) };
+            if let Some(s) = s.filter(|s| *s > 0.0 && *s < 1.0 && t - ts <= 30 * 60_000) {
+                return Some((t, (s - SLIP).max(0.0), true));
+            }
+        }
+        t += 5_000;
+    }
+    None
 }
 
 /// Trend features shared with the live bot: (Polymarket's 10-min trend, the trigger book's
@@ -705,21 +867,148 @@ fn build_chunk_with(db: &std::path::Path, start: Ms, end: Ms, now: Ms, tm: (Ms, 
     // Everything this block reads, copied into memory in one sequential pass: the database is
     // bigger than this machine's free memory, so random reads on disk made the build crawl.
     let c = mem_copy(db, start - MEM_BEFORE_MS, end + MEM_AFTER_MS)?;
-    let r = crate::rank::compute_with(&c, &p)?;
     let mut out: [Vec<Cand>; 2] = [Vec::new(), Vec::new()];
-    for (bi, base) in BASES.iter().enumerate() {
-        // Kalshi is not traded; its candidates are measured for research only.
-        let mut q = if bi == 0 { snipe::pm_quotes(&c) } else { snipe::kalshi_quotes(&c) };
+    // Polymarket: the moves the LIVE bot triggers on (every bookmaker update that jumps), measured
+    // by the same steps, so the replay and the bot look at the same things.
+    {
+        let mut q = snipe::pm_quotes(&c);
+        let mut names: HashMap<i64, (String, String, String)> = HashMap::new();
+        for mv in live_moves(&c, start, end)? {
+            let (sport, home, away) = names
+                .entry(mv.match_id)
+                .or_insert_with(|| c.query_row("SELECT sport, home, away FROM matches WHERE id = ?1", [mv.match_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap_or_default())
+                .clone();
+            let e = Mv { match_id: mv.match_id, sport: &sport, home: &home, away: &away, outcome: mv.outcome, direction: mv.dir };
+            let Some(mut cd) = make_cand(&c, &mut *q, &e, &mv.book, mv.t0, PM, now, tm) else { continue };
+            cd.late_ms = mv.t0 - mv.start;
+            if mv.start < mv.t0 {
+                // As snipebot::measure: Polymarket's move since 10 s before the first bookmaker.
+                if let (Some(qs), Some(q2)) = (q.at(mv.match_id, mv.outcome, mv.start - snipe::PRE_MS), q.at(mv.match_id, mv.outcome, mv.t0 + tm.0 + tm.1)) {
+                    cd.fol_start = ((q2.0 + q2.1) / 2.0 - (qs.0 + qs.1) / 2.0) * mv.dir as f64 / cd.bm[1];
+                }
+            }
+            out[0].push(cd);
+        }
+        out[0].sort_by_key(|x| x.tf);
+    }
+    // Kalshi is not traded; its candidates are measured for research only (one per move, at the
+    // first bookmaker, as before).
+    {
+        let r = crate::rank::compute_with(&c, &p)?;
+        let mut q = snipe::kalshi_quotes(&c);
         for e in &r.events {
-            if !(e.order.iter().any(|x| x.0 == *base) || e.missed.iter().any(|m| m == base)) {
+            if !(e.order.iter().any(|x| x.0 == KALSHI) || e.missed.iter().any(|m| m == KALSHI)) {
                 continue;
             }
             let (Some(tb), Some(t0)) = (e.first_book.clone(), e.first_book_ms) else { continue };
-            if let Some(cd) = make_cand(&c, &mut *q, e, &tb, t0, base, now, tm) {
-                out[bi].push(cd);
+            let mv = Mv { match_id: e.match_id, sport: &e.sport, home: &e.home, away: &e.away, outcome: &e.outcome, direction: e.direction };
+            if let Some(cd) = make_cand(&c, &mut *q, &mv, &tb, t0, KALSHI, now, tm) {
+                out[1].push(cd);
             }
         }
-        out[bi].sort_by_key(|x| x.tf);
+        out[1].sort_by_key(|x| x.tf);
+    }
+    Ok(out)
+}
+
+/// One bookmaker update the live bot triggers on and measures.
+struct LiveMove {
+    match_id: i64,
+    outcome: &'static str,
+    dir: i8,
+    book: String,
+    t0: Ms,
+    /// When the first bookmaker of this move moved (`t0` itself when this one is the first).
+    start: Ms,
+}
+
+/// The live bot's triggers in [start, end), as snipebot::on_change + the first steps of
+/// snipebot::measure find them: every bookmaker update 4+ points from that bookmaker's previous
+/// price, still moved 1 s and 1.5 s later, with the start of its move (the first such update the
+/// same way within MOVE_MS). Kept when the move is big enough for a rule and two feed families
+/// moved (every rule set needs both); the rest is measured by `make_cand`.
+fn live_moves(c: &Connection, start: Ms, end: Ms) -> anyhow::Result<Vec<LiveMove>> {
+    const OUTS: [&str; 3] = ["home", "away", "draw"];
+    const WARM_MS: Ms = 10 * 60_000;
+    const MAX_AGE_MS: Ms = 20 * 60_000;
+    let mut books: Vec<String> = Vec::new();
+    let mut book_id: HashMap<String, u16> = HashMap::new();
+    // (match, outcome, book) -> that book's real prices as probabilities, in time order.
+    let mut ser: HashMap<(i64, u8, u16), Vec<(Ms, f64)>> = HashMap::new();
+    let mut by_mo: HashMap<(i64, u8), Vec<u16>> = HashMap::new();
+    let mut ev: Vec<(Ms, i64, u8, u16, f64)> = Vec::new();
+    {
+        let mut st = c.prepare("SELECT ts_ms, book, match_id, outcome, new_price FROM changes WHERE new_price IS NOT NULL AND match_id > 0 AND book NOT IN ('polymarket', 'kalshi') ORDER BY ts_ms, id")?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let (ts, book, m, o, p): (Ms, String, i64, String, f64) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?);
+            let Some(oi) = OUTS.iter().position(|x| *x == o) else { continue };
+            let b = match book_id.get(&book) {
+                Some(b) => *b,
+                None => {
+                    let b = books.len() as u16;
+                    books.push(book.clone());
+                    book_id.insert(book, b);
+                    b
+                }
+            };
+            let v = ser.entry((m, oi as u8, b)).or_insert_with(|| {
+                by_mo.entry((m, oi as u8)).or_default().push(b);
+                Vec::new()
+            });
+            v.push((ts, 1.0 / p.max(1.0001)));
+            if p > 1.0 {
+                ev.push((ts, m, oi as u8, b, 1.0 / p));
+            }
+        }
+    }
+    let at = |v: &[(Ms, f64)], t: Ms| -> Option<(Ms, f64)> {
+        let i = v.partition_point(|x| x.0 <= t);
+        (i > 0).then(|| v[i - 1])
+    };
+    // Each feed family's price at `t` (mean of its books with a fresh price), as consensus.rs.
+    let fams = |m: i64, o: u8, t: Ms| -> BTreeMap<&str, f64> {
+        let mut acc: BTreeMap<&str, (f64, usize)> = BTreeMap::new();
+        for b in by_mo.get(&(m, o)).map(|v| v.as_slice()).unwrap_or(&[]) {
+            if let Some((ts, p)) = at(&ser[&(m, o, *b)], t) {
+                if t - ts <= MAX_AGE_MS {
+                    let e = acc.entry(snipe::platform(&books[*b as usize])).or_default();
+                    e.0 += p;
+                    e.1 += 1;
+                }
+            }
+        }
+        acc.into_iter().map(|(k, (s, n))| (k, s / n as f64)).collect()
+    };
+    let mut last: HashMap<(i64, u8, u16), f64> = HashMap::new();
+    let mut starts: HashMap<(i64, u8, bool), Ms> = HashMap::new();
+    let mut out = Vec::new();
+    for &(ts, m, o, b, p) in &ev {
+        let Some(prev) = last.insert((m, o, b), p) else { continue };
+        if (p - prev).abs() < TRIGGER_JUMP || ts < start - WARM_MS || ts >= end {
+            continue;
+        }
+        let dir: f64 = if p > prev { 1.0 } else { -1.0 };
+        let s = &ser[&(m, o, b)];
+        let (pre, td, td2) = (ts - snipe::PRE_MS, ts + REACTION, ts + REACTION + CONFIRM);
+        let (Some(b0), Some(b1), Some(b2)) = (at(s, pre), at(s, td), at(s, td2)) else { continue };
+        let (bm1, bm2) = ((b1.1 - b0.1) * dir, (b2.1 - b0.1) * dir);
+        if bm1 < 0.01 || bm2 < 0.01 {
+            continue; // the book went back
+        }
+        let e = starts.entry((m, o, dir > 0.0)).or_insert(ts);
+        if ts - *e > MOVE_MS || *e - ts > MOVE_MS || ts < *e {
+            *e = ts;
+        }
+        let first = *e;
+        if ts < start || bm1 < LIVE_MIN_MOVE {
+            continue;
+        }
+        let (f_pre, f_now) = (fams(m, o, pre), fams(m, o, td2));
+        if f_now.iter().filter(|(k, v)| f_pre.get(*k).is_some_and(|a| (*v - a) * dir >= 0.02)).count() < 2 {
+            continue;
+        }
+        out.push(LiveMove { match_id: m, outcome: OUTS[o as usize], dir: dir as i8, book: books[b as usize].clone(), t0: ts, start: first });
     }
     Ok(out)
 }
@@ -782,6 +1071,7 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
     let (ci, gi) = sale_idx(p);
     let lo = cands.partition_point(|c| c.tf < from);
     let mut recent: VecDeque<(i64, Ms)> = VecDeque::new();
+    let mut busy: HashMap<i64, Ms> = HashMap::new();
     for (k, c) in cands[lo..].iter().enumerate() {
         let c: &'a Cand = *c;
         if c.tf >= to {
@@ -792,6 +1082,7 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
             || c.bm[0] < p.min_move
             || c.fol[0] > p.max_followed
             || c.fol[1] > p.max_followed
+            || c.fol_start > p.max_followed
             || c.sp[0] > p.max_spread + 1e-9
             || c.sp[1] > p.max_spread + 1e-9
             || c.edge[0][ci] < p.min_edge
@@ -806,12 +1097,23 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
         if recent.iter().any(|r| r.0 == c.match_id) {
             continue;
         }
+        // The order cannot fill: no trade, but the live bot has taken the move and locked the game.
+        if c.nofill {
+            recent.push_back((c.match_id, c.tf));
+            continue;
+        }
         let Some(x) = c.exit(ci, gi) else { continue };
         if x.ts > known_by {
             continue;
         }
+        // One open position a game, as the live bot; the move is used up either way.
+        if busy.get(&c.match_id).is_some_and(|t| *t > c.tf) {
+            recent.push_back((c.match_id, c.tf));
+            continue;
+        }
         if take(lo + k, c, &x) {
             recent.push_back((c.match_id, c.tf));
+            busy.insert(c.match_id, x.ts);
         }
     }
 }
@@ -1060,7 +1362,7 @@ fn save_run(app: &App, r: &Run) {
 }
 
 /// 4-hour blocks measured at once (each on its own in-memory copy, ~0.3-0.5 GB each).
-const BUILD_THREADS: usize = 2;
+const BUILD_THREADS: usize = 1;
 /// The in-memory copy of a block: prices from this long before it (a book's "last price"
 /// further back is not seen) to this long after it (exits, consensus after the fill).
 const MEM_BEFORE_MS: Ms = 2 * 3_600_000;
@@ -1221,6 +1523,14 @@ fn step(app: &App) -> anyhow::Result<()> {
             }
         }
         start += EVERY_MS;
+    }
+    // While real money is on, nothing is measured and no rules are picked: a block build keeps the
+    // disk busy and the rule search the processor for minutes, and the bot's decisions then come
+    // late and are dropped (19 Nov: 10% of them). The traded rules are pinned, so the replay can
+    // wait; it catches up as soon as real money is off.
+    if crate::bots::mode(crate::bots::SNIPE) == Some(true) {
+        ST.lock().status = "paused while real money is on".into();
+        return Ok(());
     }
     for batch in todo.chunks(BUILD_THREADS) {
         ST.lock().status = format!("measuring moves {} UTC ({} blocks left)", fmt_utc(batch[0]), todo.len());
@@ -1440,6 +1750,7 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, 
             s.0.give_up_s = cfg.give_up_s;
         }
         s.0.max_followed = s.0.max_followed.min(SAFE_MAX_FOLLOWED);
+        s.0.min_move = s.0.min_move.max(LIVE_MIN_MOVE);
     }
     // Every trade either set would take, then one wallet in time order. The safe set first; the
     // wider set only where the safe set did not take the move (2 minutes per match).
@@ -1476,7 +1787,7 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, 
     picks.sort_by_key(|p| p.0.tf);
     let start = cfg.c.start;
     let (mut cash, mut closed) = (start, 0.0);
-    let mut open: Vec<(Ms, f64, f64)> = Vec::new();
+    let mut open: Vec<(Ms, f64, f64, i64)> = Vec::new();
     // (fill ts, exit ts, pnl, spent, sport, reason)
     let mut done: Vec<(Ms, Ms, f64, f64, String, bool)> = Vec::new();
     let mut rows: Vec<Value> = Vec::new();
@@ -1507,6 +1818,10 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, 
                 true
             }
         });
+        // One open position a game, whichever set bought it (as the live bot).
+        if open.iter().any(|o| o.3 == c.match_id) {
+            continue;
+        }
         let open_cost: f64 = open.iter().map(|o| o.1).sum();
         let stake = if wider {
             if cfg.b_daily_loss > 0.0 && b_day.1 <= -cfg.b_daily_loss {
@@ -1524,13 +1839,13 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, 
         }
         let Some(fl) = fill(c, &x, stake, walk) else { continue };
         cash -= fl.spent;
-        open.push((x.ts, fl.spent, fl.pnl));
+        open.push((x.ts, fl.spent, fl.pnl, c.match_id));
         if wider {
             b_open.push((x.ts, fl.pnl));
         }
         done.push((c.tf, x.ts, fl.pnl, fl.spent, c.sport.clone(), x.caught));
         rows.push(json!({"t": c.tf, "x": x.ts, "pnl": fl.pnl, "spent": fl.spent, "sport": c.sport, "tr": c.trigger, "caught": x.caught, "px": c.px, "entry": fl.entry, "stake": stake, "filled": fl.filled, "exit": fl.exit, "set": if wider { "wider" } else { "safe" },
-            "bm": c.bm[0], "k": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "cx": c.cx, "m": c.match_id, "home": c.home, "o": c.outcome}));
+            "bm": c.bm[0], "k": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "cx": c.cx, "m": c.match_id, "home": c.home, "o": c.outcome, "t0": c.t0, "fol_start": c.fol_start, "late_ms": c.late_ms}));
     }
     let mut out = sim_summary(start, cands.first().map(|c| c.tf), now, done.iter().map(|d| (d.0, d.1, d.2, d.3, d.4.as_str(), d.5)).collect());
     out["list"] = json!(rows);
@@ -1549,10 +1864,13 @@ fn why_not(c: &Cand, p: &Policy, f: &Flt) -> Option<&'static str> {
     if c.fol[0] > p.max_followed || c.fol[1] > p.max_followed {
         return Some("already_moved");
     }
+    if c.fol_start > p.max_followed {
+        return Some("moved_with_first_book");
+    }
     if c.sp[0] > p.max_spread + 1e-9 || c.sp[1] > p.max_spread + 1e-9 {
         return Some("spread_too_wide");
     }
-    if let Some(why) = f.check(&c.sport, &c.trigger, c.tf, c.px - SLIP_BUY + SLIP, c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx) {
+    if let Some(why) = f.check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)) {
         return Some(why);
     }
     if c.edge[0][ci] < p.min_edge || c.edge[1][ci] < p.min_edge {
@@ -1675,6 +1993,7 @@ pub fn research() -> Value {
             json!({"t": c.tf, "m": c.match_id, "s": c.sport, "tr": c.trigger, "k": c.books, "bm": c.bm, "fol": c.fol, "sp": c.sp, "e": c.edge[1][2], "px": c.px,
                 "p": c.pause, "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng,
                 "x": (0..GIVE.len()).map(|gi| r(c.exits[2][gi], c)).collect::<Vec<_>>(),
+                "t0": c.t0, "fol_start": c.fol_start, "late_ms": c.late_ms, "gap_before": gap_before(&c.cx, c.dir as f64, c.pre_mid),
                 "cx": c.cx, "xs": EXV.iter().enumerate().map(|(si, _)| (0..GIVE.len()).map(|gi| r(c.stop_exits[si][2][gi], c)).collect::<Vec<_>>()).collect::<Vec<_>>()})
         })
         .collect();
@@ -1775,7 +2094,62 @@ mod tests {
             b_tr5: 0.0,
             b_tr10: 0.0,
             b_rng: 0.0,
+            t0: 0,
+            fol_start: 0.0,
+            late_ms: 0,
+            nofill: false,
+            dec: [0.0, 0.0],
+            pre_mid: 0.0,
         }
+    }
+
+    /// Not a unit test: builds the replay's candidates for a time span from the real database
+    /// and writes them, with the trades the live rules take, as JSON, to compare with
+    /// tools/live_emu.py (the checked copy of the live bot). SWIFTEYE_DB, FROM_MS, TO_MS, OUT.
+    #[test]
+    #[ignore]
+    fn dump_live_path() {
+        let db = std::path::PathBuf::from(std::env::var("SWIFTEYE_DB").expect("SWIFTEYE_DB"));
+        let from: Ms = std::env::var("FROM_MS").expect("FROM_MS").parse().unwrap();
+        let to: Ms = std::env::var("TO_MS").expect("TO_MS").parse().unwrap();
+        let out = std::env::var("OUT").expect("OUT");
+        let now = to + 3_600_000;
+        let mut chunks: Vec<[Arc<Vec<Cand>>; 2]> = Vec::new();
+        let mut start = boundary(from);
+        while start < to {
+            let t = std::time::Instant::now();
+            let [a, b] = build_chunk(&db, start, (start + EVERY_MS).min(to), now).expect("build");
+            eprintln!("block {start}: {} polymarket candidates, {} kalshi ({:.0} s)", a.len(), b.len(), t.elapsed().as_secs_f64());
+            chunks.push([Arc::new(a), Arc::new(b)]);
+            start += EVERY_MS;
+        }
+        FLT.with(|x| x.set(Flt::default()));
+        let light: Vec<Value> = all_cands(&chunks, 0)
+            .iter()
+            .map(|c| {
+                json!({"t0": c.t0, "tf": c.tf, "m": c.match_id, "o": c.outcome, "d": c.dir, "book": c.trigger, "bm": c.bm, "fol": c.fol, "fol_start": c.fol_start,
+                    "late_ms": c.late_ms, "sp": c.sp, "edge": [c.edge[0][2], c.edge[1][2]], "px": c.px, "pause": c.pause, "sport": c.sport, "cx": c.cx, "nofill": c.nofill, "pre_mid": c.pre_mid, "gap_before": gap_before(&c.cx, c.dir as f64, c.pre_mid),
+                    "x900": c.exits[2][3].map(|x| json!([x.ts, x.px, x.caught])), "x300": c.exits[2][2].map(|x| json!([x.ts, x.px, x.caught]))})
+            })
+            .collect();
+        FLT.with(|x| x.set(Flt { hours: Some([12, 21]), ..Flt::picked() }));
+        let cands = all_cands(&chunks, 0);
+        let mut trades: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for give in [900, 300] {
+            let p = Policy { min_books: 1, max_followed: 0.05, min_edge: 0.04, max_spread: 0.04, min_move: 0.10, catch: 1.0, give_up_s: give, skip_after_pause: true, walk_book: true };
+            let (ci, _) = sale_idx(&p);
+            let mut v = Vec::new();
+            // As bot_sim: the rules took the move (the game is locked) whether or not $12 fills.
+            run_policy(&cands, &p, 0, now + 1, now, |_, c, x| {
+                if let Some(f) = fill(c, x, 12.0, may_walk(c, &p, ci)) {
+                    v.push(json!({"t0": c.t0, "m": c.match_id, "o": c.outcome, "d": c.dir, "book": c.trigger, "entry": f.entry, "exit": f.exit, "pnl": f.pnl, "spent": f.spent, "caught": x.caught, "x": x.ts, "home": c.home, "sport": c.sport}));
+                }
+                true
+            });
+            trades.insert(format!("give{give}"), v);
+        }
+        std::fs::write(&out, serde_json::to_vec(&json!({"cands": light, "trades": trades})).unwrap()).unwrap();
+        eprintln!("{} candidates written to {out}", light.len());
     }
 
     #[test]

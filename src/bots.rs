@@ -87,6 +87,9 @@ pub struct SnipeCfg {
     pub give_up_s: i64,
     /// Trade only between these UTC hours [from, to); equal = all day.
     pub hours_utc: [u8; 2],
+    /// Trade the fixed, tested rules (`adaptive::pinned_rules`) whatever the rule picker chooses.
+    /// The picker still runs and shows its choice; it does not steer the bot while this is on.
+    pub pin_rules: bool,
 }
 
 impl SnipeCfg {
@@ -101,7 +104,7 @@ impl SnipeCfg {
 
 impl Default for SnipeCfg {
     fn default() -> Self {
-        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true, b_enabled: true, b_pct: 0.06, b_max_trade: 12.0, b_daily_loss: 15.0, r_pct: 0.30, r_max_trade: 12.0, give_up_s: 900, hours_utc: [12, 21] }
+        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true, b_enabled: true, b_pct: 0.06, b_max_trade: 12.0, b_daily_loss: 15.0, r_pct: 0.30, r_max_trade: 12.0, give_up_s: 900, hours_utc: [12, 21], pin_rules: true }
     }
 }
 
@@ -230,6 +233,40 @@ pub fn log_order(app: &App, bot: &str, venue: &str, ok: bool, data: &Value) {
     }
 }
 
+/// A real order about to be sent, written before it goes out: if the bot dies before the result
+/// is recorded, this row is what says shares may have been bought that nothing tracks.
+pub fn log_intent(app: &App, bot: &str, data: &Value) {
+    if let Ok(c) = Connection::open(&app.db_path) {
+        let _ = c.busy_timeout(std::time::Duration::from_secs(5));
+        let _ = c.execute("INSERT INTO bot_orders(ts_ms, bot, venue, ok, data) VALUES (?1, ?2, 'polymarket', 0, ?3)", params![now_ms(), bot, data.to_string()]);
+    }
+}
+
+/// Real orders of the last day that were being sent when the bot stopped and have no recorded
+/// result (no order row for the same token within 2 minutes after). Each is reported once.
+pub fn unresolved_intents(app: &App) -> Vec<Value> {
+    let Ok(c) = Connection::open(&app.db_path) else { return Vec::new() };
+    let _ = c.busy_timeout(std::time::Duration::from_secs(5));
+    let now = now_ms();
+    let rows: Vec<(i64, Ms, String)> = c
+        .prepare(
+            "SELECT i.id, i.ts_ms, i.data FROM bot_orders i
+             WHERE json_extract(i.data, '$.intent') = 1 AND COALESCE(json_extract(i.data, '$.told'), 0) = 0 AND i.ts_ms >= ?1 AND i.ts_ms < ?2
+               AND NOT EXISTS (SELECT 1 FROM bot_orders r WHERE r.id > i.id AND r.ts_ms <= i.ts_ms + 120000
+                                 AND COALESCE(json_extract(r.data, '$.intent'), 0) = 0 AND json_extract(r.data, '$.token') = json_extract(i.data, '$.token'))",
+        )
+        .and_then(|mut st| st.query_map(params![now - 86_400_000, now - 60_000], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|it| it.filter_map(|x| x.ok()).collect()))
+        .unwrap_or_default();
+    rows.into_iter()
+        .filter_map(|(id, ts, d)| {
+            let _ = c.execute("UPDATE bot_orders SET data = json_set(data, '$.told', 1) WHERE id = ?1", [id]);
+            let mut v: Value = serde_json::from_str(&d).ok()?;
+            v["ts_ms"] = json!(ts);
+            Some(v)
+        })
+        .collect()
+}
+
 /// Dollars at risk in one game across both bots: open arbitrage positions (both legs' cost) and
 /// open snipe trades.
 pub fn exposure(c: &Connection, match_id: i64) -> f64 {
@@ -266,8 +303,32 @@ pub fn snipe_game_room(c: &Connection, match_id: i64, real: bool) -> f64 {
 }
 
 /// Open real snipe positions in a game.
-pub fn real_open_in_game(c: &Connection, match_id: i64) -> i64 {
-    c.query_row("SELECT COUNT(*) FROM bot_trades WHERE match_id = ?1 AND closed_ms IS NULL AND bot = ?2 AND real = 1", params![match_id, SNIPE], |r| r.get(0)).unwrap_or(0)
+/// Open positions of one wallet (bot name, paper or real) in a game.
+pub fn open_in_game(c: &Connection, bot: &str, real: bool, match_id: i64) -> i64 {
+    c.query_row("SELECT COUNT(*) FROM bot_trades WHERE match_id = ?1 AND closed_ms IS NULL AND bot = ?2 AND real = ?3", params![match_id, bot, real as i64], |r| r.get(0)).unwrap_or(0)
+}
+
+/// What an open snipe trade would fetch now, per contract: the best bid of the side held in the
+/// live book, else the last recorded Polymarket price; nobody bidding = nothing.
+pub fn sellable_now(c: &Connection, v: &Value) -> Option<f64> {
+    let dir = v["dir"].as_f64().unwrap_or(1.0);
+    let (m, o) = (v["match_id"].as_i64()?, v["outcome"].as_str()?);
+    if let Some((_, l, _)) = crate::venue::outcome_of(o).and_then(|oc| crate::venue::pm_contract(m, oc)) {
+        return Some(if dir > 0.0 { l.bids.first().map(|x| x.0).unwrap_or(0.0) } else { l.asks.first().map(|x| 1.0 - x.0).unwrap_or(0.0) });
+    }
+    let (b, a): (Option<f64>, Option<f64>) = c.query_row("SELECT bid, ask FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 ORDER BY ts_ms DESC LIMIT 1", params![m, o], |r| Ok((r.get(0)?, r.get(1)?))).ok()?;
+    Some(if dir > 0.0 { b.unwrap_or(0.0) } else { a.map(|a| 1.0 - a).unwrap_or(0.0) })
+}
+
+/// Where a wallet's open snipe trades stand if sold now: their value less what they cost
+/// (negative = under water). A loser is a loss before it is sold, not only after.
+pub fn open_pnl(c: &Connection, bot: &str, real: bool) -> f64 {
+    let since = if real { settings().snipe.c.real_since } else { settings().snipe.c.paper_since };
+    let rows: Vec<Value> = c
+        .prepare("SELECT data FROM bot_trades WHERE bot = ?1 AND real = ?2 AND ts_ms >= ?3 AND closed_ms IS NULL")
+        .and_then(|mut st| st.query_map(params![bot, real as i64, since], |r| r.get::<_, String>(0)).map(|it| it.filter_map(|x| x.ok()).filter_map(|s| serde_json::from_str(&s).ok()).collect()))
+        .unwrap_or_default();
+    rows.iter().filter_map(|v| Some(v["contracts"].as_f64()? * sellable_now(c, v)? - v["cost"].as_f64()?)).sum()
 }
 
 /// Start of today (UTC), ms.
@@ -394,7 +455,8 @@ pub fn check_daily_loss(app: &App, bot: &str) {
     let s = settings();
     let (day, limit) = match bot {
         ARB => (arb_ledger(&c, true).2, s.arb.c.daily_loss),
-        _ => (snipe_ledger(&c, SNIPE, true).2, s.snipe.c.daily_loss),
+        // Sold today plus what the open positions have lost so far.
+        _ => (snipe_ledger(&c, SNIPE, true).2 + open_pnl(&c, SNIPE, true).min(0.0), s.snipe.c.daily_loss),
     };
     if day < -limit {
         let mut w = SET.write();
@@ -405,7 +467,7 @@ pub fn check_daily_loss(app: &App, bot: &str) {
         let s2 = w.clone();
         drop(w);
         let _ = save(app, &s2);
-        event(format!("{bot}: real money switched OFF: today's real result ${day:.2} is past the daily limit -${limit:.0}"));
+        event(format!("{bot}: real money switched OFF: today's real result ${day:.2} (open positions counted) is past the daily limit -${limit:.0}"));
     }
 }
 
@@ -922,11 +984,15 @@ pub fn tick_run(app: &App) -> Option<String> {
 }
 
 /// Safety triggers: the run ends early when real money does worse than the replay says it
-/// should (replay, safe set: ~19 of 20 trades win, a loser costs about half its stake, the paper
+/// should (see the numbers below; the paper
 /// twin of a trade fills within a cent or two).
-const GUARD_WIN_SHARE: f64 = 0.60;
-const GUARD_WIN_MIN_TRADES: usize = 4;
-const GUARD_ONE_TRADE_LOSS: f64 = 0.80;
+/// Backtested on 17-19 Nov 2026 (tools/replay_eval.py): about 3 trades in 4 win, a loser costs
+/// about 40% of its stake and 2-3 in 100 lose all of it. The first stops (2 losers in a row,
+/// under 60% after 4 trades, one trade at -80%) kept $52 of $186 and ended 97% of runs within 30
+/// trades; these keep all of it and still end a bad day at about the daily limit.
+const GUARD_WIN_SHARE: f64 = 0.50;
+const GUARD_WIN_MIN_TRADES: usize = 10;
+const GUARD_LOSERS_IN_ROW: usize = 3;
 /// Orders Polymarket refused (an error, not just "nothing filled": a sale that waits for a bid
 /// retries every second and a buy whose price ran is normal).
 const GUARD_REFUSED_ORDERS: usize = 3;
@@ -954,6 +1020,12 @@ fn guard_inputs(app: &App, r: &Run) -> Option<(Vec<Value>, Vec<Value>, (usize, u
 /// Why the running real test should stop now (None = all as expected).
 fn run_guard(app: &App, r: &Run) -> Option<String> {
     let (real, paper, orders, limit) = guard_inputs(app, r)?;
+    // Open positions count: three losers still open are a loss already.
+    let open = crate::store::open_ro(&app.db_path).map(|c| open_pnl(&c, SNIPE, true)).unwrap_or(0.0).min(0.0);
+    let sold: f64 = real.iter().map(|t| t["pnl"].as_f64().unwrap_or(0.0)).sum();
+    if open < 0.0 && sold + open <= -limit {
+        return Some(format!("real money is down ${:.2} counting open positions, past the ${limit:.0} limit", -(sold + open)));
+    }
     run_guard_on(&real, &paper, orders, limit)
 }
 
@@ -968,12 +1040,11 @@ pub fn run_guard_facts(app: &App) -> Option<Value> {
     Some(json!({
         "loss": -real.iter().map(pnl).sum::<f64>().min(0.0), "pnl": real.iter().map(pnl).sum::<f64>(), "loss_limit": limit,
         "closed": real.len(), "wins": real.iter().filter(|t| pnl(t) > 0.0).count(),
-        "last_two_lost": real.len() >= 2 && real[real.len() - 2..].iter().all(|t| ret(t) < -0.05),
-        "last_lost": real.last().is_some_and(|t| ret(t) < -0.05),
+        "losers_in_row": real.iter().rev().take_while(|t| ret(t) < -0.05).count(),
         "worst_return": real.iter().map(ret).fold(0.0f64, f64::min),
         "refused": refused, "unfilled_buys": unfilled_buys, "filled_buys": filled_buys,
         "twin_pairs": gaps.len(), "twin_gap": if gaps.is_empty() { None } else { Some(gaps.iter().sum::<f64>() / gaps.len() as f64) },
-        "limits": {"win_share": GUARD_WIN_SHARE, "win_min_trades": GUARD_WIN_MIN_TRADES, "one_trade_loss": GUARD_ONE_TRADE_LOSS, "refused": GUARD_REFUSED_ORDERS, "unfilled_buys": GUARD_UNFILLED_BUYS, "twin_gap": GUARD_TWIN_GAP},
+        "limits": {"win_share": GUARD_WIN_SHARE, "win_min_trades": GUARD_WIN_MIN_TRADES, "losers_in_row": GUARD_LOSERS_IN_ROW, "refused": GUARD_REFUSED_ORDERS, "unfilled_buys": GUARD_UNFILLED_BUYS, "twin_gap": GUARD_TWIN_GAP},
         "would_stop": run_guard_on(&real, &paper, (refused, unfilled_buys, filled_buys), limit),
     }))
 }
@@ -1002,15 +1073,12 @@ fn run_guard_on(real: &[Value], paper: &[Value], orders: (usize, usize, usize), 
         return Some(format!("real money is down ${:.2}, past the ${loss_limit:.0} limit", -total));
     }
     // A loss here is more than 5% of the stake: a give-up a cent under the buy price is a scratch.
-    if real.len() >= 2 && real[real.len() - 2..].iter().all(|t| ret(t) < -0.05) {
-        return Some("two losing real trades in a row (the replay expects about 1 loser in 20)".into());
+    if real.len() >= GUARD_LOSERS_IN_ROW && real[real.len() - GUARD_LOSERS_IN_ROW..].iter().all(|t| ret(t) < -0.05) {
+        return Some(format!("{GUARD_LOSERS_IN_ROW} losing real trades in a row (the tests expect about 1 loser in 4)"));
     }
     let wins = real.iter().filter(|t| pnl(t) > 0.0).count();
     if real.len() >= GUARD_WIN_MIN_TRADES && (wins as f64) < GUARD_WIN_SHARE * real.len() as f64 {
-        return Some(format!("only {wins} of {} real trades won (the replay expects about 19 of 20)", real.len()));
-    }
-    if let Some(t) = real.iter().find(|t| ret(t) <= -GUARD_ONE_TRADE_LOSS) {
-        return Some(format!("one real trade lost {:.0}% of its stake ({})", -ret(t) * 100.0, t["home"].as_str().unwrap_or("")));
+        return Some(format!("only {wins} of {} real trades won (the tests expect about 3 in 4)", real.len()));
     }
     if refused >= GUARD_REFUSED_ORDERS {
         return Some(format!("Polymarket refused {refused} real orders"));
@@ -1139,6 +1207,7 @@ fn parse_flt(s: &str) -> crate::adaptive::Flt {
             "nobb" => f.no_basketball = v != "0",
             "maxpx" => f.max_px = x,
             "skipfeeds" => f.skip_feeds = v != "0",
+            "gap" => f.gap = x,
             "picked" => f = crate::adaptive::Flt::picked(),
             _ => {}
         }
@@ -1180,7 +1249,7 @@ pub fn panel(app: &App, real: bool) -> Value {
         })
         .unwrap_or_default();
     let day0 = today();
-    let (mut closed, mut today_pnl, mut open_cost) = (0.0, 0.0, 0.0);
+    let (mut closed, mut today_pnl, mut open_cost, mut open_now) = (0.0, 0.0, 0.0, 0.0);
     let mut trades = Vec::new();
     for (ts, cl, v) in &rows {
         let (dir, entry) = (v["dir"].as_f64().unwrap_or(1.0), v["entry"].as_f64().unwrap_or(0.0));
@@ -1205,11 +1274,11 @@ pub fn panel(app: &App, real: bool) -> Value {
             }
             None => {
                 open_cost += v["cost"].as_f64().unwrap_or(0.0);
-                // What it would fetch now: the best bid of the side held.
-                let o = v["outcome"].as_str().and_then(crate::venue::outcome_of);
-                let bid = o.and_then(|o| crate::venue::pm_contract(v["match_id"].as_i64().unwrap_or(0), o)).and_then(|(_, l, _)| if dir > 0.0 { l.bids.first().map(|x| x.0) } else { l.asks.first().map(|x| 1.0 - x.0) });
+                // What it would fetch now: the best bid of the side held (nobody bidding = nothing).
+                let bid = sellable_now(&c, v);
                 t["bid_now"] = json!(bid);
                 t["value_now"] = json!(bid.map(|b| n * b));
+                open_now += bid.map(|b| n * b - v["cost"].as_f64().unwrap_or(0.0)).unwrap_or(0.0);
             }
         }
         trades.push(t);
@@ -1232,7 +1301,8 @@ pub fn panel(app: &App, real: bool) -> Value {
     let wider_today: f64 = rows.iter().filter(|(_, cl, v)| cl.is_some_and(|t| t >= day0) && v["set"].as_str() == Some("wider")).map(|(_, _, v)| v["pnl"].as_f64().unwrap_or(0.0)).sum();
     json!({
         "real": real, "scope": scope, "start": start, "since": since, "now": now, "rules_since": RULES_SINCE_MS,
-        "balance": start + closed, "closed_pnl": closed, "today": today_pnl, "open_cost": open_cost, "wider_today": wider_today,
+        // Balance and today's result count open positions at what they would sell for now.
+        "balance": start + closed + open_now, "closed_pnl": closed, "today": today_pnl + open_now, "open_cost": open_cost, "open_pnl": open_now, "wider_today": wider_today,
         "trades": trades, "signals": signals, "window": window,
         "run": s.run.as_ref().map(|r| json!({"start_ms": r.start_ms, "end_ms": r.end_ms, "bankroll": r.bankroll, "stake": r.stake})),
         "mode": {"kill": s.kill, "enabled": s.snipe.c.enabled, "real": s.snipe.c.real},
@@ -1278,7 +1348,7 @@ pub fn view(app: &App) -> Value {
     let orders: Vec<Value> = c
         .as_ref()
         .and_then(|c| {
-            let mut st = c.prepare("SELECT ts_ms, bot, venue, ok, data FROM bot_orders ORDER BY id DESC LIMIT 50").ok()?;
+            let mut st = c.prepare("SELECT ts_ms, bot, venue, ok, data FROM bot_orders WHERE COALESCE(json_extract(data, '$.intent'), 0) = 0 ORDER BY id DESC LIMIT 50").ok()?;
             let it = st
                 .query_map([], |r| Ok(json!({"ts": r.get::<_, Ms>(0)?, "bot": r.get::<_, String>(1)?, "venue": r.get::<_, String>(2)?, "ok": r.get::<_, i64>(3)? != 0, "data": serde_json::from_str::<Value>(&r.get::<_, String>(4)?).unwrap_or(Value::Null)})))
                 .ok()?;
@@ -1326,12 +1396,15 @@ mod tests {
         assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], (0, 0, 0), 15.0), None);
         // The loss limit.
         assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], (0, 0, 0), 15.0).unwrap().contains("limit"));
-        // Two real losers in a row.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], (0, 0, 0), 15.0).unwrap().contains("in a row"));
-        // Too few winners after four trades.
-        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], (0, 0, 0), 15.0).unwrap().contains("won"));
-        // Nearly a whole stake on one trade.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], (0, 0, 0), 15.0).unwrap().contains("lost 87%"));
+        // Two losers in a row are ordinary at 3 wins in 4; three in a row stop it.
+        assert_eq!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], (0, 0, 0), 15.0), None);
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0), t(4, 0, 15.0, -2.0)], &[], (0, 0, 0), 15.0).unwrap().contains("in a row"));
+        // Too few winners: under half once there are ten trades (four of ten here), not before.
+        let lose = |m| t(m, 0, 15.0, -0.5);
+        assert_eq!(run_guard_on(&[lose(1), win(2), lose(3), win(4), lose(5)], &[], (0, 0, 0), 15.0), None);
+        assert!(run_guard_on(&[lose(1), win(2), lose(3), win(4), lose(5), win(6), lose(7), win(8), lose(9), lose(10)], &[], (0, 0, 0), 15.0).unwrap().contains("won"));
+        // One trade losing nearly its whole stake is within the tests (2-3 in 100): no stop by itself.
+        assert_eq!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], (0, 0, 0), 15.0), None);
         // Orders that fail.
         assert!(run_guard_on(&[win(1)], &[], (3, 0, 0), 15.0).unwrap().contains("orders"));
         // Buys that find nothing: fine while most fill, a stop once they are most of the attempts.

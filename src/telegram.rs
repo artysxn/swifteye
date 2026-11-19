@@ -218,6 +218,8 @@ static CFG: LazyLock<Mutex<TgCfg>> = LazyLock::new(Default::default);
 static PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(|| Mutex::new(PathBuf::from("telegram.json")));
 static BOT: LazyLock<Mutex<BotInfo>> = LazyLock::new(Default::default);
 static LOG: LazyLock<Mutex<VecDeque<Sent>>> = LazyLock::new(Default::default);
+/// When /realon was asked for, and for how many hours: "/realon yes" must follow within 2 minutes.
+static REALON: LazyLock<Mutex<Option<(Ms, i64)>>> = LazyLock::new(Default::default);
 
 fn save(c: &TgCfg) {
     let p = PATH.lock().clone();
@@ -376,13 +378,13 @@ async fn bot_loop(app: Arc<App>) {
         let c = cfg();
         // The command menu in Telegram (once per token).
         if !c.token.is_empty() && menu_set != c.token {
-            let menu: [(&str, &str); 34] = [
+            let menu: [(&str, &str); 35] = [
                 ("status", "Both wallets and whether it is trading"), ("now", "Update right now"), ("open", "Open trades"), ("today", "Today's results"),
                 ("real", "The real wallet"), ("paper", "The paper wallet"), ("account", "Cash on the Polymarket account"),
                 ("trades", "Last 10 closed trades"), ("last", "The last trade"), ("chart", "Chart of the last trade"), ("best", "Best trades"), ("worst", "Worst trades"),
                 ("week", "Last 7 days, day by day"), ("stats", "Win rate, average win and loss"), ("sports", "Results by sport"),
                 ("run", "The real run"), ("safety", "Where the run stands against each safety stop"), ("twins", "Real trades against their paper twins"),
-                ("compare", "Live trades against the replay"), ("extend", "Extend the run: /extend 2h"), ("stoprun", "End the real run now"), ("realoff", "Real money off"),
+                ("compare", "Live trades against the replay"), ("extend", "Extend the run: /extend 2h"), ("realon", "Start real money (asks you to confirm)"), ("stoprun", "End the real run now"), ("realoff", "Real money off"),
                 ("rules", "When it buys and sells"), ("settings", "Wallets, stakes, hours"), ("signals", "What it checked today and why it passed"), ("hours", "Trading hours"),
                 ("replay", "The replay of this setup"), ("projected", "What money turns into: /projected 24h"), ("balance", "Real balance chart"), ("balancepaper", "Paper balance chart"),
                 ("health", "Feeds, prices, replay"), ("kill", "Emergency: stop opening trades"), ("unkill", "Resume trading"), ("help", "Every command"),
@@ -490,11 +492,28 @@ The run stops itself at −{}. /safety shows every stop, /stoprun ends it now.",
                 if !(c.bot_alerts.enabled && c.bot_alerts.buys) {
                     continue;
                 }
-                let _ = send("bot", &buy_text(&v, compact)).await;
+                // With the buy: where it stands, what it expects, where it cashes out, its
+                // break-even and when it gives up.
+                let text = buy_text(&v, compact);
+                let chart = if !compact && c.bot_alerts.charts {
+                    let (a2, v2) = (app.clone(), v.clone());
+                    tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten()
+                } else {
+                    None
+                };
+                let sent = match chart {
+                    Some(ch) => send_chart(&ch, &text).await,
+                    None => Err(anyhow!("no chart")),
+                };
+                if sent.is_err() {
+                    let _ = send("bot", &text).await;
+                }
             }
             if let Some(cl) = v["closed_ms"].as_i64() {
-                if cl > closed_seen {
-                    closed_seen = cl;
+                // Every sale since the last look, whatever order they closed in (two trades
+                // sold in one look used to drop the one that closed earlier).
+                if cl > since_close {
+                    closed_seen = closed_seen.max(cl);
                     if !(c.bot_alerts.enabled && c.bot_alerts.sells) {
                         continue;
                     }
@@ -568,48 +587,181 @@ fn eta_text(app: &App, ts: Ms) -> String {
 
 /// Chart.js config: the market's Polymarket bid / ask each minute from 10 min before the buy to 5
 /// min after the sale, the buy (green) and the sale (red) marked, in the bought side's price.
+/// The look shared with the aim4 insights bot's Telegram charts (tgcharts.js): straight thin
+/// lines, no fill, a light horizontal grid only, a small legend at the bottom.
+fn chart_options(title: &str, y_label: &str) -> Value {
+    json!({
+        "title": {"display": true, "text": title, "fontSize": 16},
+        "legend": {"display": true, "position": "bottom", "labels": {"boxWidth": 12, "fontSize": 11}},
+        "scales": {
+            "yAxes": [{"scaleLabel": {"display": true, "labelString": y_label}, "gridLines": {"color": "#eee"}}],
+            "xAxes": [{"ticks": {"maxTicksLimit": 12, "maxRotation": 0}, "gridLines": {"display": false}}]
+        }
+    })
+}
+
 fn trade_chart(app: &App, v: &Value) -> Option<Value> {
-    let c = crate::store::open_ro(&app.db_path).ok()?;
-    let (m, o) = (v["match_id"].as_i64()?, v["outcome"].as_str()?.to_string());
-    let (target, give) = pays_at(v);
-    let end = v["closed_ms"].as_i64().unwrap_or_else(|| now_ms());
-    let (t0, t1) = (v["ts"].as_i64()? - 600_000, end + 300_000);
-    let yes = v["dir"].as_f64().unwrap_or(1.0) > 0.0;
-    let mut st = c.prepare("SELECT ts_ms, bid, ask FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms >= ?3 AND ts_ms <= ?4 ORDER BY ts_ms").ok()?;
-    let rows: Vec<(Ms, Option<f64>, Option<f64>)> = st.query_map(params![m, o, t0, t1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok()?.filter_map(|x| x.ok()).collect();
-    let mut mins: std::collections::BTreeMap<Ms, (Option<f64>, Option<f64>)> = Default::default();
-    for (t, b, a) in rows {
-        // The bought side's price: Yes as is; No = 1 - the other side of the Yes book.
-        let (b2, a2) = if yes { (b, a) } else { (a.map(|x| 1.0 - x), b.map(|x| 1.0 - x)) };
-        mins.insert(t - t.rem_euclid(60_000), (b2, a2));
-    }
-    if mins.len() < 2 {
+    trade_chart_at(&app.db_path, v, typical_hold_ms(app), now_ms())
+}
+
+/// The price a sale must reach to get the money back (the buy and both fees): solves
+/// p - fee(p) = cost per share. None without a cost.
+fn break_even(v: &Value) -> Option<f64> {
+    let (n, cost) = (v["contracts"].as_f64()?, v["cost"].as_f64()?);
+    if n <= 0.0 {
         return None;
     }
-    let keys: Vec<Ms> = mins.keys().copied().collect();
-    let idx = |t: Ms| keys.iter().rposition(|k| *k <= t).unwrap_or(0);
-    let labels: Vec<String> = keys.iter().map(|k| { let (d, _) = local(*k); format!("{:02}:{:02}", d.hour(), d.minute()) }).collect();
+    let rate = v["fee_rate"].as_f64().unwrap_or(0.05);
+    let c = cost / n;
+    let mut p = c;
+    for _ in 0..20 {
+        p = c + rate * p * (1.0 - p);
+    }
+    Some(p.clamp(0.0, 1.0))
+}
+
+/// One trade against the price of the side bought: the price it can be sold at (line), the
+/// offer (thin line), the buy and the sale (markers) and where it sells (dashed).
+fn trade_chart_at(db: &Path, v: &Value, hold: Ms, now: Ms) -> Option<Value> {
+    let c = crate::store::open_ro(db).ok()?;
+    let (m, o) = (v["match_id"].as_i64()?, v["outcome"].as_str()?.to_string());
+    let (target, give) = pays_at(v);
+    let ts = v["ts"].as_i64()?;
+    let end = v["closed_ms"].as_i64().unwrap_or(now);
+    // The chart runs on past the give-up time, so an open trade shows what is still to come.
+    let (t0, t1) = (ts - 600_000, (end + 300_000).max(give.unwrap_or(end) + 90_000));
+    let yes = v["dir"].as_f64().unwrap_or(1.0) > 0.0;
+    // A time grid fine enough to show the price path (at most ~180 points), not one box a minute.
+    let span = t1 - t0;
+    let step: Ms = [5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000].into_iter().find(|s| span / s <= 180).unwrap_or(900_000);
+    let n = (span / step) as usize + 1;
+    // A quote older than this says nothing about that moment: the line breaks there.
+    let stale = (3 * step).max(180_000);
+    let mut st = c.prepare("SELECT ts_ms, bid, ask FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms >= ?3 AND ts_ms <= ?4 ORDER BY ts_ms").ok()?;
+    let rows: Vec<(Ms, Option<f64>, Option<f64>)> = st.query_map(params![m, o, t0 - stale, t1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok()?.filter_map(|x| x.ok()).collect();
+    if rows.len() < 2 {
+        return None;
+    }
     let cents = |x: Option<f64>| x.map(|p| (p * 1000.0).round() / 10.0);
-    let mut buy = vec![Value::Null; keys.len()];
-    let mut sell = vec![Value::Null; keys.len()];
-    buy[idx(v["ts"].as_i64()?)] = json!(cents(v["entry"].as_f64()));
+    let (mut bid, mut ask, mut labels) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+    let mut k = 0;
+    for i in 0..n {
+        let t = t0 + i as Ms * step;
+        while k < rows.len() && rows[k].0 <= t {
+            k += 1;
+        }
+        // The bought side's price: Yes as is; No = 1 - the other side of the Yes book.
+        let q = (k > 0 && t <= now).then(|| rows[k - 1]).filter(|r| t - r.0 <= stale).map(|(_, b, a)| if yes { (b, a) } else { (a.map(|x| 1.0 - x), b.map(|x| 1.0 - x)) });
+        bid.push(cents(q.and_then(|x| x.0)));
+        ask.push(cents(q.and_then(|x| x.1)));
+        let (d, _) = local(t);
+        // Unique labels (an invisible mark on repeats) so a time can be pointed at exactly.
+        let l = format!("{:02}:{:02}", d.hour(), d.minute());
+        let dup = labels.iter().filter(|x: &&String| x.trim_end_matches('\u{200b}') == l).count();
+        labels.push(format!("{l}{}", "\u{200b}".repeat(dup)));
+    }
+    // The first grid point at or after `t`: where the lines first show what happened at `t`.
+    let idx = |t: Ms| (((t - t0) as f64 / step as f64).ceil().max(0.0) as usize).min(n - 1);
+    // The bookmakers on the same time grid and the same side: the one whose move triggered the
+    // trade, and the middle of all of them (each feed family once), as the bot reads them. Their
+    // prices are 1 / odds, so they sit on the same cents scale as Polymarket's.
+    const BOOK_AGE: Ms = 20 * 60_000;
+    let trig = v["trigger"].as_str().unwrap_or("").to_string();
+    let mut books: HashMap<String, Vec<(Ms, f64)>> = HashMap::new();
+    if let Ok(mut bs) = c.prepare("SELECT ts_ms, book, new_price FROM changes WHERE match_id = ?1 AND market = '1x2' AND outcome = ?2 AND ts_ms >= ?3 AND ts_ms <= ?4 AND new_price IS NOT NULL AND book NOT IN ('polymarket', 'kalshi') ORDER BY ts_ms") {
+        if let Ok(it) = bs.query_map(params![m, o, t0 - BOOK_AGE, t1], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?))) {
+            for (t, b, p) in it.flatten() {
+                books.entry(b).or_default().push((t, 1.0 / p.max(1.0001)));
+            }
+        }
+    }
+    let side = |p: f64| if yes { p } else { 1.0 - p };
+    let at = |s: &[(Ms, f64)], t: Ms| -> Option<f64> {
+        let i = s.partition_point(|x| x.0 <= t);
+        (i > 0 && t <= now && t - s[i - 1].0 <= BOOK_AGE).then(|| s[i - 1].1)
+    };
+    let (mut trig_line, mut mid_line) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    for i in 0..n {
+        let t = t0 + i as Ms * step;
+        trig_line.push(cents(books.get(&trig).and_then(|s| at(s, t)).map(side)));
+        let mut fam: std::collections::BTreeMap<&str, (f64, usize)> = Default::default();
+        for (b, s) in &books {
+            if let Some(p) = at(s, t) {
+                let e = fam.entry(crate::snipe::platform(b)).or_default();
+                e.0 += p;
+                e.1 += 1;
+            }
+        }
+        let mut means: Vec<f64> = fam.values().map(|(s, k)| s / *k as f64).collect();
+        means.sort_by(|a, b| a.total_cmp(b));
+        mid_line.push(cents((!means.is_empty()).then(|| side(means[means.len() / 2]))));
+    }
+    // The bookmaker update the bot reacted to.
+    let mut signal = vec![Value::Null; n];
+    if let Some(mv) = v["move_ms"].as_i64() {
+        if let Some(p) = books.get(&trig).and_then(|s| at(s, mv + 1_500)) {
+            signal[idx(mv)] = json!(cents(Some(side(p))));
+        }
+    }
+    let mut buy = vec![Value::Null; n];
+    let mut sell = vec![Value::Null; n];
+    buy[idx(ts)] = json!(cents(v["entry"].as_f64()));
     if let Some(cl) = v["closed_ms"].as_i64() {
         sell[idx(cl)] = json!(cents(v["exit"].as_f64()));
     }
-    let eta = if v["closed_ms"].is_i64() { String::new() } else { format!(" · cash in {}", eta_text(app, v["ts"].as_i64().unwrap_or(0))) };
-    let title = format!("{} v {} · {} {} · {} (cents) · pays at {}¢{eta}, gives up {}", v["home"].as_str().unwrap_or(""), v["away"].as_str().unwrap_or(""), if yes { "Yes" } else { "No" }, outcome_name(&o), if v["real"].as_bool() == Some(true) { "REAL" } else { "paper" },
-        target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into()), give.map(hhmm).unwrap_or_default());
+    let pays = target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into());
+    // What the trade expects: Polymarket climbing from the buy to the sale price over a typical
+    // hold, then staying there until the give-up.
+    let entry = v["entry"].as_f64();
+    let give_end = give.unwrap_or(ts + 300_000);
+    let mut expect = vec![Value::Null; n];
+    if let (Some(e), Some(x)) = (entry, target) {
+        let (a, b) = (idx(ts), idx(ts + hold.max(step)));
+        for (i, slot) in expect.iter_mut().enumerate().take(idx(give_end) + 1).skip(a) {
+            let f = if b > a { ((i - a) as f64 / (b - a) as f64).min(1.0) } else { 1.0 };
+            *slot = json!(cents(Some(e + (x - e) * f)));
+        }
+    }
+    let be = break_even(v);
+    let title = format!("{} v {} · {} {} · {} (cents) · sells at {pays}¢, gives up {}", v["home"].as_str().unwrap_or(""), v["away"].as_str().unwrap_or(""), if yes { "Yes" } else { "No" }, outcome_name(&o), if v["real"].as_bool() == Some(true) { "REAL" } else { "paper" }, give.map(hhmm).unwrap_or_default());
+    let line = |label: String, data: Value, colour: &str, width: f64| json!({"label": label, "data": data, "borderColor": colour, "backgroundColor": colour, "fill": false, "pointRadius": 0, "lineTension": 0, "borderWidth": width});
+    let mark = |label: &str, data: Vec<Value>, colour: &str, shape: &str| json!({"label": label, "data": data, "borderColor": colour, "backgroundColor": colour, "showLine": false, "fill": false, "pointRadius": 8, "pointHoverRadius": 8, "pointStyle": shape});
+    // One rule on this chart: solid = what happened; dotted and faded = the plan or a prediction;
+    // the shaded part is still to come.
+    let mut target_line = line(format!("Plan: cash out at {pays}¢"), json!(vec![cents(target); n]), "rgba(46,158,91,0.55)", 1.5);
+    target_line["borderDash"] = json!([6, 4]);
+    let mut expect_line = line("Prediction".into(), json!(expect), "rgba(46,158,91,0.6)", 2.5);
+    expect_line["borderDash"] = json!([2, 4]);
+    let mut be_line = line(format!("Plan: break-even {}¢", be.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into())), json!(vec![cents(be); n]), "rgba(110,110,110,0.55)", 1.0);
+    be_line["borderDash"] = json!([2, 4]);
+    let mut opts = chart_options(&title, "¢");
+    // The give-up time: there it sells at whatever the price is (no stop-loss before it).
+    let mut notes = vec![json!({"type": "line", "mode": "vertical", "scaleID": "x-axis-0", "value": labels[idx(give_end)].clone(), "borderColor": "rgba(214,69,69,0.7)", "borderWidth": 1.5, "borderDash": [6, 4],
+        "label": {"enabled": true, "content": format!("Plan: gives up {} · sells at any price", hhmm(give_end)), "position": "top", "xAdjust": 120, "yAdjust": 6, "backgroundColor": "rgba(214,69,69,0.8)", "fontSize": 11}})];
+    // Still open: everything after now is shaded and a solid line marks now.
+    if v["closed_ms"].is_null() && now < t1 {
+        let i = idx(now);
+        notes.insert(0, json!({"type": "box", "xScaleID": "x-axis-0", "xMin": labels[i].clone(), "xMax": labels[n - 1].clone(), "backgroundColor": "rgba(0,0,0,0.045)", "borderWidth": 0}));
+        notes.push(json!({"type": "line", "mode": "vertical", "scaleID": "x-axis-0", "value": labels[i].clone(), "borderColor": "#555", "borderWidth": 1.5,
+            "label": {"enabled": true, "content": "Now", "position": "bottom", "yAdjust": -6, "backgroundColor": "rgba(60,60,60,0.85)", "fontSize": 11}}));
+    }
+    opts["annotation"] = json!({"annotations": notes});
     Some(json!({
         "type": "line",
+        // Markers first: the first dataset is drawn on top.
         "data": {"labels": labels, "datasets": [
-            {"label": "Bid", "data": mins.values().map(|x| cents(x.0)).collect::<Vec<_>>(), "borderColor": "#7a8a86", "fill": false, "pointRadius": 0, "borderWidth": 1.5, "steppedLine": true},
-            {"label": "Ask", "data": mins.values().map(|x| cents(x.1)).collect::<Vec<_>>(), "borderColor": "#b8c4c0", "fill": false, "pointRadius": 0, "borderWidth": 1.5, "steppedLine": true},
-            {"label": "Buy", "data": buy, "borderColor": "#0f9e73", "backgroundColor": "#0f9e73", "showLine": false, "pointRadius": 7, "pointStyle": "triangle"},
-            {"label": "Sell", "data": sell, "borderColor": "#e0453c", "backgroundColor": "#e0453c", "showLine": false, "pointRadius": 7, "pointStyle": "rectRot"},
-            {"label": format!("Pays at {}¢ (sells when caught up)", target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into())), "data": vec![cents(target); keys.len()], "borderColor": "#2f6fdb", "borderDash": [6, 4], "fill": false, "pointRadius": 0, "borderWidth": 1.5},
+            mark("Buy", buy, "#2e9e5b", "triangle"),
+            mark("Sell", sell, "#d64545", "rectRot"),
+            mark("Bookmaker move", signal, "#e07b25", "circle"),
+            line("Polymarket sell".into(), json!(bid), "#2f6fdf", 2.5),
+            line("Polymarket buy".into(), json!(ask), "#a9bfee", 1.0),
+            line(trig.clone(), json!(trig_line), "#e07b25", 2.0),
+            line("All bookmakers".into(), json!(mid_line), "#8e44ad", 1.2),
+            target_line,
+            expect_line,
+            be_line,
         ]},
-        "options": {"title": {"display": true, "text": title}, "legend": {"position": "bottom"}, "spanGaps": true,
-            "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "¢"}}]}}
+        "options": opts,
     }))
 }
 
@@ -674,17 +826,17 @@ fn balance_chart(app: &App, real: bool) -> Option<(Value, String)> {
     }
     labels.push("now".into());
     vals.push((bal * 100.0).round() / 100.0);
-    let colour = if bal >= start_bal { "#0f9e73" } else { "#e0453c" };
+    // Real money in black, paper in blue, as the insights bot draws them.
+    let colour = if real { "#111111" } else { "#2f6fdf" };
     let wins = pts.iter().filter(|p| p.1 > 0.0).count();
     let caption = format!("💼 <b>Bot balance ${bal:.2}</b> ({}{:.2} from ${start_bal:.0}) · {} trades, {wins} won", if bal >= start_bal { "+$" } else { "-$" }, (bal - start_bal).abs(), pts.len());
     Some((json!({
         "type": "line",
         "data": {"labels": labels, "datasets": [
-            {"label": "Balance ($)", "data": vals, "borderColor": colour, "backgroundColor": "rgba(15,158,115,0.08)", "fill": true, "pointRadius": 3, "steppedLine": true, "borderWidth": 2},
-            {"label": "Start", "data": vec![start_bal; labels.len()], "borderColor": "#9aa5a1", "borderDash": [6, 4], "fill": false, "pointRadius": 0, "borderWidth": 1},
+            {"label": "Wallet ($)", "data": vals, "borderColor": colour, "backgroundColor": colour, "fill": false, "pointRadius": if labels.len() <= 31 { 2 } else { 0 }, "lineTension": 0, "borderWidth": 3},
+            {"label": format!("start ${start_bal:.0}"), "data": vec![start_bal; labels.len()], "borderColor": "#d0d0d0", "backgroundColor": "#d0d0d0", "fill": false, "pointRadius": 0, "lineTension": 0, "borderWidth": 1},
         ]},
-        "options": {"title": {"display": true, "text": [label, format!("${bal:.2} now")]}, "legend": {"position": "bottom"},
-            "scales": {"yAxes": [{"scaleLabel": {"display": true, "labelString": "$"}}]}}
+        "options": chart_options(&label, "$"),
     }), caption))
 }
 
@@ -702,7 +854,7 @@ async fn send_chart(chart: &Value, caption: &str) -> Result<()> {
     let http = client();
     let r: Value = http
         .post("https://quickchart.io/chart/create")
-        .json(&json!({"chart": chart, "width": 900, "height": 500, "devicePixelRatio": 2, "backgroundColor": "white", "format": "png"}))
+        .json(&json!({"chart": chart, "width": 900, "height": 600, "devicePixelRatio": 2, "backgroundColor": "white", "format": "png"}))
         .send()
         .await?
         .json()
@@ -998,6 +1150,7 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
             Ok(v) => format!("⏱ Run extended. It now ends {}.", hhmm(v["end_ms"].as_i64().unwrap_or(0))),
             Err(e) => format!("Use: /extend 2h (1 to 48 hours)\n{}", esc(&e.to_string())),
         },
+        "/realon" => realon(app, &arg).await,
         "/stoprun" => match crate::bots::stop_run(app, "stopped from Telegram") {
             Ok(_) => "🏁 Real run stopped. Real money is off; open real positions are still sold. The summary follows.".into(),
             Err(_) => "No real run going.".into(),
@@ -1033,6 +1186,55 @@ No new trades, paper or real. Open ones are still sold. /unkill resumes.".into()
     reply(http, &c.token, chat, &msg).await
 }
 
+
+/// Real money from Telegram, in two steps so one stray message cannot start it: /realon shows
+/// what would start; "/realon yes" within 2 minutes starts it. It starts a test run (the Bots
+/// page's real amount and real stake, a new real wallet, the run's safety stops), never a bigger
+/// amount than the settings hold. Only the linked chat reaches this, and it is not part of
+/// `preview`, so nothing but a Telegram message from that chat can start real money here.
+async fn realon(app: &App, arg: &str) -> String {
+    let s = crate::bots::settings();
+    let a = arg.trim().to_lowercase();
+    let now = now_ms();
+    let (bank, stake) = (s.snipe.c.bankroll, s.snipe.real_stake(s.snipe.c.bankroll));
+    if a == "yes" {
+        let Some((t, hours)) = REALON.lock().take() else { return "Send /realon first: it shows what will start.".into() };
+        if now - t > 120_000 {
+            return "That took more than 2 minutes. Send /realon again.".into();
+        }
+        let pm = crate::pmacct::load(&app.db_path);
+        let cash = crate::exec::pm_cash(&crate::books::http_client(), &pm).await.ok();
+        return match crate::bots::start_run(app, hours, bank, cash, "REAL MONEY") {
+            Ok(_) => format!(
+                "💵 <b>Real money is ON</b>\nNew wallet {}, about {} a trade, for {hours} hours.\nIt stops by itself at -{} for the day (open positions counted) and on the run's safety stops.\n\n/realoff stops real money\n/kill stops everything\n/safety shows the stops",
+                dollars(bank), dollars(stake), dollars(s.snipe.c.daily_loss)
+            ),
+            Err(e) => format!("Not started: {}", esc(&format!("{e:#}"))),
+        };
+    }
+    let hours = if a.is_empty() { 8 } else { a.trim_end_matches(|c: char| c.is_ascii_alphabetic()).trim().parse::<i64>().unwrap_or(0) };
+    if ![4, 8, 9, 16, 24].contains(&hours) {
+        return "Use /realon (8 hours) or /realon 4, 16 or 24.".into();
+    }
+    if s.run.is_some() || s.snipe.c.real {
+        return "Real money is already on. /realoff stops it.".into();
+    }
+    if s.kill {
+        return "The kill switch is on. /unkill first.".into();
+    }
+    if !crate::adaptive::rules_ready() {
+        return "The bot is still loading its rules after a restart (up to 25 minutes). Try again when /rules answers.".into();
+    }
+    *REALON.lock() = Some((now, hours));
+    let when = match s.snipe.hours() {
+        Some([a, b]) => format!("trading {a:02}:00-{b:02}:00 UTC"),
+        None => "trading at all hours".into(),
+    };
+    format!(
+        "⚠️ <b>Switch REAL money on?</b>\nNew wallet {}, about {} a trade, for {hours} hours, {when}.\n\nIt stops by itself: at -{} for the day (open positions counted), after 3 losing trades in a row, if under half its trades win once there are 10, or if orders keep failing. /realon starts it again.\n\nSend <b>/realon yes</b> within 2 minutes to start.\n/realoff stops it at any time.",
+        dollars(bank), dollars(stake), dollars(s.snipe.c.daily_loss)
+    )
+}
 
 fn money_s(x: f64) -> String {
     format!("{}{}", if x < 0.0 { "-" } else { "+" }, dollars(x.abs()))
@@ -1113,7 +1315,7 @@ fn projected(app: &App, arg: &str) -> String {
 fn real_log(app: &App, n: i64) -> String {
     let Ok(c) = crate::store::open_ro(&app.db_path) else { return "Database not readable.".into() };
     let rows: Vec<(Ms, String, String, bool, Value)> = c
-        .prepare("SELECT ts_ms, bot, venue, ok, data FROM bot_orders ORDER BY id DESC LIMIT ?1")
+        .prepare("SELECT ts_ms, bot, venue, ok, data FROM bot_orders WHERE COALESCE(json_extract(data, '$.intent'), 0) = 0 ORDER BY id DESC LIMIT ?1")
         .and_then(|mut st| st.query_map([n], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0, serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null)))).map(|it| it.filter_map(|x| x.ok()).collect()))
         .unwrap_or_default();
     if rows.is_empty() {
@@ -1298,6 +1500,9 @@ fn buy_text(v: &Value, compact: bool) -> String {
         if let Some(g) = give {
             t.push_str(&format!(" · gives up {}", hhmm(g)));
         }
+    }
+    if let Some(be) = break_even(v) {
+        t.push_str(&format!("\n⚖️ Break-even {} · no stop-loss: at the give-up it sells at any price; most it can lose {}", cents(be), dollars(cost)));
     }
     let set = if v["set"] == "wider" { "Wider set" } else { "Safe set" };
     t.push_str(&format!("\n<i>{set} · {} feeds moved · expected gain {}</i>", v["books"][1].as_u64().unwrap_or(0), cents(v["edge"].as_f64().unwrap_or(0.0))));
@@ -1605,6 +1810,10 @@ fn sig_name(k: &str) -> String {
         "gone_at_match" => "Offer gone when the order matched",
         "real_not_filled" => "Real order did not fill",
         "real_order_failed" => "Real order failed",
+        "polymarket_already_apart" => "Polymarket already far from the bookmakers",
+        "measured_too_late" => "Decision came too late (Mac busy)",
+        "moved_with_first_book" => "Polymarket moved with the first bookmaker",
+        "same_move" => "Same move, already taken",
         "already_in_game" => "Real money already in this game",
         "feed_quiet" => "Polymarket price feed went quiet",
         "wider_set_daily_stop" => "Wider set stopped for today",
@@ -1646,19 +1855,20 @@ fn signals_text(app: &App) -> String {
 fn safety_text(app: &App) -> String {
     let Some(f) = crate::bots::run_guard_facts(app) else {
         let s = crate::bots::settings();
-        return format!("🛡 No real run going, so nothing to stop.\nA run stops itself after −{}, two losses in a row, too few winners, one trade losing nearly its whole stake, refused orders, or real fills clearly worse than paper.", dollars(s.snipe.c.daily_loss));
+        return format!("🛡 No real run going, so nothing to stop.\nA run stops itself after −{} on the day (open positions counted), 3 losses in a row, under half its trades winning after 10, refused orders, or real fills clearly worse than paper.", dollars(s.snipe.c.daily_loss));
     };
     let l = &f["limits"];
     let ok = |bad: bool| if bad { "⚠️" } else { "✅" };
     let (closed, wins) = (f["closed"].as_u64().unwrap_or(0), f["wins"].as_u64().unwrap_or(0));
     let (loss, limit) = (f["loss"].as_f64().unwrap_or(0.0), f["loss_limit"].as_f64().unwrap_or(0.0));
-    let in_row = if f["last_two_lost"] == true { 2 } else if f["last_lost"] == true { 1 } else { 0 };
+    let in_row = f["losers_in_row"].as_u64().unwrap_or(0);
+    let row_max = l["losers_in_row"].as_u64().unwrap_or(3);
     let worst = f["worst_return"].as_f64().unwrap_or(0.0);
-    let mut t = format!("🛡 <b>Safety stops</b> · real run\n{} Lost {} of {}\n{} Losses in a row: {in_row} of 2\n{} Winners: {wins} of {closed} (needs {:.0}% once there are {})\n{} Worst trade {:.0}% (stops at −{:.0}%)\n{} Refused orders: {} of {}\n{} Buys that found nothing: {} (stops at {} if most)",
+    let mut t = format!("🛡 <b>Safety stops</b> · real run\n{} Lost {} of {}\n{} Losses in a row: {in_row} of {row_max}\n{} Winners: {wins} of {closed} (needs {:.0}% once there are {})\n▫️ Worst trade {:.0}% (no stop by itself)\n{} Refused orders: {} of {}\n{} Buys that found nothing: {} (stops at {} if most)",
         ok(loss >= limit * 0.5), dollars(loss), dollars(limit),
-        ok(in_row >= 1),
-        ok(closed >= 3 && (wins as f64) < 0.7 * closed as f64), l["win_share"].as_f64().unwrap_or(0.0) * 100.0, l["win_min_trades"],
-        ok(worst <= -0.5), worst * 100.0, l["one_trade_loss"].as_f64().unwrap_or(0.0) * 100.0,
+        ok(in_row + 1 >= row_max),
+        ok(closed >= 6 && (wins as f64) < 0.6 * closed as f64), l["win_share"].as_f64().unwrap_or(0.0) * 100.0, l["win_min_trades"],
+        worst * 100.0,
         ok(f["refused"].as_u64().unwrap_or(0) >= 1), f["refused"], l["refused"],
         ok(f["unfilled_buys"].as_u64().unwrap_or(0) >= 3), f["unfilled_buys"], l["unfilled_buys"]);
     t.push_str(&match f["twin_gap"].as_f64() {
@@ -1884,7 +2094,7 @@ fn toggle(cmd: &str, arg: &str) -> Option<String> {
     Some(alerts_text())
 }
 
-const HELP: &str = "<b>Swifteye snipe bot</b>\n\n<b>Now</b>\n/status · /now · /open · /today · /hours\n\n<b>Wallets</b>\n/real · /paper · /account · /balance · /balancepaper\n\n<b>Results</b>\n/trades · /last · /chart · /best · /worst · /week · /stats · /sports\n\n<b>Real run</b>\n/run · /safety · /twins · /compare · /extend 2h · /stoprun · /realoff\n\n<b>How it works</b>\n/rules · /settings · /signals · /replay · /projected 24h · /timing · /log · /health\n\n<b>Controls</b>\n/kill · /unkill · /pause · /resume · /alerts\n/buys, /sells, /charts, /updates on|off\n\n<i>Starting real money and raising its amount is only on the Bots page.</i>";
+const HELP: &str = "<b>Swifteye snipe bot</b>\n\n<b>Now</b>\n/status · /now · /open · /today · /hours\n\n<b>Wallets</b>\n/real · /paper · /account · /balance · /balancepaper\n\n<b>Results</b>\n/trades · /last · /chart · /best · /worst · /week · /stats · /sports\n\n<b>Real run</b>\n/run · /safety · /twins · /compare · /extend 2h · /realon · /stoprun · /realoff\n\n<b>How it works</b>\n/rules · /settings · /signals · /replay · /projected 24h · /timing · /log · /health\n\n<b>Controls</b>\n/kill · /unkill · /pause · /resume · /alerts\n/buys, /sells, /charts, /updates on|off\n\n<i>/realon starts real money (it asks you to confirm). Raising its amount is only on the Bots page.</i>";
 
 
 fn arb_text(a: &crate::arb::Arb) -> String {
@@ -2218,9 +2428,30 @@ mod bot_text_tests {
         assert!(t.line().contains("+$2.40") && t.line().contains("1 open"));
     }
 
+    /// Not a unit test: writes the chart of one recorded trade as JSON (SWIFTEYE_DB, TRADE_ID, OUT),
+    /// to render and look at.
+    #[test]
+    #[ignore]
+    fn dump_trade_chart() {
+        let db = PathBuf::from(std::env::var("SWIFTEYE_DB").expect("SWIFTEYE_DB"));
+        let id: i64 = std::env::var("TRADE_ID").expect("TRADE_ID").parse().unwrap();
+        let c = crate::store::open_ro(&db).unwrap();
+        let (d, real, cl): (String, i64, Option<Ms>) = c.query_row("SELECT data, real, closed_ms FROM bot_trades WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let mut v: Value = serde_json::from_str(&d).unwrap();
+        v["real"] = json!(real != 0);
+        v["closed_ms"] = json!(cl);
+        // As an open trade (the chart sent with the buy) when OPEN is set.
+        if std::env::var("OPEN").is_ok() {
+            v["closed_ms"] = Value::Null;
+        }
+        let now = std::env::var("NOW").ok().and_then(|x| x.parse().ok()).unwrap_or_else(now_ms);
+        let ch = trade_chart_at(&db, &v, 60_000, now).expect("chart");
+        std::fs::write(std::env::var("OUT").expect("OUT"), serde_json::to_vec(&ch).unwrap()).unwrap();
+    }
+
     #[test]
     fn every_listed_command_is_in_the_help() {
-        for c in ["/status", "/now", "/open", "/today", "/hours", "/real", "/paper", "/account", "/balance", "/trades", "/last", "/chart", "/best", "/worst", "/week", "/stats", "/sports", "/run", "/safety", "/twins", "/compare", "/extend", "/stoprun", "/realoff", "/rules", "/settings", "/signals", "/replay", "/projected", "/timing", "/log", "/health", "/kill", "/unkill", "/pause", "/resume", "/alerts", "/buys", "/sells", "/charts", "/updates"] {
+        for c in ["/status", "/now", "/open", "/today", "/hours", "/real", "/paper", "/account", "/balance", "/trades", "/last", "/chart", "/best", "/worst", "/week", "/stats", "/sports", "/run", "/safety", "/twins", "/compare", "/extend", "/realon", "/stoprun", "/realoff", "/rules", "/settings", "/signals", "/replay", "/projected", "/timing", "/log", "/health", "/kill", "/unkill", "/pause", "/resume", "/alerts", "/buys", "/sells", "/charts", "/updates"] {
             assert!(HELP.contains(c), "{c} missing from the help");
         }
     }

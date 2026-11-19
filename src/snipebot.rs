@@ -40,6 +40,13 @@ const SLIP: f64 = 0.01;
 const CAP: f64 = 0.02;
 const MIN_JUMP: f64 = 0.04;
 const SAME_MOVE_MS: Ms = 120_000;
+/// Bookmakers moving the same way within this long of the first one are one move (the replay's
+/// event window).
+const MOVE_MS: Ms = crate::adaptive::MOVE_MS;
+/// A decision reached this long after its planned moment (move + 1.75 s) is dropped. Measuring is
+/// normally done about 0.3 s after it; when the disk is busy (a replay rebuild) it has taken up to
+/// a minute, and an order sent then lands on a price nobody tested.
+const LATE_MAX_MS: Ms = 1_000;
 /// Time for the store to have written what the stream already delivered.
 const STORE_LAG_MS: Ms = 400;
 /// No trade when Polymarket's price socket has been silent this long: the book in memory and the
@@ -53,10 +60,12 @@ const RECHECK_MS: u64 = 4_000;
 struct State {
     /// (match, outcome, book) -> (last real probability, when)
     last: HashMap<(i64, Outcome, &'static str), (f64, Ms)>,
-    /// match -> when a candidate last started. Per GAME, not per outcome: in a two-way market one
-    /// move shows on both sides (home up = away down) and both would buy the same token; the
-    /// simulator also takes one move per game per 2 minutes.
+    /// match -> when a move in it was last taken (passed the rules). Per GAME, not per outcome: in
+    /// a two-way market one move shows on both sides (home up = away down) and both would buy the
+    /// same token; the replay also takes one move per game per 2 minutes.
     seen: HashMap<i64, Ms>,
+    /// (match, outcome, up?) -> when the first bookmaker of the current move moved (see `move_start`).
+    starts: HashMap<(i64, Outcome, bool), Ms>,
     candidates: u64,
     skipped: BTreeMap<String, u64>,
     entered: BTreeMap<String, u64>,
@@ -105,6 +114,25 @@ pub fn spawn(app: Arc<App>) {
                 if let Ok(Some(msg)) = tokio::task::spawn_blocking(move || bots::tick_run(&a2)).await {
                     let _ = crate::telegram::send("bot", &msg).await;
                 }
+                // The daily loss stop looks at open positions too, so it is checked on a clock,
+                // not only when a trade is sold.
+                if bots::mode(SNIPE) == Some(true) {
+                    let a3 = a.clone();
+                    let _ = tokio::task::spawn_blocking(move || bots::check_daily_loss(&a3, SNIPE)).await;
+                }
+            }
+        });
+    }
+    // A real buy that was going out when the bot last stopped and has no recorded result: say so
+    // (it may have filled; nothing sells shares the bot has no trade for).
+    {
+        let a = app.clone();
+        tokio::spawn(async move {
+            let lost = tokio::task::spawn_blocking(move || bots::unresolved_intents(&a)).await.unwrap_or_default();
+            for v in lost {
+                let what = format!("{} v {} ({})", v["home"].as_str().unwrap_or("?"), v["away"].as_str().unwrap_or("?"), v["outcome"].as_str().unwrap_or("?"));
+                bots::event(format!("snipe: a real buy of {} shares of {what} was being sent when the bot stopped and has no recorded result: check the Polymarket account", v["shares"]));
+                let _ = crate::telegram::send("bot", &format!("⚠️ <b>Check your Polymarket positions</b>\nA real buy of {} shares of {} (limit {:.0}¢) was being sent when the bot stopped, and no result was recorded. If it filled, the bot is NOT tracking those shares: sell them yourself or tell me.", v["shares"], what, v["limit"].as_f64().unwrap_or(0.0) * 100.0)).await;
             }
         });
     }
@@ -163,13 +191,13 @@ fn on_change(app: &Arc<App>, ch: &Change) {
         return;
     }
     {
+        // A game is locked for 2 minutes only once a move in it was TAKEN (see `claim`), as in
+        // the replay. Locking it on every move looked at threw away the bigger move that often
+        // follows a small one seconds later: 26 of the replay's 36 trades on 17-19 Nov.
         let mut s = ST.lock();
-        let k = ch.match_id;
-        if s.seen.get(&k).is_some_and(|t| ch.ts_ms - *t < SAME_MOVE_MS) {
+        if s.seen.get(&ch.match_id).is_some_and(|t| (ch.ts_ms - *t).abs() < SAME_MOVE_MS) {
             return;
         }
-        s.seen.insert(k, ch.ts_ms);
-        s.seen.retain(|_, t| ch.ts_ms - *t < SAME_MOVE_MS);
         s.candidates += 1;
     }
     let (app, m, o, dir, book, t0) = (app.clone(), ch.match_id, ch.outcome, if jump > 0.0 { 1.0 } else { -1.0 }, ch.book, ch.ts_ms);
@@ -180,11 +208,15 @@ fn on_change(app: &Arc<App>, ch: &Change) {
         }
         let a = app.clone();
         let t_meas = now_ms();
-        let feat = tokio::task::spawn_blocking(move || measure(&a, m, o, dir, book, t0)).await.ok().flatten();
+        // The smallest move any rule set takes: smaller ones stop before the expensive reads.
+        let min_any = crate::adaptive::LIVE_MIN_MOVE;
+        let feat = tokio::task::spawn_blocking(move || measure(&a, m, o, dir, book, t0, min_any)).await.ok().flatten();
         let Some(mut feat) = feat else { return };
         feat.measure_ms = now_ms() - t_meas;
         let mut rules = crate::adaptive::active_rules();
         rules.max_followed = rules.max_followed.min(crate::adaptive::SAFE_MAX_FOLLOWED);
+        // The replay measures no smaller move: the bot takes none either.
+        rules.min_move = rules.min_move.max(crate::adaptive::LIVE_MIN_MOVE);
         let mut one = rules;
         one.min_books = 1;
         let fill_at = t0 + REACTION + CONFIRM + FILL;
@@ -192,18 +224,34 @@ fn on_change(app: &Arc<App>, ch: &Change) {
         if wait > 0 {
             tokio::time::sleep(Duration::from_millis(wait as u64)).await;
         }
+        let late = now_ms() - fill_at;
+        if late > LATE_MAX_MS {
+            let mut j = feat.json();
+            j["late_ms"] = json!(late);
+            note(SNIPE, "measured_too_late", j);
+            return;
+        }
         if let Some(real) = main {
+            // Right after a restart the chosen rules are not loaded yet (the defaults are looser).
+            if !crate::adaptive::rules_ready() {
+                note(SNIPE, "rules_loading", feat.json());
+                return;
+            }
             let safe = crate::adaptive::Flt::live();
             match gate(&feat, &rules, &safe) {
+                // Passed, but another move in this game was just taken: the same event twice.
+                Ok(()) if !claim(m, t0) => note(SNIPE, "same_move", feat.json()),
                 Ok(()) => {
-                    // Real money always has a paper twin on the same move, with the paper
-                    // wallet's own stakes: the pair shows what paper gets wrong. Started first
-                    // and on its own task, so it never delays the real order.
                     if real {
-                        let (a, f2) = (app.clone(), feat.clone());
-                        tokio::spawn(async move { enter(&a, SNIPE, false, &f2, &rules, false).await });
+                        // Real money first. Its paper twin (the paper wallet's own stake) copies
+                        // the real fill: the same price, and no paper trade when the real order
+                        // did not fill. It then sells when and where the real trade sells.
+                        if let Some(fill) = enter(&app, SNIPE, true, &feat, &rules, false, None).await {
+                            enter(&app, SNIPE, false, &feat, &rules, false, Some(fill)).await;
+                        }
+                    } else {
+                        enter(&app, SNIPE, false, &feat, &rules, false, None).await;
                     }
-                    enter(&app, SNIPE, real, &feat, &rules, false).await
                 }
                 Err(why) => {
                     // Not a safe-set trade: the wider set (smaller stake, its own daily stop)?
@@ -219,8 +267,10 @@ fn on_change(app: &Arc<App>, ch: &Change) {
                         let real_b = real && bots::settings().run.is_none();
                         if set.b_daily_loss > 0.0 && wider_today(&app, real_b) <= -set.b_daily_loss {
                             note(SNIPE, "wider_set_daily_stop", feat.json());
+                        } else if !claim(m, t0) {
+                            note(SNIPE, "same_move", feat.json());
                         } else {
-                            enter(&app, SNIPE, real_b, &feat, &pb, true).await;
+                            enter(&app, SNIPE, real_b, &feat, &pb, true, None).await;
                         }
                     }
                 }
@@ -228,7 +278,9 @@ fn on_change(app: &Arc<App>, ch: &Change) {
         }
         if shadow {
             match gate(&feat, &one, &crate::adaptive::Flt::live()) {
-                Ok(()) => enter(&app, SNIPE_SHADOW, false, &feat, &one, false).await,
+                Ok(()) => {
+                    enter(&app, SNIPE_SHADOW, false, &feat, &one, false, None).await;
+                }
                 Err(why) => note(SNIPE_SHADOW, why, Value::Null),
             }
         }
@@ -247,6 +299,9 @@ struct Feat {
     bm: [f64; 2],
     books: [usize; 2],
     fol: [f64; 2],
+    /// Share of the move Polymarket made since the FIRST bookmaker of this move moved (a slow
+    /// book updating late looks like a fresh move that Polymarket has not followed).
+    fol_start: f64,
     sp: [f64; 2],
     dec: [f64; 2],
     pause: bool,
@@ -264,7 +319,7 @@ struct Feat {
 
 impl Feat {
     fn json(&self) -> Value {
-        json!({"match_id": self.m, "outcome": self.o.as_str(), "dir": self.dir, "trigger": self.trigger, "books": self.books, "move": self.bm, "followed": self.fol, "spread": self.sp, "tr": self.tr, "dec": self.dec, "cx": self.cx, "sport": self.sport, "measure_ms": self.measure_ms})
+        json!({"match_id": self.m, "outcome": self.o.as_str(), "dir": self.dir, "trigger": self.trigger, "books": self.books, "move": self.bm, "followed": self.fol, "followed_since_start": self.fol_start, "gap_before": crate::adaptive::gap_before(&self.cx, self.dir, self.pre_mid), "spread": self.sp, "tr": self.tr, "dec": self.dec, "cx": self.cx, "sport": self.sport, "measure_ms": self.measure_ms})
     }
     /// Expected gain per contract if Polymarket catches up to `catch` of the move (test i).
     fn edge(&self, i: usize, catch: f64) -> f64 {
@@ -296,7 +351,7 @@ fn platforms_moved(c: &Connection, m: i64, o: &str, dir: f64, from: Ms, t: Ms) -
     p.len()
 }
 
-fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: Ms) -> Option<Feat> {
+fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: Ms, min_any: f64) -> Option<Feat> {
     let c = crate::store::open_ro(&app.db_path).ok()?;
     let os = o.as_str();
     let (td, td2) = (t0 + REACTION, t0 + REACTION + CONFIRM);
@@ -312,12 +367,20 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
     if bm[0] < 0.01 || bm[1] < 0.01 {
         return skip("book_reverted");
     }
+    let start = move_start(m, o, dir, t0);
+    // Too small for every rule set: counted, not logged, and nothing more is read. Every
+    // bookmaker update is a trigger now (hundreds a minute) and most of them end here.
+    if bm[0] < min_any {
+        *ST.lock().skipped.entry(format!("{SNIPE}: move_too_small")).or_default() += 1;
+        return None;
+    }
     let mut q = snipe::pm_quotes(&c);
     let (Some(q0), Some(q1), Some(q2)) = (q.at(m, os, pre), q.at(m, os, td), q.at(m, os, td2)) else {
         return skip("no_market_price");
     };
     let pre_mid = (q0.0 + q0.1) / 2.0;
     let fol = |x: &snipe::Q, b: f64| ((x.0 + x.1) / 2.0 - pre_mid) * dir / b;
+    let fol_start = if start < t0 { q.at(m, os, start - snipe::PRE_MS).map(|e| ((q2.0 + q2.1) / 2.0 - (e.0 + e.1) / 2.0) * dir / bm[1]) } else { None };
     let dec = |x: &snipe::Q| if dir > 0.0 { x.1 + SLIP } else { 1.0 - x.0 + SLIP };
     let (a, b, cc, d) = crate::adaptive::trends(&c, q.as_mut(), trigger, m, os, dir, t0, pre_mid, b0, b2);
     let Some(cx) = crate::consensus::Series::load(&c, m, os, t0 - 31 * 60_000, td2).ctx(dir, pre, td2) else {
@@ -335,6 +398,7 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
         // Independent bookmakers = feed families that moved (as the replay counts them).
         books: [cx.fam_moved, cx.fam_moved],
         fol: [fol(&q1, bm[0]), fol(&q2, bm[1])],
+        fol_start: fol_start.unwrap_or_else(|| fol(&q2, bm[1])),
         sp: [q1.1 - q1.0, q2.1 - q2.0],
         dec: [dec(&q1), dec(&q2)],
         pause: crate::adaptive::after_pause(&c, trigger, m, os, t0),
@@ -346,6 +410,34 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
         home,
         away,
     })
+}
+
+/// When this move started: the first bookmaker (that did not bounce straight back) moving this
+/// outcome the same way within MOVE_MS before `t0`, else `t0` itself (this book is the first).
+fn move_start(m: i64, o: Outcome, dir: f64, t0: Ms) -> Ms {
+    let mut s = ST.lock();
+    if s.starts.len() > 20_000 {
+        s.starts.retain(|_, t| t0 - *t < 10 * 60_000);
+    }
+    let e = s.starts.entry((m, o, dir > 0.0)).or_insert(t0);
+    if t0 - *e > MOVE_MS || *e - t0 > MOVE_MS {
+        *e = t0; // a new move
+    } else if t0 < *e {
+        *e = t0; // an earlier book measured after a later one
+    }
+    *e
+}
+
+/// Take the game for a move that passed the rules: false when another move in it was taken
+/// within 2 minutes (home up and away down, or two books naming one move).
+fn claim(m: i64, t0: Ms) -> bool {
+    let mut s = ST.lock();
+    if s.seen.get(&m).is_some_and(|t| (t0 - *t).abs() < SAME_MOVE_MS) {
+        return false;
+    }
+    s.seen.retain(|_, t| t0 - *t < SAME_MOVE_MS);
+    s.seen.insert(m, t0);
+    true
 }
 
 /// Today's (UTC) result of the wider set's closed trades.
@@ -378,6 +470,10 @@ fn gate(f: &Feat, r: &crate::adaptive::Policy, flt: &crate::adaptive::Flt) -> Re
     if f.fol[0] > r.max_followed || f.fol[1] > r.max_followed {
         return Err("already_moved");
     }
+    // A slow bookmaker catching up late: Polymarket already moved with the first ones.
+    if f.fol_start > r.max_followed {
+        return Err("moved_with_first_book");
+    }
     if f.sp[0] > r.max_spread + 1e-9 || f.sp[1] > r.max_spread + 1e-9 {
         return Err("spread_too_wide");
     }
@@ -385,7 +481,7 @@ fn gate(f: &Feat, r: &crate::adaptive::Policy, flt: &crate::adaptive::Flt) -> Re
         return Err("price_out_of_range");
     }
     // Above 90c (no room to gain), trends against us, bounces and swingy games: see adaptive::Flt.
-    if let Some(why) = flt.check(&f.sport, f.trigger, now_ms(), f.dec[0].max(f.dec[1]), f.bm, f.tr, &f.cx) {
+    if let Some(why) = flt.check(&f.sport, f.trigger, now_ms(), f.dec[0].max(f.dec[1]), f.bm, f.tr, &f.cx, crate::adaptive::gap_before(&f.cx, f.dir, f.pre_mid)) {
         return Err(why);
     }
     if f.edge(0, r.catch) < r.min_edge || f.edge(1, r.catch) < r.min_edge {
@@ -430,37 +526,41 @@ fn take(levels: &[(f64, f64)], max_px: f64, dollars: f64) -> (f64, f64) {
     (n, if n > 0.0 { cost / n.max(1e-9) } else { 0.0 })
 }
 
-async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy, wider: bool) {
+/// Buy one move for one wallet: Some((trade id, price paid)) when a trade was made.
+/// `twin` = (the real trade, its price): a paper trade that copies a real fill instead of
+/// simulating its own, so paper never shows a buy or a price real money did not get.
+async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy, wider: bool, twin: Option<(i64, f64)>) -> Option<(i64, f64)> {
     let s = bots::settings();
     // Two wallets, nothing shared: real money uses the real wallet's fields (bankroll, r_pct,
     // r_max_trade), paper the paper wallet's. During a test run the paper side reads the copy
     // kept for after the run (the same numbers but for the Real switch).
     let sn = if real { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
     let quiet = now_ms() - venue::alive_ms(venue::V::Pm);
-    if quiet > FEED_QUIET_MS {
+    if twin.is_none() && quiet > FEED_QUIET_MS {
         note(bot, "feed_quiet", json!({"match_id": f.m, "outcome": f.o.as_str(), "quiet_ms": quiet}));
-        return;
+        return None;
     }
     let Some((token, asks, _, fee)) = our_book(f.m, f.o, f.dir) else {
         note(bot, "no_live_book", f.json());
-        return;
+        return None;
     };
-    let Some(best) = asks.first().map(|l| l.0) else {
+    let Some(best) = twin.map(|t| t.1).or_else(|| asks.first().map(|l| l.0)) else {
         note(bot, "no_offer", f.json());
-        return;
+        return None;
     };
-    if best + SLIP > f.dec[1] + CAP {
+    if twin.is_none() && best + SLIP > f.dec[1] + CAP {
         note(bot, "price_ran", f.json());
-        return;
+        return None;
     }
     // Stake: share of this bot's own balance (x edge), within its caps, cash and the game cap.
     let (cash, balance, open, room) = {
-        let Ok(c) = crate::store::open_ro(&app.db_path) else { return };
-        // Real money: one open position a game. A second move in the same game is the same bet
-        // again, and three of them would be most of a small wallet riding on one match.
-        if real && bots::real_open_in_game(&c, f.m) > 0 {
+        let Ok(c) = crate::store::open_ro(&app.db_path) else { return None };
+        // One open position a game, per wallet. A second move in the same game is the same bet
+        // again (or its opposite), and three of them would be most of a small wallet riding on one
+        // match. Paper follows the same rule, or its record shows trades real money cannot take.
+        if bots::open_in_game(&c, bot, real, f.m) > 0 {
             note(bot, "already_in_game", f.json());
-            return;
+            return None;
         }
         let (closed, open, _, _, _) = bots::snipe_ledger(&c, bot, real);
         let bal = sn.c.start + closed;
@@ -478,16 +578,19 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     let give_up_s = if !wider && sn.give_up_s > 0 { sn.give_up_s } else { r.give_up_s };
     if stake < snipe::MIN_FILL {
         note(bot, "no_cash", f.json());
-        return;
+        return None;
     }
     // Past the best price (up to 2c) only as far as the expected gain still clears the rule's
     // minimum at that price: every level bought must be worth buying on its own.
     let room = edge - (best + SLIP - f.dec[1]) - r.min_edge;
     let max_px = if r.walk_book { best + ((room * 100.0 + 1e-6).floor() / 100.0).clamp(0.0, 0.02) } else { best };
-    let (mut n, mut avg) = take(&asks, max_px, stake);
+    let (mut n, mut avg) = match twin {
+        Some((_, px)) => ((stake / px).floor(), px),
+        None => take(&asks, max_px, stake),
+    };
     if n < 1.0 || n * avg < snipe::MIN_FILL {
         note(bot, "too_thin", f.json());
-        return;
+        return None;
     }
     if real {
         let pm = crate::pmacct::load(&app.db_path);
@@ -503,9 +606,16 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
             Ok(w) => w,
             Err(e) => {
                 note(bot, "no_account_cash", json!({"error": format!("{e:#}")}));
-                return;
+                return None;
             }
         };
+        // Written beside the order, not before it (the order must not wait for the disk): if the
+        // bot dies before the result is recorded, the next start finds this and says so.
+        {
+            let a = app.clone();
+            let j = json!({"intent": true, "side": "buy-intent", "token": token, "limit": max_px, "shares": n, "match_id": f.m, "outcome": f.o.as_str(), "home": f.home, "away": f.away});
+            tokio::task::spawn_blocking(move || bots::log_intent(&a, bot, &j));
+        }
         let placed = crate::exec::pm_order(&http, &pm, &token, true, max_px, n, false).await;
         if let Ok(x) = &placed {
             wallet.spent += x.filled * x.avg * 1.02;
@@ -537,7 +647,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
                 let extra = base.zip(have).map(|(b, h)| ((h - b) * 100.0 + 1e-6).floor() / 100.0).unwrap_or(0.0);
                 if extra < 1.0 {
                     note(bot, why, f.json());
-                    return;
+                    return None;
                 }
                 // The order did buy: track it like any trade so it is watched and sold. The price
                 // is not known from the reply: the limit is the most it can have cost.
@@ -548,7 +658,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
                 let _ = crate::telegram::send("bot", &format!("⚠️ A real buy was reported as not filled but the account got {n} shares ({} {}). The bot is tracking it and will sell it as usual.", f.home, f.o.as_str())).await;
             }
         }
-    } else {
+    } else if twin.is_none() {
         // Paper: as a real order would fill. The order reaches Polymarket after its reply time
         // and, on a game already playing, matches only after the live-sports delay (both measured
         // by the test runs): the fill takes what rests at or under the limit THEN.
@@ -560,13 +670,13 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         tokio::time::sleep(Duration::from_millis(wait.max(0) as u64)).await;
         let Some((_, asks2, _, _)) = our_book(f.m, f.o, f.dir) else {
             note(bot, "gone_at_match", f.json());
-            return;
+            return None;
         };
         let (n2, avg2) = take(&asks2, max_px, n * max_px + 1.0);
         let n2 = n2.min(n);
         if n2 < 1.0 || n2 * avg2 < snipe::MIN_FILL {
             note(bot, "gone_at_match", json!({"match_id": f.m, "outcome": f.o.as_str(), "waited_ms": wait, "limit": max_px}));
-            return;
+            return None;
         }
         // No slippage on top: real buys paid exactly what rested at the match (19 Nov, 5 of 5).
         n = n2;
@@ -580,18 +690,20 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         "catch": r.catch, "give_up_s": give_up_s, "fee_rate": fee.rate, "set": if wider { "wider" } else { "safe" },
         "contracts": n, "entry": avg, "fee_in": fee_in, "cost": n * avg + fee_in, "stake": stake, "limit": max_px, "best": best,
         "tr": f.tr, "stop_px": crate::adaptive::Flt::live().stop_px(avg, f.bm[0]), "cx": f.cx, "revert": crate::adaptive::Flt::live().revert,
+        "followed_since_start": f.fol_start, "twin_of": twin.map(|t| t.0),
     });
     let id = {
-        let Ok(w) = Connection::open(&app.db_path) else { return };
+        let Ok(w) = Connection::open(&app.db_path) else { return None };
         let _ = w.busy_timeout(Duration::from_secs(5));
         if w.execute("INSERT INTO bot_trades(bot, real, ts_ms, match_id, data) VALUES (?1, ?2, ?3, ?4, ?5)", params![bot, real as i64, now_ms(), f.m, v.to_string()]).is_err() {
-            return;
+            return None;
         }
         w.last_insert_rowid()
     };
     note(bot, "entered", json!({"match_id": f.m, "outcome": f.o.as_str(), "entry": avg, "contracts": n, "real": real}));
     tracing::info!("snipebot {bot}: bought {n} {} {} at {avg:.3} ({})", f.home, f.o.as_str(), if real { "REAL" } else { "paper" });
     tokio::spawn(monitor(app.clone(), id, v));
+    Some((id, avg))
 }
 
 /// Watch one open trade every second; sell when caught up or at the give-up time.
@@ -611,6 +723,22 @@ async fn monitor(app: Arc<App>, id: i64, v: Value) {
     loop {
         tick.tick().await;
         let now = now_ms();
+        // A paper twin sells when and where its real trade sold (same price per share).
+        if let Some(rid) = v["twin_of"].as_i64() {
+            let row: Option<(Option<Ms>, String)> = crate::store::open_ro(&app.db_path).ok().and_then(|c| c.query_row("SELECT closed_ms, data FROM bot_trades WHERE id = ?1", [rid], |r| Ok((r.get(0)?, r.get(1)?))).ok());
+            match row {
+                Some((Some(_), d)) => {
+                    let rv: Value = serde_json::from_str(&d).unwrap_or(Value::Null);
+                    let exit = rv["exit"].as_f64().unwrap_or(0.0);
+                    let fee = Fee { rate: v["fee_rate"].as_f64().unwrap_or(Fee::PM_SPORTS.rate), ..Fee::PM_SPORTS };
+                    close(&app, id, &v, &bot, false, left * exit, venue::pm_fee(fee, left, exit), now, rv["reason"].as_str().unwrap_or("as the real trade"));
+                    return;
+                }
+                Some((None, _)) => continue,
+                // The real trade is gone from the record: carry on as an ordinary paper trade.
+                None => {}
+            }
+        }
         let Some((tok, l, meta)) = venue::pm_contract(m, o) else {
             // No live book (the market closed or the feed lost it): after the give-up time, settle
             // on the result once the recorded prices show one.

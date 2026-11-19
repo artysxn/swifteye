@@ -327,6 +327,10 @@ pub(crate) trait Quotes {
     }
     /// Every quote change in (from, to], oldest first.
     fn path(&mut self, match_id: i64, outcome: &str, from: Ms, to: Ms) -> Vec<Q>;
+    /// The last recorded row at or before t as it is: (bid, ask, when); either side may be missing.
+    fn raw(&mut self, _match_id: i64, _outcome: &str, _t: Ms) -> Option<(Option<f64>, Option<f64>, Ms)> {
+        None
+    }
 }
 
 fn ok_quote(b: Option<f64>, a: Option<f64>) -> Option<(f64, f64)> {
@@ -345,6 +349,13 @@ fn depth_row(r: &rusqlite::Row) -> rusqlite::Result<crate::engine::Depth> {
 }
 
 impl Quotes for PmQuotes<'_> {
+    fn raw(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<(Option<f64>, Option<f64>, Ms)> {
+        let mut st = self
+            .c
+            .prepare_cached("SELECT bid, ask, ts_ms FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1")
+            .ok()?;
+        st.query_row(params![match_id, outcome, t], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional().ok()?
+    }
     fn depth(&mut self, match_id: i64, outcome: &str, t: Ms) -> Option<crate::engine::Depth> {
         let mut st = self
             .c

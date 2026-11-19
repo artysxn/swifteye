@@ -230,7 +230,7 @@ SE.pages.bots = {
           statH('schedule', 'Running', t0 ? longFor(p.now - t0) : '<span class="faint">-</span>', t0 ? `since ${SE.fmtDateTime(t0)}` : 'no trades yet', 'Clock time since this wallet started (it trades only inside its hours).') +
           statH('emoji_events', 'Won', cur.length ? `${Math.round(100 * won / cur.length)}%` : '<span class="faint">-</span>', cur.length ? `${won} of ${cur.length} · ${pct(staked ? gained / staked : 0)} per $` : old.length ? `none yet on these rules (${old.length} old)` : 'no closed trades', 'Trades on the current rules only.') +
           statH('today', 'Today', pnl(p.today), `${today.length} trade${today.length === 1 ? '' : 's'} · UTC day`) +
-          statH('hourglass_top', 'Open', String(open.length), open.length ? `${money(p.open_cost)} in play` : 'none') + `</div>`;
+          statH('hourglass_top', 'Open', String(open.length), open.length ? `${money(p.open_cost)} in play · <span class="${cls(p.open_pnl)}">${signed(p.open_pnl || 0)} now</span>` : 'none', 'Open positions count in Balance, Profit and Today at what they would sell for right now.') + `</div>`;
       }).join('');
       for (const id of ['bpChartTag', 'bpOpenTag', 'bpTradesTag']) if ($('#' + id)) $('#' + id).innerHTML = tags();
     }
