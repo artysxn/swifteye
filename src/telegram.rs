@@ -903,6 +903,10 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
         "/open" => trade_list(app, true, 10),
         "/trades" => trade_list(app, false, 10),
         "/run" => run_text(app),
+        "/extend" => match arg.trim().trim_end_matches(|c: char| c.is_ascii_alphabetic()).parse::<i64>().map_err(anyhow::Error::from).and_then(|h| crate::bots::extend_run(app, h)) {
+            Ok(v) => format!("Test run extended; now ends {}", hhmm(v["end_ms"].as_i64().unwrap_or(0))),
+            Err(e) => format!("Use: /extend 4h (1-48 h) · {}", esc(&e.to_string())),
+        },
         "/projected" => projected(app, &arg),
         "/log" => real_log(app, arg.parse::<i64>().unwrap_or(20).clamp(1, 60)),
         "/kill" => match crate::bots::update(app, &json!({"kill": true})) {
@@ -928,7 +932,7 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
     reply(http, &c.token, chat, &msg).await
 }
 
-const HELP: &str = "<b>Snipe bot</b>\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
+const HELP: &str = "<b>Snipe bot</b>\n/extend 4h — extend the running test run\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
 
 fn money_s(x: f64) -> String {
     format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())

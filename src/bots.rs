@@ -696,6 +696,20 @@ pub fn stop_run(app: &App, why: &str) -> anyhow::Result<Value> {
     Ok(rep)
 }
 
+/// Extend the running test run by `hours` (1..=48), total at most 7 days.
+pub fn extend_run(app: &App, hours: i64) -> anyhow::Result<Value> {
+    anyhow::ensure!((1..=48).contains(&hours), "1 to 48 hours");
+    let mut s = settings();
+    let Some(r) = s.run.as_mut() else { anyhow::bail!("no test run going") };
+    anyhow::ensure!(r.end_ms + hours * 3_600_000 - r.start_ms <= 7 * 86_400_000, "a run can last at most 7 days");
+    r.end_ms += hours * 3_600_000;
+    let end = r.end_ms;
+    save(app, &s)?;
+    *SET.write() = s;
+    event(format!("snipe: test run extended by {hours} h"));
+    Ok(json!({"end_ms": end}))
+}
+
 /// Called every 30 s: ends a run at its end time.
 pub fn tick_run(app: &App) {
     if settings().run.as_ref().is_some_and(|r| now_ms() >= r.end_ms) {

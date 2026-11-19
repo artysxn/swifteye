@@ -347,7 +347,7 @@ SE.pages.bots = {
       if (!$('#btRun')) return;
       const cur = g.current, last = cur || (g.past || [])[0];
       $('#btRunTools').innerHTML = cur
-        ? `<span class="chip bad" style="font-weight:700">REAL · ends ${SE.fmtDateTime(cur.end_ms)}</span> <button class="btn sm" id="runStop">${ic('stop')}Stop now</button>`
+        ? `<span class="chip bad" style="font-weight:700">REAL · ends ${SE.fmtDateTime(cur.end_ms)}</span> <button class="btn sm" id="runExtend">Extend…</button> <button class="btn sm" id="runStop">${ic('stop')}Stop now</button>`
         : [4, 8, 16, 24].map((h) => `<button class="btn sm" data-run="${h}">${ic('play_arrow')}${h} h</button>`).join(' ');
       const rep = (r, live) => `<div class="stats" style="margin:0 0 10px">` +
         `<div class="stat key"><div class="stat-label">${ic('payments')}${live ? 'Result so far' : 'Result'}</div><div class="stat-value">${pnl(r.pnl)}</div><div class="stat-foot">on ${money(r.staked)} staked · $${r.bankroll} bankroll</div></div>` +
@@ -373,6 +373,12 @@ SE.pages.bots = {
         { key: 'p', label: 'Result', cls: 'r', w: 100, fmt: (r) => pnl(r.pnl) },
         { key: 'e', label: 'Ended', fmt: (r) => `<span class="muted">${esc(r.ended || '')}</span>` },
       ], { sort: 't' }).set(g.past);
+      if ($('#runExtend')) $('#runExtend').onclick = async () => {
+        const h = Math.round(+(window.prompt('Extend the real test run by how many hours? (1-48)', '4') || 0));
+        if (!h) return;
+        try { await api('/bots/run/extend', { body: { hours: h } }); SE.toast(`Extended by ${h} h`); } catch (e) { SE.toast(e.message, 6000); }
+        load(); loadRun();
+      };
       if ($('#runStop')) $('#runStop').onclick = async () => {
         if (!window.confirm('Stop the real test run now? Open trades are still sold by the bot.')) return;
         try { await api('/bots/run/stop', { method: 'POST' }); SE.toast('Test run stopped'); } catch (e) { SE.toast(e.message, 6000); }

@@ -223,7 +223,8 @@ impl Feat {
     }
     /// Expected gain per contract if Polymarket catches up to `catch` of the move (test i).
     fn edge(&self, i: usize, catch: f64) -> f64 {
-        let target = self.pre_mid + self.dir * self.bm[i] * catch;
+        // A share never pays more than $1 or less than 0: cap where the price can go.
+        let target = (self.pre_mid + self.dir * self.bm[i] * catch).clamp(0.0, 1.0);
         let exp = if self.dir > 0.0 { target - self.sp[i] / 2.0 - SLIP } else { 1.0 - (target + self.sp[i] / 2.0) - SLIP };
         let d = self.dec[i];
         exp - d - Fee::PM_SPORTS.raw(1.0, d) - Fee::PM_SPORTS.raw(1.0, exp.clamp(0.0, 1.0))
@@ -312,6 +313,10 @@ fn gate(f: &Feat, r: &crate::adaptive::Policy) -> Result<(), &'static str> {
     }
     if !f.dec.iter().all(|d| (0.02..=0.98).contains(d)) {
         return Err("price_out_of_range");
+    }
+    // Above 90c there is almost no room left to gain but the whole stake is at risk.
+    if f.dec.iter().any(|d| *d > 0.90) {
+        return Err("price_too_high");
     }
     if f.edge(0, r.catch) < r.min_edge || f.edge(1, r.catch) < r.min_edge {
         return Err("gap_too_small");
@@ -495,7 +500,8 @@ async fn monitor(app: Arc<App>, id: i64, v: Value) {
         };
         let (bid, ask) = (l.bids.first().map(|x| x.0), l.asks.first().map(|x| x.0));
         let caught = match (bid, ask) {
-            (Some(b), Some(a)) => snipe::caught_up(&(b, a, now, "book"), dir, pre_mid, need, s1),
+            // Also cash in once the bought side can be sold at 99c+: the win is all but certain.
+            (Some(b), Some(a)) => snipe::caught_up(&(b, a, now, "book"), dir, pre_mid, need, s1) || (if dir > 0.0 { b } else { 1.0 - a }) >= 0.99,
             _ => false,
         };
         if !caught && now < give_end {

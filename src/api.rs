@@ -65,6 +65,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/bots/runs", get(bots_runs))
         .route("/bots/run/start", post(bots_run_start))
         .route("/bots/run/stop", post(bots_run_stop))
+        .route("/bots/run/extend", post(bots_run_extend))
         .route("/bots/run/chart", get(bots_run_chart))
         .route("/pm/api-from-key", post(pm_api_from_key))
         .route("/bots/test/{bot}", post(bots_test))
@@ -1214,6 +1215,16 @@ async fn bots_runs(State(app): S) -> Response {
 async fn bots_run_start(State(app): S, Json(b): Json<Value>) -> Response {
     let (h, conf) = (b["hours"].as_i64().unwrap_or(0), b["confirm"].as_str().unwrap_or("").to_string());
     match tokio::task::spawn_blocking(move || crate::bots::start_run(&app, h, &conf)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Extend the running test run: {"hours": 1..48}.
+async fn bots_run_extend(State(app): S, Json(b): Json<Value>) -> Response {
+    let h = b["hours"].as_i64().unwrap_or(0);
+    match tokio::task::spawn_blocking(move || crate::bots::extend_run(&app, h)).await {
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
