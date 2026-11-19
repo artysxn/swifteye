@@ -77,6 +77,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/bots/test/{bot}", post(bots_test))
         .route("/bots/test-sellback/{id}", post(bots_test_sellback))
         .route("/assets/pages6.js", get(|| async { asset("pages6.js", "text/javascript; charset=utf-8", include_str!("web/pages6.js")) }))
+        .route("/assets/changelog.js", get(|| async { asset("changelog.js", "text/javascript; charset=utf-8", include_str!("web/changelog.js")) }))
         .route("/predarb/order/{id}", post(predarb_order))
         .route("/predarb/sell/{ts}/{id}", post(predarb_sell))
         .route("/api", get(index))

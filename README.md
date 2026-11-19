@@ -1,15 +1,28 @@
-# oddsfeed
+# Swifteye
 
-One small Rust binary that polls live football odds from several bookmakers,
-matches the same game across books, logs **every price change** with a
-millisecond timestamp to SQLite, and serves it all as a local HTTP API.
+Swifteye records live odds from about 28 bookmaker feeds plus Polymarket and Kalshi, measures
+which source moves first, and runs a bot that buys on Polymarket when it lags a bookmaker move.
 
-```
+It is one Rust program (`oddsfeed`) with a web app, a local API and a Telegram bot built in.
+
+- **Sports:** football, tennis, basketball, hockey, volleyball, baseball, American football, MMA
+  and e-sports (CS2, Dota 2, LoL, Valorant and others).
+- **Markets:** match winner everywhere; totals, handicaps and both-teams-to-score where a feed has them.
+- **Storage:** every price change, with a millisecond timestamp, in one SQLite file.
+
+> The snipe bot can trade real money. It is off by default and only trades with your own
+> Polymarket keys. Nothing here is financial advice, and backtest results are not a promise.
+
+## Quick start
+
+```bash
 cargo build --release
-cd run && ../target/release/oddsfeed.exe        # optional: oddsfeed.exe path/to/oddsfeed.toml
+./target/release/oddsfeed            # optional argument: path/to/oddsfeed.toml
 ```
 
-API on `http://127.0.0.1:8787`. Live table in a browser: `http://127.0.0.1:8787/ui`.
+Then open <http://127.0.0.1:8787>. The app and API listen on localhost only. There is no login.
+
+Copy `oddsfeed.example.toml` to `oddsfeed.toml` to choose sports and feeds. Every key is optional.
 
 ## Run 24/7 on a Mac
 
@@ -18,187 +31,187 @@ git clone https://github.com/artysxn/swifteye.git ~/swifteye-src
 cd ~/swifteye-src && ./deploy/mac/install.sh
 ```
 
-- First time only: the script tells you to install Rust (`rustup`) and Xcode's command line tools if they're missing.
-- It builds the collector and installs a launchd agent (`com.swifteye.oddsfeed`). The agent
-  starts at login, restarts within 10 s if the collector crashes, and keeps the Mac awake on
-  power (`caffeinate`). For a closed MacBook, use an external display or keep the lid open,
-  and turn on "Start up automatically after a power failure" in System Settings.
-- Data, config and logs go in `~/swifteye/`: `oddsfeed.db`, `oddsfeed.toml`, `logs/oddsfeed.log`.
+- The script builds the program and installs a launchd agent (`com.swifteye.oddsfeed`). It
+  starts at login, restarts after a crash and keeps the Mac awake on power.
+- First time only, it tells you to install Rust and Xcode's command line tools if they are missing.
+- Data, config and logs go in `~/swifteye/`: `oddsfeed.db`, `oddsfeed.toml`, `bots.json`, `logs/oddsfeed.log`.
 - Update: `cd ~/swifteye-src && git pull && ./deploy/mac/install.sh`
 - Stop: `./deploy/mac/uninstall.sh` (keeps the data).
-- Status: `curl localhost:8787/books`. Live table: <http://127.0.0.1:8787/ui>.
-- From another computer: the API only listens on localhost (there is no login). Use an SSH
-  tunnel, `ssh -L 8787:127.0.0.1:8787 you@your-mac`, then open `http://127.0.0.1:8787/ui` locally.
-- The database grows with every price change (mostly Linebet's many lines), roughly hundreds of MB a week.
-  Check it with `du -h ~/swifteye/oddsfeed.db`.
-Measured on this PC: ~60 MB RAM, ~3% of one core with 7 books, 9.6 MB exe.
+- From another computer, use an SSH tunnel: `ssh -L 8787:127.0.0.1:8787 you@your-mac`.
+- The database grows by roughly 2 GB a day with every feed on.
 
-## Books
+## The web app
 
-| Book | Status | Source | Markets | Book's own timestamp |
-|---|---|---|---|---|
-| Unibet | ✅ | Kambi offering API (`ubse`) | 1X2, total, Asian handicap, BTTS* | per outcome, 1 s precision |
-| SportyBet | ✅ | factsCenter live list (NG) | 1X2, totals (all lines), handicap, BTTS | per market, ms |
-| betPawa | ✅ | sportsbook v4 by-queries (NG) | 1X2 | – |
-| Betika | ✅ | live.betika.com (KE) | 1X2 | per outcome, ms |
-| Linebet | ✅ | 1xBet-platform LiveFeed (football filter) | 1X2, totals, handicaps (all lines), BTTS | – |
-| Fonbet | ✅ | public line CDN, incremental by version | 1X2, main total, main handicap | – |
-| VINN | ✅ | Altenar widget API (`vinn`) | 1X2, totals, BTTS | – |
-| **Polymarket** | ✅ | CLOB market **WebSocket** (push) + Gamma for the game list | 1X2 (home/draw/away Yes tokens) | server stamp per message, ms |
-| Winline | ⏳ | binary WebSocket (`wss.winline.ru/data_ng`) | needs protocol decoding | |
-| Favbet, STS, Norsk Tipping, 1Win, 20Bet, GGBET, Betway, thunderpick | ⏳ | push sockets / not yet traced | possible, not done | |
-| Pinnacle | ❌ | needs a logged-in account | not automated | |
-| bet365 | ❌ | the given link is Sportradar stats, not odds; bet365 itself is bot-protected | | |
-| Merkur Bets | ❌ | geo-blocked outside Germany | | |
-| BetBoom | ❌ | 401 + bot challenge | | |
-| Novibet, M88 | ❌ | Cloudflare 403 to plain clients (not tried further) | | |
+| Group | Pages |
+|---|---|
+| Delay | Overview, Rankings (who moves first), Snipe window, Latency |
+| Markets | Matches, Sheet, Charts, Movers, Edges, Arbitrage Scout, Bots, Suspicious |
+| Tools | Data, Query (read-only SQL), API, Control panel, Polymarket, Kalshi, Telegram |
+| Other | Statistics, Changelog, Settings |
 
-\*whatever the in-play list carries for that match.
+The **Changelog** page lists what changed and when. Add an entry at the top of
+`src/web/changelog.js` when something a user would notice ships.
 
-Every adapter reads the same public JSON the bookmaker's own live page loads.
-Nothing logs in, solves challenges, or works around blocks. Fonbet's website
-shows a Cloudflare check, but its odds CDN is open, so we read the CDN.
-E-sports and simulated football (FIFA 2x4 min, "Short Football 3x3", "MLS+",
-"LFL 5x5") are dropped unless `include_esoccer = true`.
+## Sources
 
-## What "down to the millisecond" means here
+| Platform | Feeds |
+|---|---|
+| Polymarket | CLOB market WebSocket (pushed), order book depth |
+| Kalshi | WebSocket (needs an API key) |
+| 1xBet platform | Linebet, Melbet, BetWinner, Megapari, PariPesa, 22Bet, 22Bit, 1xBit |
+| Kambi | Unibet, LeoVegas, Paf |
+| Fonbet platform | Fonbet, PARI, Mostbet |
+| Altenar | VINN, BetKing |
+| Betby | Duel |
+| Own feeds | Pinnacle, Marathonbet, Leon, Olimpbet, Betcity, M88, Thunderpick, SportyBet, betPawa, Betika |
 
-`ts_ms` = the moment the response (or WebSocket message) carrying the change
-arrived, in ms since epoch, **NTP-corrected**. At startup and every 10 min the
-service asks public NTP servers how wrong the PC clock is (`GET /clock`) and adds
-that offset to every timestamp. This PC runs **2.6 s fast**. Without the
-correction every bookmaker would look 2.6 s slower against Polymarket's server
-stamps.
+Every adapter reads the same public JSON the bookmaker's own live page loads. Nothing logs in,
+solves challenges or works around blocks. `docs/BOOKMAKERS.md` has the details per feed,
+including the ones that are blocked.
 
-Bookmakers are polled every 1 s (`poll_ms`), so a change is seen within one poll
-plus that feed's own delay. Polymarket is pushed, so it arrives within ms.
+Feeds that share one trading desk count as one group when the bot asks "how many bookmakers moved".
 
-Measured (corrected clock), from each source's own change stamp to our receipt:
+## Timestamps
 
-| source | avg | range |
-|---|---|---|
-| Polymarket (WebSocket) | 19 ms | 16–47 ms |
-| Unibet (Kambi, stamp has 1 s precision) | 1.7 s | 0.35–3.3 s |
-| SportyBet | 3.0 s | 0.3–32 s |
-| Betika | 3.5 s | 0.5–6.2 s |
+`ts_ms` is the moment a change arrived, in milliseconds, corrected against public NTP servers
+(`GET /clock`). Bookmakers are polled about once a second; Polymarket and Kalshi are pushed.
+Bookmaker feeds carry their own delay of 1 to 3.5 seconds, and polling faster does not remove it.
 
-The bookmaker delay is in the public feeds themselves (CDN caching, the "live
-delay" books apply), and polling faster does not remove it.
+## The snipe bot
 
-## Bookmakers vs Polymarket: the delay measurement
+When several bookmakers move and Polymarket has not followed yet, the bot buys the stale
+Polymarket price and sells when Polymarket catches up.
 
-Polymarket lists a football game as three Yes/No markets (home, draw, away).
-Each Yes token's mid (best bid + best ask) / 2 is the crowd's probability.
-It's stored in the change log as decimal odds `1 / mid` (book `polymarket`),
-so it sits next to the bookmakers on `/board`. The raw bid/ask/last per token,
-with Polymarket's own server time, go to `pm_quotes`. A spread over 25 cents is
-treated as "no price".
+**A buy needs all of these:**
 
-Polymarket's `gameId` is the Sportradar match id (checked on USL New Mexico v
-Sacramento = SportyBet `sr:match:76582718`), so games link exactly to
-SportyBet/betPawa/Betika, and by name to the others.
+- A bookmaker move of at least 10 points, still there 1 and 1.5 seconds later.
+- At least 2 independent bookmaker groups moved, and their middle price moved 3 points or more.
+- Polymarket followed at most 5% of the move, counted from the first bookmaker that moved.
+- Polymarket and the bookmakers agreed before the move (under 10 points apart).
+- Earlier in this game, Polymarket did lag the bookmakers.
+- Spread at most 4¢, expected gain at least 4¢, price at most 90¢, no basketball.
+- The decision was reached on time (not more than 1 second late).
 
-`GET /lag` (and the panel under the table on `/ui`) measures, on the 1X2 market:
+**It sells** when Polymarket has made the full move, at 99¢ or more, or after 5 minutes.
+There is no stop-loss price: in testing, stops lost more than they saved.
 
-1. Every price becomes implied probability `1/odds`.
-2. A **jump** = a move of ≥ `min_jump` (default 0.04 = 4 points) within `settle_s` (10 s).
-3. For each jump, look ±`window_s` (90 s) at the other side. If it moved the same
-   way by at least half as much, it **followed**.
-4. Each side is timed when it crosses halfway through its own move.
-   **`delay_ms = Polymarket time − book time`** (positive = Polymarket later).
-5. Two directions:
-   - `trigger: book`: a bookmaker jumped; how long until Polymarket followed.
-   - `trigger: polymarket`: Polymarket jumped; how long until each book followed.
-     `first book` is the earliest of them.
-6. Jumps from before both sides were being recorded are ignored.
+**Paper and real money**
 
-Parameters: `since, until, min_jump, window_s, settle_s, match, book`, and
-`clock=source` to use each feed's own stamps instead of our receive time.
-`GET /lag/events` lists every jump with both sides' before/after levels, to audit
-a number.
+- Paper and real have separate wallets and stakes. Paper is on by default; real money is off.
+- With real money on, each paper trade copies the real order's fill and sale.
+- One open position a game, per wallet.
 
-Reading it: bookmaker numbers include their 1–3.5 s feed delay above. That is
-the delay you would actually have watching these feeds. `clock=source` removes it
-for SportyBet/Betika/Unibet, the books whose feeds carry a stamp.
+**Safety for real money**
 
-**Not yet measured for real.** So far it has seen one Polymarket game (a 4 a.m.
-USL match) and no goal while Polymarket was recorded. The two small draw moves
-it caught had Polymarket ~22 s behind the books. That shows the pipeline works.
-It is not a result. Real numbers need goals and red cards in busy hours.
+- A daily loss limit that counts open positions.
+- A run stops itself after 3 losing trades in a row, when under half the trades win after 10,
+  or when orders keep failing.
+- A kill switch stops all new trades.
+- Every real buy is recorded as it goes out; a buy left without a result is reported at the next start.
+
+The settings are on the **Bots** page and in `bots.json`.
+
+## The replay
+
+The replay runs the bot's rules over the recorded prices. It finds moves the same way the live
+bot does and measures them with the same steps, so it describes what the bot would have done.
+It fills orders from the recorded order book and takes 1¢ off every sale.
+
+`tools/` holds the checks that keep the two honest:
+
+| Script | What it does |
+|---|---|
+| `live_emu.py` | An offline copy of the live decision path, run over the database |
+| `check_live.py` | Compares the running bot's logged decisions with that copy |
+| `live_cands.py`, `live_eval.py` | Save every candidate move with its price path, then compare rules in seconds |
+| `replay_eval.py` | Backtests rule variants on the replay's saved blocks |
+| `compare_replay.py` | Compares the replay with the offline copy, trade by trade |
+
+A replay result is a backtest on the days it was built from. Treat it as an estimate.
+
+## Telegram
+
+Link a bot on the **Telegram** page. It sends buys and sales with charts, and answers commands.
+
+| Command | What it does |
+|---|---|
+| `/status`, `/today`, `/open` | Where both wallets stand |
+| `/safety` | Where a real run stands against each stop |
+| `/rules`, `/settings`, `/signals` | What the bot trades and why it skipped moves |
+| `/realon` | Starts a real run. It shows what would start and waits for `/realon yes` |
+| `/realoff`, `/stoprun` | Real money off |
+| `/kill`, `/unkill` | Stop or resume all new trades |
+| `/help` | Every command |
+
+Only the linked chat can use the commands.
 
 ## Data model
 
-Tables in `oddsfeed.db` (SQLite, WAL; open it with any SQLite tool while running):
+Tables in `oddsfeed.db` (SQLite, WAL; any SQLite tool can read it while the program runs):
 
-- `matches(id, sport, home, away, league, start_ms, sr_id, created_ms)`: one row per real-world game.
-- `book_events(book, book_event_id, match_id, …, first_seen_ms, last_seen_ms)`: each book's event, linked to a match.
-- `changes(id, ts_ms, book, book_event_id, match_id, market, line, outcome, kind, old_price, new_price, book_ts_ms)`:
-  the append-only log.
-  - `market`: `1x2` | `total` | `handicap` | `btts` (all full-time)
-  - `line`: total = goal line; handicap = **home** team's handicap
-  - `outcome`: `home draw away over under yes no`
-  - `kind`: `open` (first seen), `move`, `suspend` (→ null), `resume`, `close` (line/event gone)
+- `matches(id, sport, home, away, league, start_ms, sr_id, created_ms)`: one row per real game.
+- `book_events(book, book_event_id, match_id, …)`: each source's event, linked to a match.
+- `changes(id, ts_ms, book, match_id, market, line, outcome, kind, old_price, new_price, book_ts_ms)`:
+  the append-only price log. Prices are decimal odds. Polymarket and Kalshi are stored as `1 / mid`.
+  - `market`: `1x2` | `total` | `handicap` | `btts`. Two-way sports store their winner under `1x2`.
+  - `kind`: `open`, `move`, `suspend`, `resume`, `close`.
+- `pm_quotes`, `kalshi_quotes`: best bid and ask with size, per outcome.
+- `bot_trades`, `bot_orders`, `bot_signals`, `bot_runs`: what the bots did and why.
 
-### Cross-book matching
-
-1. Exact: SportyBet, betPawa and Betika expose Sportradar match ids, so those link exactly.
-2. Fuzzy: same sport, kick-off within 45 min (4 h if names are near-identical),
-   both team names similar after normalising (accents, FC/CF/…, Utd→United).
-   Women / U21 / reserves tags must agree, so youth sides never merge with first teams.
-   One event per book per match.
-
-Fix mistakes by hand: `POST /matches/{into}/merge/{from}` or `POST /events/{book}/{event_id}/unlink`.
+Games are linked across sources by Sportradar id where a feed has one, otherwise by sport,
+start time and team names. Fix a wrong link with `POST /matches/{into}/merge/{from}` or
+`POST /events/{book}/{event_id}/unlink`.
 
 ## API
 
+The **API** page in the app lists every endpoint. The most used:
+
 | | |
 |---|---|
-| `GET /` | endpoint list |
-| `GET /ui` | live table (1X2 / total / handicap / BTTS), best price highlighted, moves flash |
-| `GET /books` | per book: polls, errors, last error, request time, live events/quotes, changes |
-| `GET /matches?q=&book=&min_books=&all=1` | live matches, which books have them, best 1X2 across books |
-| `GET /matches/{id}` | every current price for one match, per book, with `updated_ms` / `book_ts_ms` |
-| `GET /matches/{id}/changes?since=&market=&book=&outcome=&line=` | that match's full history, oldest first |
-| `GET /board?market=1x2&min_books=2` | the live table as JSON |
-| `GET /changes?since=&until=&book=&match=&market=&outcome=&kind=&line=&limit=&order=` | the change log |
-| `GET /stream?match=&book=&market=` | Server-Sent Events: one `change` event per price change as it lands |
-| `GET /query?sql=SELECT…&limit=` | any read-only SQL |
-| `GET /stats` | totals + changes per book in the last 5 min |
-| `GET /lag?since=&min_jump=&window_s=&clock=` | bookmaker ↔ Polymarket delay summary per book |
-| `GET /lag/events?match=&book=&trigger=` | every jump behind those numbers |
-| `GET /clock` | measured PC clock offset applied to all timestamps |
-
-Examples:
+| `GET /books` | Per source: polls, errors, live events |
+| `GET /matches`, `GET /matches/{id}` | Live games and their current prices |
+| `GET /matches/{id}/changes` | One game's full price history |
+| `GET /changes` | The change log, filtered |
+| `GET /stream` | Server-Sent Events, one per price change |
+| `GET /query?sql=SELECT…` | Any read-only SQL |
+| `GET /lag`, `GET /lag/events` | Bookmaker and Polymarket delay, and the jumps behind it |
+| `GET /bots/panel?real=0` | A wallet's trades, signals and state |
+| `GET /bots/sim?kind=…` | A replay result |
+| `GET /adaptive` | The replay's status and the rule picker's history |
 
 ```bash
-curl "localhost:8787/board?market=1x2&min_books=3"
-curl "localhost:8787/matches/1/changes?market=1x2&outcome=home"
+curl "localhost:8787/matches?min_books=3"
 curl -N "localhost:8787/stream?market=1x2"
 curl -G localhost:8787/query --data-urlencode "sql=SELECT book, COUNT(*) FROM changes WHERE kind='move' GROUP BY book"
-```
-
-Which book moved first on each 1X2 change of a match (lead/lag):
-
-```sql
-SELECT book, outcome, ts_ms, book_ts_ms, old_price, new_price
-FROM changes WHERE match_id = 1 AND market = '1x2' AND kind = 'move'
-ORDER BY ts_ms;
 ```
 
 ## Layout
 
 ```
-src/main.rs        config, startup, one task per book
-src/books/*.rs     one adapter per platform (kambi, sportybet, betpawa, betika, linebet, fonbet, altenar, polymarket)
-src/clock.rs       SNTP clock-offset correction
-src/lag.rs         bookmaker <-> Polymarket jump matching and delay stats (+ unit tests)
-src/engine.rs      diffs each snapshot against the last one -> changes
-src/matcher.rs     cross-book event matching (+ unit tests)
-src/store.rs       SQLite schema, batched writer thread, read-only queries
-src/api.rs         axum HTTP API + SSE
-src/ui.html        the /ui page (compiled into the exe)
+src/main.rs           config, startup, one task per source
+src/books/*.rs        one adapter per platform
+src/engine.rs         diffs each snapshot against the last one into changes
+src/matcher.rs        links the same game across sources
+src/store.rs          SQLite schema, batched writer, read-only queries
+src/clock.rs          NTP clock correction
+src/lag.rs, rank.rs   who moved first and by how much
+src/snipe.rs          snipe window analysis and shared price helpers
+src/consensus.rs      the bookmakers' middle price and how Polymarket follows it
+src/snipebot.rs       the live snipe bot: trigger, measure, rules, buy, sell
+src/adaptive.rs       the replay and the rule picker
+src/bots.rs           wallets, settings, real runs and their safety stops
+src/exec.rs           Polymarket and Kalshi orders
+src/arb*.rs           arbitrage scout, paper arbitrage and its backtest
+src/suspect.rs        suspicious games
+src/telegram.rs       the Telegram bot and its charts
+src/api.rs            HTTP API and the web app's files
+src/web/              the web app (compiled into the program)
+tools/                research and checking scripts
+deploy/mac/           install and uninstall scripts
 ```
 
-Adding a book: implement `Book::fetch` returning a `Snapshot` of live events
-with normalised quotes, and register it in `start_books` in `main.rs`. Other
-Kambi or Altenar brands are one line each (different offering/integration name).
+Web files are compiled in. Set `ODDSFEED_WEB_DIR=<repo>/src/web` to serve them from disk while editing.
+
+Adding a source: implement `Book::fetch`, returning a `Snapshot` of live events with normalised
+quotes, and register it in `start_books` in `main.rs`. Another brand on a platform that is
+already wired is usually one line.
