@@ -45,16 +45,19 @@ pub struct Common {
     pub max_open: f64,
     /// Real money switches back to paper when today's real result is below -this.
     pub daily_loss: f64,
-    /// Real money this bot may use, of the shared accounts: its open real positions may never
-    /// cost more than this plus its real results so far. 0 = no real money.
+    /// Real money this bot may use, of the shared accounts: its own wallet inside the account.
+    /// Its open real positions may never cost more than this plus its real results since
+    /// `real_since`. 0 = no real money.
     pub bankroll: f64,
     /// The paper wallet starts here (ms): earlier paper trades are history, not this wallet's.
     pub paper_since: Ms,
+    /// The real wallet starts here (ms): set when its amount is set or a test run starts.
+    pub real_since: Ms,
 }
 
 impl Default for Common {
     fn default() -> Self {
-        Common { enabled: true, real: false, start: 10_000.0, max_trade: 250.0, max_open: 2_000.0, daily_loss: 300.0, bankroll: 0.0, paper_since: 0 }
+        Common { enabled: true, real: false, start: 10_000.0, max_trade: 250.0, max_open: 2_000.0, daily_loss: 300.0, bankroll: 0.0, paper_since: 0, real_since: 0 }
     }
 }
 
@@ -75,6 +78,11 @@ pub struct SnipeCfg {
     pub b_pct: f64,
     pub b_max_trade: f64,
     pub b_daily_loss: f64,
+    /// The real wallet's own stakes, never the paper wallet's: share of the real balance per
+    /// trade and most dollars a trade. (Its most open at once is the wallet itself, `bankroll`;
+    /// its loss stop is `daily_loss`.)
+    pub r_pct: f64,
+    pub r_max_trade: f64,
     /// Give up after this many seconds (0 = what the Adaptive rules say).
     pub give_up_s: i64,
     /// Trade only between these UTC hours [from, to); equal = all day.
@@ -82,6 +90,10 @@ pub struct SnipeCfg {
 }
 
 impl SnipeCfg {
+    /// The stake of a real safe-set trade on a real balance of `balance` at edge factor 1.
+    pub fn real_stake(&self, balance: f64) -> f64 {
+        (self.r_pct * balance).min(self.r_max_trade)
+    }
     pub fn hours(&self) -> Option<[u8; 2]> {
         (self.hours_utc[0] != self.hours_utc[1]).then_some(self.hours_utc)
     }
@@ -89,7 +101,7 @@ impl SnipeCfg {
 
 impl Default for SnipeCfg {
     fn default() -> Self {
-        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true, b_enabled: true, b_pct: 0.06, b_max_trade: 12.0, b_daily_loss: 15.0, give_up_s: 900, hours_utc: [12, 21] }
+        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true, b_enabled: true, b_pct: 0.06, b_max_trade: 12.0, b_daily_loss: 15.0, r_pct: 0.30, r_max_trade: 12.0, give_up_s: 900, hours_utc: [12, 21] }
     }
 }
 
@@ -262,9 +274,9 @@ fn today() -> Ms {
 /// Snipe ledger (one bot name, paper or real): (closed P&L, open cost, today's closed P&L, trades, wins).
 pub fn snipe_ledger(c: &Connection, bot: &str, real: bool) -> (f64, f64, f64, usize, usize) {
     let t0 = today();
-    // Real money during a test run: the run's own trades only, so it starts from its bankroll
+    // Each wallet counts its own trades from its own start: real money begins at its amount
     // whatever earlier real trades did.
-    let since = if real { settings().run.map(|r| r.start_ms).unwrap_or(0) } else { settings().snipe.c.paper_since };
+    let since = if real { settings().snipe.c.real_since } else { settings().snipe.c.paper_since };
     let mut st = match c.prepare("SELECT closed_ms, data FROM bot_trades WHERE bot = ?1 AND real = ?2 AND ts_ms >= ?3") {
         Ok(s) => s,
         Err(_) => return (0.0, 0.0, 0.0, 0, 0),
@@ -454,11 +466,17 @@ pub fn update(app: &App, edit: &Value) -> anyhow::Result<Value> {
         let now = now_ms();
         s.snipe.c.paper_since = now;
         s.arb.c.paper_since = now;
+        if let Some(r) = s.run.as_mut() {
+            r.prev.c.paper_since = now;
+        }
         event("paper wallets restarted");
     }
     if let Some(v) = edit.get("snipe") {
         // During a test run the wallet settings belong to the run: edits go to the settings
         // that come back when it ends.
+        // The real wallet's amount: a new amount starts the wallet afresh (not during a test run,
+        // which keeps its results). The cap at the account's cash is checked by the caller.
+        let (old_bank, in_run, now) = (s.snipe.c.bankroll, s.run.is_some(), now_ms());
         let w: &mut SnipeCfg = match s.run.as_mut() {
             Some(r) => &mut r.prev,
             None => &mut s.snipe,
@@ -472,6 +490,21 @@ pub fn update(app: &App, edit: &Value) -> anyhow::Result<Value> {
             None => vec![&mut s.snipe],
         };
         for w in both {
+            if let Some(x) = num(v, "bankroll", 0.0, 1e8) {
+                w.c.bankroll = x;
+                if (x - old_bank).abs() > 1e-9 && !in_run {
+                    w.c.real_since = now;
+                }
+            }
+            if let Some(x) = num(v, "daily_loss", 0.0, 1e7) {
+                w.c.daily_loss = x;
+            }
+            if let Some(x) = num(v, "r_pct", 0.01, 1.0) {
+                w.r_pct = x;
+            }
+            if let Some(x) = num(v, "r_max_trade", 1.0, 1e7) {
+                w.r_max_trade = x;
+            }
             if let Some(x) = boolv(v, "b_enabled") {
                 w.b_enabled = x;
             }
@@ -497,6 +530,18 @@ pub fn update(app: &App, edit: &Value) -> anyhow::Result<Value> {
         if let Some(x) = boolv(v, "shadow_one_book") {
             s.snipe.shadow_one_book = x;
         }
+    }
+    // During a test run both copies of the settings stay the same but for the Real switch: the
+    // run changes nothing about the paper wallet.
+    let bank = s.snipe.c.bankroll;
+    if let Some(r) = s.run.as_mut() {
+        r.bankroll = bank;
+        r.stake = r.prev.real_stake(bank);
+        let p = r.prev.clone();
+        s.snipe.c.start = p.c.start;
+        s.snipe.c.max_trade = p.c.max_trade;
+        s.snipe.c.max_open = p.c.max_open;
+        s.snipe.pct = p.pct;
     }
     if let Some(v) = edit.get("arb") {
         common(&mut s.arb.c, v);
@@ -754,43 +799,29 @@ pub async fn accounts(app: Arc<App>) -> Value {
     })
 }
 
-/// The real side's stake a trade and the loss that ends the run, from its bankroll: 30% a trade
-/// ($12 of $40; the bot's $10 minimum order fits) and three eighths lost ($15 of $40).
-pub fn run_stake(bankroll: f64) -> f64 {
-    (0.30 * bankroll * 100.0).round() / 100.0
-}
-pub fn run_loss(bankroll: f64) -> f64 {
-    (0.375 * bankroll * 100.0).round() / 100.0
-}
-/// The least real bankroll (30% of it must reach the $10 minimum order) and the default.
-pub const RUN_MIN_BANKROLL: f64 = 35.0;
+/// The default real wallet.
 pub const RUN_BANKROLL: f64 = 40.0;
 
-/// A real bankroll must fit the account: at most the Polymarket cash (as just read) less the reserve.
-fn check_bankroll(bankroll: f64, cash: Option<f64>, reserve: f64) -> anyhow::Result<()> {
-    anyhow::ensure!(bankroll >= RUN_MIN_BANKROLL, "at least ${RUN_MIN_BANKROLL:.0} (a trade is 30% of it and an order needs $10)");
+/// A real wallet must fit the account: at most the Polymarket cash (as just read) less the reserve.
+pub fn check_bankroll(bankroll: f64, cash: Option<f64>) -> anyhow::Result<()> {
+    let reserve = settings().pm_reserve;
+    check_bankroll_with(bankroll, cash, reserve)
+}
+
+fn check_bankroll_with(bankroll: f64, cash: Option<f64>, reserve: f64) -> anyhow::Result<()> {
+    anyhow::ensure!(bankroll >= crate::snipe::MIN_FILL, "at least ${:.0} (the smallest order)", crate::snipe::MIN_FILL);
     let Some(cash) = cash else { anyhow::bail!("could not read the Polymarket balance, so the amount cannot be checked against it") };
     let most = (cash - reserve).max(0.0);
     anyhow::ensure!(bankroll <= most + 1e-9, "at most ${most:.2}: the account holds ${cash:.2} and ${reserve:.0} stays in reserve");
     Ok(())
 }
 
-/// Change the real bankroll of the running test (stake and loss stop follow it).
+/// Change the real wallet's amount during a test run (the run keeps its results).
 pub fn set_run_bankroll(app: &App, bankroll: f64, cash: Option<f64>) -> anyhow::Result<Value> {
-    let mut s = settings();
-    anyhow::ensure!(s.run.is_some(), "no test run going");
-    check_bankroll(bankroll, cash, s.pm_reserve)?;
-    if let Some(r) = s.run.as_mut() {
-        r.bankroll = bankroll;
-        r.stake = run_stake(bankroll);
-    }
-    s.snipe.c.bankroll = bankroll;
-    s.snipe.c.max_trade = run_stake(bankroll);
-    s.snipe.c.max_open = bankroll;
-    s.snipe.c.daily_loss = run_loss(bankroll);
-    save(app, &s)?;
-    *SET.write() = s;
-    event(format!("snipe: test run bankroll set to ${bankroll:.0} (${:.2} a trade, stops after -${:.2})", run_stake(bankroll), run_loss(bankroll)));
+    anyhow::ensure!(settings().run.is_some(), "no test run going");
+    check_bankroll(bankroll, cash)?;
+    update(app, &json!({"snipe": {"bankroll": bankroll}}))?;
+    event(format!("snipe: real wallet set to ${bankroll:.0}"));
     Ok(view(app))
 }
 
@@ -805,8 +836,10 @@ pub fn start_run(app: &App, hours: i64, bankroll: f64, cash: Option<f64>, confir
     anyhow::ensure!(s.run.is_none(), "a test run is already going");
     anyhow::ensure!(!s.kill, "the kill switch is on");
     let now = now_ms();
-    check_bankroll(bankroll, cash, s.pm_reserve)?;
-    let stake = run_stake(bankroll);
+    check_bankroll(bankroll, cash)?;
+    // The real wallet's own stakes (never the paper wallet's) must reach the smallest order.
+    let stake = s.snipe.real_stake(bankroll);
+    anyhow::ensure!(stake >= crate::snipe::MIN_FILL, "a real trade would be ${stake:.2}, under the $10 smallest order: raise the real stake or the amount");
     // Started outside the trading hours, the run's hours count from when the window opens (the
     // bot takes no trade before that anyway).
     let begin = match s.snipe.hours() {
@@ -823,15 +856,13 @@ pub fn start_run(app: &App, hours: i64, bankroll: f64, cash: Option<f64>, confir
         }
         None => now,
     };
-    s.run = Some(Run { id: now, start_ms: now, end_ms: begin + hours * 3_600_000, bankroll, stake, prev: s.snipe.clone() });
-    // Fixed small stakes: 30% of the bankroll, capped at that (the bot's $10 minimum order fits).
-    s.snipe.c.enabled = true;
-    s.snipe.c.real = true;
+    // The real wallet starts afresh at its amount; the paper wallet and its stakes are untouched
+    // and keep trading beside it.
     s.snipe.c.bankroll = bankroll;
-    s.snipe.pct = 0.30;
-    s.snipe.c.max_trade = stake;
-    s.snipe.c.max_open = bankroll;
-    s.snipe.c.daily_loss = run_loss(bankroll);
+    s.snipe.c.real_since = now;
+    s.snipe.c.enabled = true;
+    s.run = Some(Run { id: now, start_ms: now, end_ms: begin + hours * 3_600_000, bankroll, stake, prev: s.snipe.clone() });
+    s.snipe.c.real = true;
     save(app, &s)?;
     *SET.write() = s;
     event(format!("snipe: {hours} h REAL test run started (${bankroll} bankroll, ~${stake} a trade{})", if begin > now { ", trading from the window's opening" } else { "" }));
@@ -906,7 +937,7 @@ fn run_guard(app: &App, r: &Run) -> Option<String> {
     let failed: usize = c
         .query_row("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1", params![r.start_ms], |x| x.get::<_, i64>(0))
         .unwrap_or(0) as usize;
-    run_guard_on(&real, &rows(false), failed, run_loss(r.bankroll))
+    run_guard_on(&real, &rows(false), failed, settings().snipe.c.daily_loss)
 }
 
 /// The triggers on closed real trades (oldest first), the paper trades of the same hours, and
@@ -1090,7 +1121,7 @@ pub fn panel(app: &App, real: bool) -> Value {
     // Real: the test run's own money while one runs, else the bot's real bankroll since the start.
     let (start, since, scope) = match (&s.run, real) {
         (Some(r), true) => (r.bankroll, r.start_ms, "run"),
-        (_, true) => (s.snipe.c.bankroll, 0, "real"),
+        (_, true) => (s.snipe.c.bankroll, s.snipe.c.real_since, "real"),
         (_, false) => (s.snipe.c.start, s.snipe.c.paper_since, "paper"),
     };
     let rows: Vec<(Ms, Option<Ms>, Value)> = c
@@ -1260,11 +1291,13 @@ mod tests {
         let paper = [t(1, 101_000, 100.0, 18.0), t(2, 202_000, 100.0, 16.0)];
         assert!(run_guard_on(&real, &paper, 0, 15.0).unwrap().contains("paper twins"));
         // The bankroll rules: $35 at least, never more than the account's cash less the reserve.
-        assert!(check_bankroll(40.0, Some(192.74), 5.0).is_ok());
-        assert!(check_bankroll(30.0, Some(192.74), 5.0).is_err());
-        assert!(check_bankroll(190.0, Some(192.74), 5.0).is_err());
-        assert!(check_bankroll(40.0, None, 5.0).is_err());
-        assert_eq!((run_stake(40.0), run_loss(40.0)), (12.0, 15.0));
+        assert!(check_bankroll_with(40.0, Some(192.74), 5.0).is_ok());
+        assert!(check_bankroll_with(5.0, Some(192.74), 5.0).is_err());
+        assert!(check_bankroll_with(190.0, Some(192.74), 5.0).is_err());
+        assert!(check_bankroll_with(40.0, None, 5.0).is_err());
+        // The real wallet's own stakes: 30% of $40, at most $12; never the paper wallet's $100.
+        let c = SnipeCfg { c: Common { max_trade: 100.0, ..Default::default() }, pct: 0.2, ..Default::default() };
+        assert_eq!((c.real_stake(40.0), c.real_stake(30.0), c.real_stake(1000.0)), (12.0, 9.0, 12.0));
         // Twins that agree: nothing.
         let paper = [t(1, 101_000, 100.0, 4.0), t(2, 202_000, 100.0, 5.0)];
         assert_eq!(run_guard_on(&real, &paper, 0, 15.0), None);

@@ -453,7 +453,10 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     let k = if sn.edge_sizing && !wider { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
     // The safe set: share of the balance x edge, up to the trade cap. The wider set: its own
     // small flat stake.
-    let stake = if wider { (sn.b_pct * balance).min(sn.b_max_trade) } else { (sn.pct * balance * k).min(sn.c.max_trade) }.min(cash).min(sn.c.max_open - open).min(room);
+    // Real money has its own wallet and its own stakes: share of the real balance, its own most
+    // per trade, and never more open than the wallet. Paper uses the paper wallet's.
+    let (pct, max_trade, max_open) = if real { (sn.r_pct, sn.r_max_trade, sn.c.bankroll) } else { (sn.pct, sn.c.max_trade, sn.c.max_open) };
+    let stake = if wider { (sn.b_pct * balance).min(if real { sn.r_max_trade } else { sn.b_max_trade }) } else { (pct * balance * k).min(max_trade) }.min(cash).min(max_open - open).min(room);
     let give_up_s = if !wider && sn.give_up_s > 0 { sn.give_up_s } else { r.give_up_s };
     if stake < snipe::MIN_FILL {
         note(bot, "no_cash", f.json());

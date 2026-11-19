@@ -1208,6 +1208,15 @@ async fn bots_get(State(app): S) -> Response {
 }
 
 async fn bots_settings(State(app): S, Json(edit): Json<Value>) -> Response {
+    // A new real-wallet amount must fit the account: checked against the Polymarket cash now.
+    if let Some(b) = edit["snipe"]["bankroll"].as_f64() {
+        if b > 0.0 && (b - crate::bots::settings().snipe.c.bankroll).abs() > 1e-9 {
+            let cash = pm_cash_now(&app).await;
+            if let Err(e) = crate::bots::check_bankroll(b, cash) {
+                return err(StatusCode::BAD_REQUEST, format!("Real wallet: {e:#}"));
+            }
+        }
+    }
     match tokio::task::spawn_blocking(move || crate::bots::update(&app, &edit)).await {
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),

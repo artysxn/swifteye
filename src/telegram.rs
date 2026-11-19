@@ -626,7 +626,7 @@ fn balance_chart(app: &App, real: bool) -> Option<(Value, String)> {
         } else if let Some(r) = &last_run {
             (r["bankroll"].as_f64().unwrap_or(40.0), r["start_ms"].as_i64().unwrap_or(0), r["end_ms"].as_i64().unwrap_or(now), format!("Snipe bot balance · last REAL test run (${:.0})", r["bankroll"].as_f64().unwrap_or(40.0)))
         } else {
-            (st.snipe.c.bankroll, 0, now, format!("Snipe bot balance · REAL (${:.0} bankroll)", st.snipe.c.bankroll))
+            (st.snipe.c.bankroll, st.snipe.c.real_since, now, format!("Snipe bot balance · REAL (${:.0} bankroll)", st.snipe.c.bankroll))
         }
     } else {
         (st.snipe.c.start, st.snipe.c.paper_since, now, format!("Snipe bot balance · paper (${:.0} start)", st.snipe.c.start))

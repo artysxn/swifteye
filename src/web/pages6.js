@@ -173,13 +173,13 @@ SE.pages.bots = {
       on: () => save({ snipe: { enabled: true } }, 'Snipe bot on'),
       pause: () => ask({ danger: true, icon: 'pause_circle', title: 'Pause every bot?', text: 'Open trades still sell.', ok: 'Pause', onOk: () => save({ kill: true }, 'Paused') }),
       paper: async () => { try { await api('/bots/real/snipe', { body: { real: false, confirm: '' } }); SE.toast('Back on paper'); load(); } catch (e) { SE.toast(e.message, 6000); } },
-      real: () => ask({ danger: true, icon: 'payments', title: 'Trade real money?', text: `Whole bankroll ${money(d.settings.snipe.bankroll, 0)}, up to ${money(d.settings.snipe.max_trade, 0)} a trade, stops after −${money(d.settings.snipe.daily_loss, 0)} a day.`, type: 'REAL MONEY', ok: 'Switch to real',
+      real: () => ask({ danger: true, icon: 'payments', title: 'Trade real money?', text: `Real wallet ${money(d.settings.snipe.bankroll, 0)}, up to ${money(d.settings.snipe.r_max_trade, 0)} a trade, stops after −${money(d.settings.snipe.daily_loss, 0)}. No end time and no extra safety stops: the test run has both.`, type: 'REAL MONEY', ok: 'Switch to real',
         onOk: async () => { try { await api('/bots/real/snipe', { body: { real: true, confirm: 'REAL MONEY' } }); SE.toast('Real money on', 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } }),
       run: () => {
         let hours = 9;
-        ask({ danger: true, icon: 'timer', title: 'Start a real test run?', text: 'A trade is 30% of the amount. It stops itself after losing three eighths of it, two losses in a row, or fills clearly worse than paper. Safe set only; the paper wallet trades every move beside it.',
-          extra: `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${SE.num({ id: 'bpRunB', value: 40, step: 5, min: 35, pre: '$', w: 110, tip: 'Real money for this run. At most the cash on your Polymarket account.' })}<div id="bpRunH"></div></div>`, type: 'REAL MONEY', ok: 'Start',
-          onOk: async () => { try { await api('/bots/run/start', { body: { hours, bankroll: +$('#bpRunB').value || 40, confirm: 'REAL MONEY' } }); SE.toast(`${hours} h test run started`, 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } });
+        ask({ danger: true, icon: 'timer', title: 'Start a real test run?', text: `The real wallet with its own stakes: ${pct(d.settings.snipe.r_pct, 0)} a trade, at most ${money(d.settings.snipe.r_max_trade, 0)}. It stops itself after −${money(d.settings.snipe.daily_loss, 0)}, two losses in a row, or fills clearly worse than paper. The paper wallet trades every move beside it.`,
+          extra: `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${SE.num({ id: 'bpRunB', value: d.settings.snipe.bankroll || 40, step: 5, min: 10, pre: '$', w: 110, tip: 'The real wallet for this run. At most the cash on your Polymarket account.' })}<div id="bpRunH"></div></div>`, type: 'REAL MONEY', ok: 'Start',
+          onOk: async () => { try { await api('/bots/run/start', { body: { hours, bankroll: +$('#bpRunB').value || d.settings.snipe.bankroll || 40, confirm: 'REAL MONEY' } }); SE.toast(`${hours} h test run started`, 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } });
         SE.seg($('#bpRunH'), [[4, '4 h'], [8, '8 h'], [9, '9 h', 'One whole trading window (12:00 to 21:00 UTC).'], [16, '16 h'], [24, '24 h']], hours, (v) => { hours = +v; });
       },
       extend: () => {
@@ -188,8 +188,8 @@ SE.pages.bots = {
           onOk: async () => { try { await api('/bots/run/extend', { body: { hours: h } }); SE.toast(`Extended by ${h} h`); load(); } catch (e) { SE.toast(e.message, 6000); } } });
         SE.seg($('#bpExtH'), [[1, '1 h'], [2, '2 h'], [4, '4 h'], [8, '8 h']], h, (v) => { h = +v; });
       },
-      amount: () => ask({ icon: 'payments', title: 'Real money for this run', text: 'A trade is 30% of it. At most the cash on your Polymarket account.',
-        extra: SE.num({ id: 'bpRunB2', value: d.settings.snipe.bankroll, step: 5, min: 35, pre: '$', w: 110 }), ok: 'Save',
+      amount: () => ask({ icon: 'payments', title: 'Real wallet', text: 'At most the cash on your Polymarket account. The run keeps its results.',
+        extra: SE.num({ id: 'bpRunB2', value: d.settings.snipe.bankroll, step: 5, min: 10, pre: '$', w: 110 }), ok: 'Save',
         onOk: async () => { try { await api('/bots/run/bankroll', { body: { bankroll: +$('#bpRunB2').value } }); SE.toast('Amount saved'); load(); } catch (e) { SE.toast(e.message, 7000); } } }),
       stoprun: () => ask({ danger: true, icon: 'stop_circle', title: 'End the test run now?', text: 'Back to paper. Open trades still sell.', ok: 'End run',
         onOk: async () => { try { await api('/bots/run/stop', { method: 'POST' }); SE.toast('Test run ended'); load(); } catch (e) { SE.toast(e.message, 6000); } } }),
@@ -573,24 +573,27 @@ SE.pages.bots = {
       const s = d.settings, run = s.run, sn = s.snipe, w = run ? run.prev : sn;
       const f = (icon, label, ctl, tip) => `<div class="field"><label ${tip ? `data-tip="${esc(tip)}"` : ''}>${ic(icon)}${label}</label><div class="in">${ctl}</div></div>`;
       const n = (k, v, step = 1, pre = '', suf = '', w = 92) => SE.num({ attr: `data-k="${k}"`, value: v, step, pre, suf, w });
+      // Two wallets, nothing shared: paper (left), real (middle); the rules both follow (right).
       host.innerHTML =
         `<div>` +
-          f('percent', 'Stake', n('pct', +(w.pct * 100).toFixed(1), 1, '', '%'), 'Share of the balance on a safe-set trade' + (run ? '. Applies after the test run.' : '.')) +
-          f('payments', 'Max per trade', n('max_trade', w.max_trade, 5, '$'), run ? 'Applies after the test run.' : '') +
-          f('tune', 'Size by edge', sw('ctlEdge', sn.edge_sizing), 'Bigger stake when the expected gain is bigger (½× to 3×).') +
-          f('shield', 'Daily loss stop', n('daily_loss', w.daily_loss, 5, '$'), 'Real money goes back to paper once a day loses this much.') +
-          f('stacks', 'Max open', n('max_open', w.max_open, 10, '$')) +
-        `</div><div>` +
-          f('call_split', 'Wider set', sw('ctlB', sn.b_enabled), 'More trades at a lower win rate, small stakes. Paper only during a test run.') +
-          f('percent', 'Wider stake', n('b_pct', +(sn.b_pct * 100).toFixed(1), 1, '', '%')) +
+          f('savings', 'Paper balance', n('start', w.start, 50, '$'), 'The paper wallet. Changing it starts the paper wallet afresh.') +
+          f('percent', 'Paper stake', n('pct', +(w.pct * 100).toFixed(1), 1, '', '%'), 'Share of the paper balance on a safe-set trade.') +
+          f('payments', 'Paper max per trade', n('max_trade', w.max_trade, 5, '$')) +
+          f('stacks', 'Paper max open', n('max_open', w.max_open, 10, '$')) +
+          f('percent', 'Wider stake', n('b_pct', +(sn.b_pct * 100).toFixed(1), 1, '', '%'), 'The wider set trades on the paper wallet.') +
           f('payments', 'Wider max', n('b_max_trade', sn.b_max_trade, 1, '$')) +
+        `</div><div>` +
+          f('account_balance', 'Real wallet', n('bankroll', sn.bankroll, 5, '$'), 'The real bot\'s own money inside your Polymarket account. Never more than the cash on the account. Changing it starts the real wallet afresh.') +
+          f('percent', 'Real stake', n('r_pct', +(sn.r_pct * 100).toFixed(1), 1, '', '%'), 'Share of the real wallet on a trade. Its own number, never the paper stake.') +
+          f('payments', 'Real max per trade', n('r_max_trade', sn.r_max_trade, 1, '$'), 'Most real dollars in one trade.') +
+          f('shield', 'Real loss stop', n('daily_loss', sn.daily_loss, 5, '$'), 'Real money goes back to paper once it has lost this much.') +
+          f('payments', 'Real money', sw('ctlReal', sn.real, 'Asks for a typed confirmation.')) +
+        `</div><div>` +
+          f('tune', 'Size by edge', sw('ctlEdge', sn.edge_sizing), 'Bigger stake when the expected gain is bigger (½× to 3×), up to each wallet\'s max per trade.') +
+          f('call_split', 'Wider set', sw('ctlB', sn.b_enabled), 'More trades at a lower win rate, small stakes. Paper only.') +
           f('block', 'Wider daily stop', n('b_daily_loss', sn.b_daily_loss, 5, '$'), 'The wider set stops for the day after losing this much. 0 = never.') +
           f('timer_off', 'Give up after', n('give', Math.round((sn.give_up_s || 900) / 60), 1, '', 'min'), 'An unsold trade is sold at this point.') +
-        `</div><div>` +
           f('schedule', 'Hours (UTC)', n('h0', sn.hours_utc?.[0] ?? 12, 1, '', ':00', 76) + '<span class="faint">to</span>' + n('h1', sn.hours_utc?.[1] ?? 21, 1, '', ':00', 76), 'Trades only between these hours. Same number twice = all day.') +
-          f('account_balance', 'Real bankroll', n('bankroll', w.bankroll, 10, '$'), 'How much of the Polymarket account the bot may use.') +
-          f('savings', 'Paper start', n('start', w.start, 50, '$'), 'Changing it re-bases the paper wallet.') +
-          f('payments', 'Real money', sw('ctlReal', sn.real, 'Asks for a typed confirmation.')) +
         `</div>`;
       const mark = () => { dirty = true; $('#bpSave').hidden = false; };
       $$('input[type=number]', host).forEach((i) => i.addEventListener('input', mark));
@@ -602,7 +605,7 @@ SE.pages.bots = {
       await save({ snipe: {
         pct: g('pct') / 100, max_trade: g('max_trade'), edge_sizing: $('#ctlEdge').checked,
         b_enabled: $('#ctlB').checked, b_pct: g('b_pct') / 100, b_max_trade: g('b_max_trade'), b_daily_loss: g('b_daily_loss'),
-        daily_loss: g('daily_loss'), max_open: g('max_open'), bankroll: g('bankroll'), start: g('start'),
+        daily_loss: g('daily_loss'), max_open: g('max_open'), bankroll: g('bankroll'), start: g('start'), r_pct: g('r_pct') / 100, r_max_trade: g('r_max_trade'),
         hours_utc: [g('h0'), g('h1')], give_up_s: Math.round(g('give') * 60),
       } }, 'Saved');
       $('#bpSave').hidden = true;
