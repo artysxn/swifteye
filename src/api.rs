@@ -34,6 +34,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/assets/pages4.js", get(|| async { asset("pages4.js", "text/javascript; charset=utf-8", include_str!("web/pages4.js")) }))
         .route("/telegram", get(tg_get).post(tg_post))
         .route("/telegram/test", post(tg_test))
+        .route("/telegram/preview", get(tg_preview))
+        .route("/telegram/push", post(tg_push))
+        .route("/bots/panel", get(bots_panel))
         .route("/telegram/watch", get(|| async { Json(json!({"watch": crate::telegram::watched()})) }))
         .route("/telegram/watch/{id}", post(tg_watch))
         .route("/arbs", get(arbs))
@@ -55,11 +58,13 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/adaptive", get(adaptive))
         .route("/adaptive/settings", post(adaptive_settings))
         .route("/adaptive/dump", get(adaptive_dump))
+        .route("/adaptive/research", get(|| async { Json(tokio::task::spawn_blocking(crate::adaptive::research).await.unwrap_or_default()).into_response() }))
         .route("/predarb", get(predarb))
         .route("/bots", get(bots_get))
         .route("/bots/settings", post(bots_settings))
         .route("/bots/real/{bot}", post(bots_real))
         .route("/bots/sim", get(bots_sim))
+        .route("/bots/parity", get(bots_parity))
         .route("/bots/accounts", get(bots_accounts))
         .route("/bots/tests", get(bots_tests))
         .route("/bots/runs", get(bots_runs))
@@ -827,6 +832,37 @@ async fn tg_post(State(app): S, Json(edit): Json<Value>) -> Response {
     }
 }
 
+/// What the bot would answer to a command: ?cmd=/status
+async fn tg_preview(State(app): S, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let cmd = q.get("cmd").cloned().unwrap_or_default();
+    match tokio::task::spawn_blocking(move || crate::telegram::preview(&app, &cmd)).await {
+        Ok(Some(t)) => Json(json!({"text": t})).into_response(),
+        Ok(None) => err(StatusCode::BAD_REQUEST, "unknown command".to_string()),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Send a command's answer to the linked chat: {"cmd": "/status"}.
+async fn tg_push(State(app): S, Json(b): Json<Value>) -> Response {
+    match crate::telegram::push(&app, b["cmd"].as_str().unwrap_or("")).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+/// The snipe bot's control panel: ?real=1 for real money.
+async fn bots_panel(State(app): S, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let real = q.get("real").is_some_and(|x| x == "1" || x == "true");
+    Json(tokio::task::spawn_blocking(move || crate::bots::panel(&app, real)).await.unwrap_or_default()).into_response()
+}
+
+/// Live trades vs the replay of the same hours: ?real=0|1&hours=24.
+async fn bots_parity(State(app): S, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let real = q.get("real").is_some_and(|x| x == "1" || x == "true");
+    let hours = q.get("hours").and_then(|x| x.parse::<f64>().ok()).unwrap_or(24.0);
+    Json(tokio::task::spawn_blocking(move || crate::bots::parity(&app, real, hours)).await.unwrap_or_default()).into_response()
+}
+
 async fn tg_test(State(app): S) -> Response {
     match crate::telegram::test(&app).await {
         Ok(()) => Json(json!({"ok": true})).into_response(),
@@ -1211,7 +1247,7 @@ async fn bots_runs(State(app): S) -> Response {
     Json(tokio::task::spawn_blocking(move || crate::bots::runs(&app)).await.unwrap_or_default()).into_response()
 }
 
-/// Start a timed REAL test run of the snipe bot: {"hours": 4|8|16|24, "confirm": "REAL MONEY"}.
+/// Start a timed REAL test run of the snipe bot: {"hours": 4|8|9|16|24, "confirm": "REAL MONEY"}.
 async fn bots_run_start(State(app): S, Json(b): Json<Value>) -> Response {
     let (h, conf) = (b["hours"].as_i64().unwrap_or(0), b["confirm"].as_str().unwrap_or("").to_string());
     match tokio::task::spawn_blocking(move || crate::bots::start_run(&app, h, &conf)).await {

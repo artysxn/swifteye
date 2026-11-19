@@ -5,6 +5,12 @@
 //! Measured 18 Nov 2026 (3 Polymarket round trips, live tennis): order reply 65-114 ms, live-sports
 //! matching delay 1.28-1.41 s, shares usable ~1.8 s after a buy, slippage 0c. Kalshi: not
 //! measured yet.
+//!
+//! Since 19 Nov every real order counts too (`bot_orders`: 15 orders, reply median 80 ms, signing
+//! ~100 ms, matching delay median 1.47 s with a tail to 3.2 s), and the real snipe buys give the
+//! time from the bookmaker's move to the order leaving (median 2.2 s: the two tests at 1.0 s and
+//! 1.5 s, then the store lag, measuring, the cash claim and signing). The replay used to send at
+//! 1.5 s and so filled ~0.7 s earlier than the real bot.
 
 use crate::model::*;
 use parking_lot::Mutex;
@@ -20,6 +26,11 @@ pub struct Timing {
     pub pm_live_delay_ms: Ms,
     /// Polymarket: bought shares can be sold this long after the buy matched.
     pub pm_settle_ms: Ms,
+    /// Polymarket: building and signing an order before it is sent.
+    pub pm_prep_ms: Ms,
+    /// Snipe: how long after its second test (move + 1.5 s) the real bot's order leaves (store
+    /// lag, measuring, the cash claim, signing).
+    pub pm_send_lag_ms: Ms,
     /// Kalshi: order sent -> filled or killed.
     pub kalshi_order_ms: Ms,
     /// How many tests each figure comes from (0 = default).
@@ -28,14 +39,22 @@ pub struct Timing {
 }
 
 impl Timing {
-    /// Polymarket: from sending an order to its fill (game playing or not).
+    /// Polymarket: from deciding on an order to its fill (signing, reply, and on a game already
+    /// playing the matching delay).
     pub fn pm_fill_ms(&self, live: bool) -> Ms {
+        self.pm_prep_ms + self.pm_match_ms(live)
+    }
+    /// Polymarket: from an order leaving to its fill.
+    pub fn pm_match_ms(&self, live: bool) -> Ms {
         self.pm_order_ms + if live { self.pm_live_delay_ms } else { 0 }
     }
 }
 
 /// Before any test: the first measurements, and a cautious Kalshi guess.
-pub const DEFAULT: Timing = Timing { pm_order_ms: 80, pm_live_delay_ms: 1_400, pm_settle_ms: 1_800, kalshi_order_ms: 300, n_pm: 0, n_kalshi: 0 };
+pub const DEFAULT: Timing = Timing { pm_order_ms: 80, pm_live_delay_ms: 1_470, pm_settle_ms: 1_800, pm_prep_ms: 100, pm_send_lag_ms: 700, kalshi_order_ms: 300, n_pm: 0, n_kalshi: 0 };
+
+/// The snipe bot's two tests end this long after the move (REACTION + CONFIRM).
+const SNIPE_TESTS_MS: Ms = 1_500;
 
 struct Cache {
     db: Option<PathBuf>,
@@ -91,6 +110,41 @@ pub fn get() -> Timing {
             }
             if let Some(x) = median(pick("polymarket", "settle_wait_ms", true)) {
                 t.pm_settle_ms = x as Ms;
+            }
+            // Real orders (test runs and the bots' own): every one is a measurement.
+            let orders: Vec<serde_json::Value> = c
+                .prepare("SELECT data FROM bot_orders WHERE ok = 1 AND venue = 'polymarket'")
+                .and_then(|mut st| st.query_map([], |r| r.get::<_, String>(0)).map(|it| it.filter_map(|x| x.ok()).collect::<Vec<_>>()))
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .collect();
+            let of = |key: &str, pos: bool| -> Vec<f64> { orders.iter().filter_map(|o| o["fill"][key].as_f64()).filter(|x| !pos || *x > 0.0).collect() };
+            if orders.len() >= 3 {
+                t.n_pm = orders.len();
+                if let Some(x) = median(of("latency_ms", false)) {
+                    t.pm_order_ms = x as Ms;
+                }
+                if let Some(x) = median(of("match_delay_ms", true)) {
+                    t.pm_live_delay_ms = x as Ms;
+                }
+                if let Some(x) = median(of("prep_ms", true)) {
+                    t.pm_prep_ms = x as Ms;
+                }
+            }
+            // Real snipe buys: the bookmaker's move -> the order leaving.
+            let sent: Vec<f64> = c
+                .prepare(
+                    "SELECT json_extract(o.data, '$.fill.sent_ms') - json_extract(t.data, '$.move_ms') FROM bot_trades t JOIN bot_orders o
+                     ON o.ok = 1 AND json_extract(o.data, '$.side') = 'buy' AND json_extract(o.data, '$.token') = json_extract(t.data, '$.token')
+                     AND o.ts_ms BETWEEN t.ts_ms - 3000 AND t.ts_ms + 3000 WHERE t.real = 1 AND t.bot = 'snipe'",
+                )
+                .and_then(|mut st| st.query_map([], |r| r.get::<_, Option<f64>>(0)).map(|it| it.filter_map(|x| x.ok().flatten()).collect::<Vec<_>>()))
+                .unwrap_or_default();
+            if sent.len() >= 3 {
+                if let Some(x) = median(sent) {
+                    t.pm_send_lag_ms = (x as Ms - SNIPE_TESTS_MS).clamp(0, 5_000);
+                }
             }
             let k = pick("kalshi", "latency_ms", false);
             t.n_kalshi = k.len();

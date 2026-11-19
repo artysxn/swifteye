@@ -7,7 +7,8 @@
 //!
 //! * Facts are fixed, not tuned: reaction 1 s, confirming check 0.5 s later, order travel and the
 //!   venue's matching delay as measured by the test runs (timing.rs: ~1.5 s on live Polymarket games),
-//!   1c slippage on every buy and sale, Kalshi taker fee, Polymarket sports taker fee
+//!   the buy at the price resting when the order matched (no slippage on top, as the real buys
+//!   filled), 1c slippage on every sale, Kalshi taker fee, Polymarket sports taker fee
 //!   (5% x p x (1-p) a contract, each side; version 6, before that 0), the real order book
 //!   (fills capped to what rested when depth was recorded; before that, a full fill).
 //! * Money: a paper balance (settings: starting balance, share staked per trade). Each trade
@@ -73,6 +74,11 @@ const CONFIRM: Ms = 500;
 /// Order travel and venue matching come from the diagnostic test runs (timing.rs): Polymarket's
 /// reply plus, on games already playing, its matching delay; Kalshi's order time.
 const SLIP: f64 = 0.01;
+/// Slippage on a buy against the book recorded when the order matched. The real buys (19 Nov)
+/// paid exactly the best price resting then (4 of 5; the fifth walked 6 @ 80c + the rest @ 82c,
+/// as the depth model prices it), so nothing is added: the tests of a move keep their 1c margin,
+/// only the money counted is exact. Sales keep 1c (real: +1, 0, 0, -1.5, -2c against the bid).
+const SLIP_BUY: f64 = 0.0;
 /// Stake used only to estimate the fee per contract in the expected-gain test.
 const REF_STAKE: f64 = 100.0;
 const CAP: f64 = 0.02;
@@ -86,7 +92,10 @@ const PAUSE_WINDOW_MS: Ms = 120_000;
 
 // ---- choosing
 /// Method version: stored with every run; a change recomputes the history.
-const VERSION: u32 = 7;
+const VERSION: u32 = 16;
+/// Version of the candidate measurements on disk (bump only when `Cand` or its measuring changes;
+/// rule or filter changes re-pick the rules but keep the measurements).
+const CAND_VERSION: u32 = 15;
 const MIN_N: usize = 30;
 /// Standard errors subtracted from the average return.
 const SE_K: f64 = 2.0;
@@ -132,6 +141,16 @@ pub struct Policy {
     /// Buy past the best price (up to 2c worse) to fill more of the stake.
     #[serde(default = "yes")]
     pub walk_book: bool,
+}
+
+/// The safe set never buys when Polymarket has already made more than this share of the move,
+/// whatever the rule-picker chose for a window (it once allowed 25%: the replay's total loss).
+pub const SAFE_MAX_FOLLOWED: f64 = 0.10;
+
+/// The wider set's rules of the move: 2+ feeds, 7-point move, Polymarket followed 10% at most,
+/// 2c expected gain, 4c spread, sell on the full catch-up, give up after 15 minutes.
+pub fn policy_b() -> Policy {
+    Policy { min_books: 2, max_followed: 0.10, min_edge: 0.02, max_spread: 0.04, min_move: 0.07, catch: 1.0, give_up_s: 900, skip_after_pause: false, walk_book: true }
 }
 
 fn policy(i: &Idx) -> Policy {
@@ -252,9 +271,153 @@ pub fn save_settings(app: &App, edit: &Value) -> anyhow::Result<Value> {
     Ok(json!({"bank": b, "recomputing": changed}))
 }
 
+// ---------------------------------------------------------------- trend filters
+
+/// Extra trade filters and the stop-loss sale, outside the rule grid (tested by replay; the live
+/// bot uses `Flt::live()`).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Flt {
+    /// Nothing bought above 90c.
+    pub cap: bool,
+    /// Skip when Polymarket's own price fell more than this (in our direction) over the 10 min before.
+    pub pm_trend: Option<f64>,
+    /// Skip when the trigger bookmaker fell more than this over the 10 min before its move.
+    pub book_trend: Option<f64>,
+    /// Skip when the trigger bookmaker's move over 5 min is under this share of its 10 s move
+    /// (a bounce back from a dip, not new information).
+    pub rev: Option<f64>,
+    /// Skip when the 10 s move is under this multiple of the trigger book's range over the 10 min
+    /// before (a swingy game where such jumps are routine).
+    pub noise: Option<f64>,
+    /// Sell early once the bought side can only be sold this share of the bookmakers' move below
+    /// the buy price (at least 4c).
+    pub stop: Option<f64>,
+    /// Sell early once the bookmakers' consensus gave back half its move (the reason is gone).
+    pub revert: bool,
+    /// Consensus filters (see consensus.rs): least consensus move, least gap shock, least
+    /// follow share (needs an earlier jump), most lead share, least z, least families moved.
+    pub cons: Option<f64>,
+    pub shock: Option<f64>,
+    pub follow: Option<f64>,
+    pub lead: Option<f64>,
+    pub z: Option<f64>,
+    pub fams: Option<usize>,
+    /// Skip live basketball (swings every possession; the replay's big losers).
+    pub no_basketball: bool,
+    /// Nothing bought above this price (the wider set: 40c).
+    pub max_px: Option<f64>,
+    /// Skip moves triggered by the feeds that lost in the wider set (duel, the 1xbet group,
+    /// olimp, betcity).
+    pub skip_feeds: bool,
+    /// Trade only between these UTC hours [from, to).
+    pub hours: Option<[u8; 2]>,
+}
+
+impl Flt {
+    /// The rules the replay of 17-19 Nov picked (no basketball, 2+ feed families, consensus and
+    /// gap moved 3+ pts, Polymarket followed 30%+ of earlier jumps in the game, <= 90c): 53
+    /// trades in 1.8 days, all won, +29%/$, median hold 58 s.
+    pub fn picked() -> Flt {
+        Flt { cap: true, fams: Some(2), cons: Some(0.03), follow: Some(0.3), no_basketball: true, ..Default::default() }
+    }
+    /// The safe set as the live bot runs it: `picked` inside the trading hours of the settings.
+    pub fn live() -> Flt {
+        Flt { hours: crate::bots::settings().snipe.hours(), ..Flt::picked() }
+    }
+    /// The wider set (more trades, smaller stakes): any consensus move, Polymarket followed 20%+
+    /// of earlier jumps, bought at 40c or less, not triggered by the feeds that lost there.
+    /// Rules of the move itself: `policy_b`.
+    pub fn wider() -> Flt {
+        Flt { cap: true, fams: Some(2), follow: Some(0.2), no_basketball: true, max_px: Some(0.40), skip_feeds: true, hours: crate::bots::settings().snipe.hours(), ..Default::default() }
+    }
+    fn keep(&self, c: &Cand) -> bool {
+        // The price the live bot tests: the offer plus its 1c margin.
+        self.check(&c.sport, &c.trigger, c.tf, c.px - SLIP_BUY + SLIP, c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx).is_none()
+    }
+    /// Why a move fails the filters (None = passes). `tr` = [pm_tr, b_tr5, b_tr10, b_rng].
+    pub fn check(&self, sport: &str, trigger: &str, t: Ms, px: f64, bm: [f64; 2], tr: [f64; 4], cx: &crate::consensus::Ctx) -> Option<&'static str> {
+        let [pm_tr, b_tr5, b_tr10, b_rng] = tr;
+        if let Some([a, b]) = self.hours {
+            let h = (t.rem_euclid(86_400_000) / 3_600_000) as u8;
+            if a != b && !(if a < b { h >= a && h < b } else { h >= a || h < b }) {
+                return Some("outside_hours");
+            }
+        }
+        if self.max_px.is_some_and(|m| px > m) {
+            return Some("price_above_set_limit");
+        }
+        if self.skip_feeds && matches!(snipe::platform(trigger), "duel" | "1xbet" | "olimp" | "betcity") {
+            return Some("weak_feed");
+        }
+        if self.no_basketball && sport == "basketball" {
+            return Some("basketball");
+        }
+        if self.fams.is_some_and(|k| cx.fam_moved < k) {
+            return Some("too_few_feeds");
+        }
+        if self.cons.is_some_and(|k| cx.cons_move < k) {
+            return Some("consensus_did_not_move");
+        }
+        if self.shock.is_some_and(|k| cx.gap_shock < k) {
+            return Some("gap_usual_size");
+        }
+        if self.follow.is_some_and(|k| cx.jumps == 0 || cx.follow < k) {
+            return Some("polymarket_does_not_lag");
+        }
+        if self.lead.is_some_and(|k| cx.jumps > 0 && cx.lead > k) {
+            return Some("polymarket_leads");
+        }
+        if self.z.is_some_and(|k| cx.z < k) {
+            return Some("swingy_consensus");
+        }
+        if self.cap && px > 0.90 {
+            return Some("price_too_high");
+        }
+        if self.pm_trend.is_some_and(|t| pm_tr < -t) {
+            return Some("polymarket_trend_against");
+        }
+        if self.book_trend.is_some_and(|t| b_tr10 < -t) {
+            return Some("book_trend_against");
+        }
+        if self.rev.is_some_and(|r| b_tr5 < r * bm[1]) {
+            return Some("bounce_not_news");
+        }
+        if self.noise.is_some_and(|k| bm[0] < k * b_rng) {
+            return Some("swingy_game");
+        }
+        None
+    }
+    /// The stop-loss sale price for a buy at `entry` on a bookmaker move `bm`.
+    pub fn stop_px(&self, entry: f64, bm: f64) -> Option<f64> {
+        self.stop.map(|k| entry - (k * bm).max(0.04))
+    }
+}
+
+thread_local! {
+    static FLT: std::cell::Cell<Flt> = std::cell::Cell::new(Flt { cap: true, ..Default::default() });
+}
+
+fn flt() -> Flt {
+    FLT.with(|f| f.get())
+}
+
+impl Cand {
+    fn exit(&self, ci: usize, gi: usize) -> Option<Exit> {
+        let f = flt();
+        if f.stop.is_none() && !f.revert {
+            return self.exits[ci][gi];
+        }
+        let i = EXV.iter().position(|(s, r)| *r == f.revert && s.zip(f.stop).map_or(s.is_none() && f.stop.is_none(), |(a, b)| (a - b).abs() < 1e-9)).unwrap_or(1);
+        self.stop_exits[i][ci][gi]
+    }
+}
+
+/// Early-sale variants the replay prices: (stop-loss share of the move, "reason gone" exit).
+pub const EXV: [(Option<f64>, bool); 5] = [(Some(0.25), false), (Some(0.5), false), (Some(1.0), false), (None, true), (Some(0.5), true)];
+
 // ---------------------------------------------------------------- candidates
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Exit {
     ts: Ms,
     /// Sale price per contract before the book (slippage included).
@@ -264,7 +427,7 @@ struct Exit {
     caught: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Cand {
     match_id: i64,
     sport: String,
@@ -282,13 +445,24 @@ struct Cand {
     sp: [f64; 2],
     /// Expected gain per contract at each test, for each catch-up share.
     edge: [[f64; 3]; 2],
-    /// Price per contract before the book (slippage included).
+    /// Price per contract at the best offer when the order matched (plus `SLIP_BUY`).
     px: f64,
     /// (contracts at the best price, contracts within 2c) on our side; None = depth not recorded.
     buy: Option<(f64, f64)>,
     pause: bool,
     /// [catch][give-up]; None = not known yet.
     exits: [[Option<Exit>; 5]; 3],
+    /// The same with early sales, per `EXV`.
+    stop_exits: [[[Option<Exit>; 5]; 3]; 5],
+    /// The move against the whole market and this game's history.
+    cx: crate::consensus::Ctx,
+    /// Polymarket's mid change in our direction over the 10 min before the move.
+    pm_tr: f64,
+    /// The trigger bookmaker's change in our direction over 5 min (to the confirm) and over the 10 min before.
+    b_tr5: f64,
+    b_tr10: f64,
+    /// The trigger book's price range over the 10 min before the move.
+    b_rng: f64,
 }
 
 fn fee(pm: bool, n: f64, p: f64) -> f64 {
@@ -323,6 +497,13 @@ fn fill(c: &Cand, x: &Exit, stake: f64, walk: bool) -> Option<Fill> {
     Some(Fill { pnl, spent: n * entry, entry, exit, filled: c.buy.map(|_| (n * entry / stake).min(1.0)) })
 }
 
+/// May this rule buy past the best price here? Only when the move's expected gain still clears
+/// the rule's minimum after paying the 2c: the contracts bought past the best price must be worth
+/// buying on their own, not carried by the cheap ones.
+fn may_walk(c: &Cand, p: &Policy, ci: usize) -> bool {
+    p.walk_book && c.edge[1][ci] - CAP >= p.min_edge - 1e-9
+}
+
 /// The trigger bookmaker suspended this price within 2 minutes before the move (a goal,
 /// a red card, a break of serve: the book paused, then reopened somewhere else).
 pub(crate) fn after_pause(c: &Connection, book: &str, match_id: i64, outcome: &str, t0: Ms) -> bool {
@@ -343,7 +524,12 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     let dir = e.direction as f64;
     let (td, td2) = (t0 + tm.0, t0 + tm.0 + tm.1);
     let tmg = crate::timing::get();
-    let fd: Ms = if pm { tmg.pm_fill_ms(crate::timing::live(c, mid, td2)) } else { tmg.kalshi_order_ms };
+    let live = pm && crate::timing::live(c, mid, td2);
+    // The buy: the real bot's order leaves `pm_send_lag_ms` after the second test (store lag,
+    // measuring, cash claim, signing), then the reply and, on a game playing, the matching delay.
+    let fd: Ms = if pm { tmg.pm_send_lag_ms + tmg.pm_match_ms(live) } else { tmg.kalshi_order_ms };
+    // A sale: signing, the reply, the matching delay.
+    let fs: Ms = if pm { tmg.pm_fill_ms(live) } else { tmg.kalshi_order_ms };
     // Bought shares can only be sold once they have settled (Polymarket).
     let settle: Ms = if pm { tmg.pm_settle_ms } else { 0 };
     let tf = td2 + fd;
@@ -358,6 +544,9 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     }
     let pre_mid = (q0.0 + q0.1) / 2.0;
     let (bm1, bm2) = ((b1 - b_pre) * dir, (b2 - b_pre) * dir);
+    let (pm_tr, b_tr5, b_tr10, b_rng) = trends(c, q, tb, mid, o, dir, t0, pre_mid, b_pre, b2);
+    let series = crate::consensus::Series::load_for(c, base, mid, o, t0 - 31 * 60_000, tf + GIVE[GIVE.len() - 1] * 1000 + 60_000);
+    let cx = series.ctx(dir, t0 - snipe::PRE_MS, td2)?;
     if bm1 < MOVE[0] || bm2 < 0.01 {
         return None;
     }
@@ -375,7 +564,7 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
         return None;
     }
     let edge = |bm: f64, sp: f64, d: f64, catch: f64| {
-        let target = pre_mid + dir * bm * catch;
+        let target = (pre_mid + dir * bm * catch).clamp(0.0, 1.0);
         let exp = if dir > 0.0 { target - sp / 2.0 - SLIP } else { 1.0 - (target + sp / 2.0) - SLIP };
         let n = REF_STAKE / d;
         (n * (exp - d) - fee(pm, n, d) - fee(pm, n, exp.clamp(0.0, 1.0))) / n
@@ -385,10 +574,10 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     if !(0..3).any(|k| e1[k] >= EDGE[0] && e2[k] >= EDGE[0]) {
         return None;
     }
-    let entry0 = dec(&qf);
-    if entry0 > d2 + CAP {
+    if dec(&qf) > d2 + CAP {
         return None; // price ran before the fill
     }
+    let entry0 = dec(&qf) - SLIP + SLIP_BUY;
     // What rested on our side when the order landed: buying Yes takes asks, buying No takes Yes
     // bids. Unknown for hours recorded before depth was kept.
     let side = q.depth(mid, o, tf).and_then(|d| if dir > 0.0 { d.ask_size.zip(d.ask_depth) } else { d.bid_size.zip(d.bid_depth) });
@@ -398,29 +587,55 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
     // Every sale: catch-up judged on the price we would sell at; else the give-up time.
     let path = q.path(mid, o, tf, tf + GIVE[GIVE.len() - 1] * 1000);
     let mut exits = [[None; 5]; 3];
+    let mut stop_exits = [[[None; 5]; 3]; 5];
+    // The consensus gave back half its move: the reason for the trade is gone.
+    let gone = |t: Ms| series.cons_at(t).is_some_and(|cn| (cn - cx.cons_now) * dir <= -0.5 * cx.cons_move.max(0.01));
+    for si in 0..=EXV.len() {
+    // si == EXV.len(): no early sale.
+    let stop_px = EXV.get(si).and_then(|v| v.0).map(|k| entry0 - (k * bm1).max(0.04));
+    let revert = EXV.get(si).is_some_and(|v| v.1);
     for (ci, &k) in CATCH.iter().enumerate() {
         for (gi, &g) in GIVE.iter().enumerate() {
             let give = tf + g * 1000;
-            // A sale can only be sent once the shares have settled.
-            let hit = path.iter().take_while(|x| x.2 <= give).filter(|x| x.2 >= tf + settle).find(|x| snipe::caught_up(x, dir, pre_mid, k * bm1, s1)).map(|x| x.2);
+            let sellable = |x: &Q| if dir > 0.0 { x.0 } else { 1.0 - x.1 };
+            // The bot looks at the book once a second from its buy and sells on what it sees
+            // then (never before the shares have settled): a catch-up that is gone again by the
+            // next look is missed, as it is live.
+            let tick = |t: Ms| tf + (t - tf + 999).div_euclid(1000) * 1000;
+            let state_at = |t: Ms| {
+                let i = path.partition_point(|x| x.2 <= t);
+                if i == 0 { qf } else { path[i - 1] }
+            };
+            let first = tick(tf + settle);
+            let caught_at = |x: &Q| snipe::caught_up(x, dir, pre_mid, k * bm1, s1) || sellable(x) >= 0.99;
+            let hit = std::iter::once(first)
+                .chain(path.iter().filter(|x| x.2 > first).map(|x| tick(x.2)))
+                .take_while(|t| *t <= give)
+                .find_map(|t| {
+                    let x = state_at(t);
+                    let c = caught_at(&x);
+                    (c || stop_px.is_some_and(|sp| sellable(&x) <= sp) || (revert && gone(t))).then_some((t, c))
+                });
             let (t_sell, caught) = match hit {
-                Some(t) => (t, true),
-                None if give + fd > now => continue, // still open
+                Some((t, c)) => (t, c),
+                None if give + fs > now => continue, // still open
                 None => (give, false),
             };
-            if t_sell + fd > now {
+            if t_sell + fs > now {
                 continue;
             }
-            let Some(qs) = q.at(mid, o, t_sell + fd) else { continue };
+            let Some(qs) = q.at(mid, o, t_sell + fs) else { continue };
             let px = (if dir > 0.0 { qs.0 } else { 1.0 - qs.1 }) - SLIP;
             // Selling Yes hits bids; selling No hits Yes asks.
             let sell = if side.is_some() {
-                q.depth(mid, o, t_sell + fd).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
+                q.depth(mid, o, t_sell + fs).and_then(|d| if dir > 0.0 { d.bid_size.zip(d.bid_depth) } else { d.ask_size.zip(d.ask_depth) })
             } else {
                 None
             };
-            exits[ci][gi] = Some(Exit { ts: t_sell + fd, px, sell, caught });
+            let x = Some(Exit { ts: t_sell + fs, px, sell, caught });
+            if si < EXV.len() { stop_exits[si][ci][gi] = x } else { exits[ci][gi] = x }
         }
+    }
     }
     Some(Cand {
         match_id: mid,
@@ -432,7 +647,8 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
         trigger: tb.to_string(),
         pm,
         tf,
-        books: [snipe::confirmations(e, td), snipe::confirmations(e, td2)],
+        // Independent bookmakers = feed families that moved (the live bot counts the same way).
+        books: [cx.fam_moved, cx.fam_moved],
         bm: [bm1, bm2],
         fol: [f1, f2],
         sp: [s1, s2],
@@ -441,7 +657,31 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &RankEvent, tb: &str, t0: Ms
         buy: side,
         pause: after_pause(c, tb, mid, o, t0),
         exits,
+        stop_exits,
+        cx,
+        pm_tr,
+        b_tr5,
+        b_tr10,
+        b_rng,
     })
+}
+
+/// Trend features shared with the live bot: (Polymarket's 10-min trend, the trigger book's
+/// 5-min net move, the trigger book's 10-min trend before, its range over those 10 min), the
+/// trends in our direction.
+pub(crate) fn trends(c: &Connection, q: &mut dyn Quotes, tb: &str, mid: i64, o: &str, dir: f64, t0: Ms, pre_mid: f64, b_pre: f64, b_now: f64) -> (f64, f64, f64, f64) {
+    let pm_tr = q.at(mid, o, t0 - 600_000).map(|x| (pre_mid - (x.0 + x.1) / 2.0) * dir).unwrap_or(0.0);
+    let b_tr5 = snipe::book_prob(c, tb, mid, o, t0 - 300_000).map(|b| (b_now - b) * dir).unwrap_or(b_now - b_pre);
+    let b_tr10 = snipe::book_prob(c, tb, mid, o, t0 - 600_000).map(|b| (b_pre - b) * dir).unwrap_or(0.0);
+    // Range: the book's price every 30 s over the 10 min before the move window.
+    let (mut lo, mut hi) = (b_pre, b_pre);
+    for k in 1..=20 {
+        if let Some(b) = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS - k * 30_000) {
+            lo = lo.min(b);
+            hi = hi.max(b);
+        }
+    }
+    (pm_tr, b_tr5, b_tr10, hi - lo)
 }
 
 /// Every move in [start, end) for both markets.
@@ -462,10 +702,13 @@ fn build_chunk_with(db: &std::path::Path, start: Ms, end: Ms, now: Ms, tm: (Ms, 
         fastest: None,
         sport: None,
     };
-    let r = crate::rank::compute(db, &p)?;
-    let c = crate::store::open_ro(db)?;
+    // Everything this block reads, copied into memory in one sequential pass: the database is
+    // bigger than this machine's free memory, so random reads on disk made the build crawl.
+    let c = mem_copy(db, start - MEM_BEFORE_MS, end + MEM_AFTER_MS)?;
+    let r = crate::rank::compute_with(&c, &p)?;
     let mut out: [Vec<Cand>; 2] = [Vec::new(), Vec::new()];
     for (bi, base) in BASES.iter().enumerate() {
+        // Kalshi is not traded; its candidates are measured for research only.
         let mut q = if bi == 0 { snipe::pm_quotes(&c) } else { snipe::kalshi_quotes(&c) };
         for e in &r.events {
             if !(e.order.iter().any(|x| x.0 == *base) || e.missed.iter().any(|m| m == base)) {
@@ -563,7 +806,7 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
         if recent.iter().any(|r| r.0 == c.match_id) {
             continue;
         }
-        let Some(x) = c.exits[ci][gi] else { continue };
+        let Some(x) = c.exit(ci, gi) else { continue };
         if x.ts > known_by {
             continue;
         }
@@ -584,7 +827,7 @@ fn price_all(cands: &[&Cand], stake: f64) -> Vec<Priced> {
             for (w, &walk) in WALK.iter().enumerate() {
                 for ci in 0..3 {
                     for gi in 0..GIVE.len() {
-                        if let Some(x) = &c.exits[ci][gi] {
+                        if let Some(x) = &c.exit(ci, gi) {
                             p[w][ci][gi] = fill(c, x, stake, walk).map(|f| (f.pnl, f.spent));
                         }
                     }
@@ -600,7 +843,7 @@ fn stats_where(cands: &[&Cand], pr: &[Priced], i: &Idx, from: Ms, to: Ms, known_
     let p = policy(i);
     let (ci, gi) = sale_idx(&p);
     let mut s = Stats::default();
-    run_policy(cands, &p, from, to, known_by, |k, c, _| match pr[k][i[8]][ci][gi] {
+    run_policy(cands, &p, from, to, known_by, |k, c, _| match pr[k][may_walk(c, &p, ci) as usize][ci][gi] {
         Some((pnl, spent)) => {
             if only(c) {
                 s.add(pnl, spent, stake);
@@ -714,7 +957,7 @@ fn simulate<'a>(cands: &[&'a Cand], segs: &[(Policy, Ms, Ms)], known_by: Ms, ban
             if stake < snipe::MIN_FILL {
                 return false; // broke, or all cash in open trades
             }
-            let Some(f) = fill(c, x, stake, p.walk_book) else { return false };
+            let Some(f) = fill(c, x, stake, may_walk(c, p, sale_idx(p).0)) else { return false };
             cash -= f.spent;
             open.push((x.ts, f.spent, f.pnl));
             s.add(f.pnl, f.spent, stake);
@@ -816,9 +1059,92 @@ fn save_run(app: &App, r: &Run) {
     }
 }
 
+/// 4-hour blocks measured at once (each on its own in-memory copy, ~0.3-0.5 GB each).
+const BUILD_THREADS: usize = 2;
+/// The in-memory copy of a block: prices from this long before it (a book's "last price"
+/// further back is not seen) to this long after it (exits, consensus after the fill).
+const MEM_BEFORE_MS: Ms = 2 * 3_600_000;
+const MEM_AFTER_MS: Ms = 45 * 60_000;
+
+/// The first row id of `table` at or after `t` (ids grow with time; bisection on the key).
+fn id_at(d: &Connection, table: &str, t: Ms) -> anyhow::Result<i64> {
+    let max: i64 = d.query_row(&format!("SELECT COALESCE(MAX(id), 0) FROM {table}"), [], |r| r.get(0))?;
+    let ts_of = |id: i64| -> Option<Ms> { d.query_row(&format!("SELECT ts_ms FROM {table} WHERE id >= ?1 ORDER BY id LIMIT 1"), [id], |r| r.get(0)).ok() };
+    let (mut lo, mut hi) = (1i64, max + 1);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match ts_of(mid) {
+            Some(ts) if ts < t => lo = mid + 1,
+            _ => hi = mid,
+        }
+    }
+    Ok(lo)
+}
+
+/// An in-memory database with the 1x2 price changes and Polymarket quotes of [lo, hi] (read by
+/// row-id range, i.e. sequentially) and the matches table, indexed like the real one.
+fn mem_copy(db: &std::path::Path, lo: Ms, hi: Ms) -> anyhow::Result<Connection> {
+    let d = crate::store::open_ro(db)?;
+    // A little slack: ids are only roughly in time order.
+    let (c0, c1) = (id_at(&d, "changes", lo - 60_000)?, id_at(&d, "changes", hi + 60_000)?);
+    let (q0, q1) = (id_at(&d, "pm_quotes", lo - 60_000)?, id_at(&d, "pm_quotes", hi + 60_000)?);
+    drop(d);
+    let m = Connection::open_with_flags(":memory:", rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE | rusqlite::OpenFlags::SQLITE_OPEN_URI)?;
+    let uri = format!("file:{}?mode=ro", db.display());
+    m.execute("ATTACH DATABASE ?1 AS d", [uri])?;
+    m.execute_batch("PRAGMA d.mmap_size = 8589934592;")?;
+    m.execute("CREATE TABLE changes AS SELECT id, ts_ms, book, match_id, market, line, outcome, kind, old_price, new_price, book_ts_ms FROM d.changes WHERE id >= ?1 AND id < ?2 AND market = '1x2' AND ts_ms BETWEEN ?3 AND ?4", params![c0, c1, lo, hi])?;
+    m.execute("CREATE TABLE pm_quotes AS SELECT * FROM d.pm_quotes WHERE id >= ?1 AND id < ?2 AND ts_ms BETWEEN ?3 AND ?4", params![q0, q1, lo, hi])?;
+    // Kalshi: its quotes (candle backfills are not in id order: filter on time) and event links.
+    m.execute("CREATE TABLE kalshi_quotes AS SELECT * FROM d.kalshi_quotes WHERE ts_ms BETWEEN ?1 AND ?2", params![lo, hi])?;
+    m.execute_batch(
+        "CREATE TABLE book_events AS SELECT * FROM d.book_events WHERE book = 'kalshi';
+         CREATE INDEX kalshi_quotes_ev ON kalshi_quotes(event, outcome, ts_ms);
+         CREATE INDEX book_events_match ON book_events(match_id);
+         CREATE TABLE matches AS SELECT * FROM d.matches;
+         DETACH DATABASE d;
+         CREATE INDEX changes_ts ON changes(ts_ms);
+         CREATE INDEX changes_match ON changes(match_id, ts_ms);
+         CREATE INDEX pm_quotes_match ON pm_quotes(match_id, ts_ms);
+         CREATE INDEX matches_id ON matches(id);",
+    )?;
+    Ok(m)
+}
+
+fn cache_dir(app: &App) -> PathBuf {
+    app.db_path.parent().map(|d| d.join("adaptive_cache")).unwrap_or_else(|| PathBuf::from("adaptive_cache"))
+}
+
+/// A finished block from the disk cache, if it was measured by this method version.
+fn load_chunk(app: &App, start: Ms) -> Option<[Vec<Cand>; 2]> {
+    let t = std::fs::read(cache_dir(app).join(format!("v{CAND_VERSION}-{start}.json"))).ok()?;
+    serde_json::from_slice(&t).ok()
+}
+
+fn save_chunk(app: &App, start: Ms, b: &[Vec<Cand>; 2]) {
+    let d = cache_dir(app);
+    let _ = std::fs::create_dir_all(&d);
+    // Blocks of older method versions are useless now.
+    if let Ok(rd) = std::fs::read_dir(&d) {
+        for e in rd.flatten() {
+            if !e.file_name().to_string_lossy().starts_with(&format!("v{CAND_VERSION}-")) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if let Ok(t) = serde_json::to_vec(b) {
+        let tmp = d.join(format!("v{CAND_VERSION}-{start}.tmp"));
+        if std::fs::write(&tmp, t).is_ok() {
+            let _ = std::fs::rename(tmp, d.join(format!("v{CAND_VERSION}-{start}.json")));
+        }
+    }
+}
+
 /// Candidate references for one market, sorted by fill time.
+/// Live rule `cap`: nothing bought above 90c (no room to gain, whole stake at risk).
 fn all_cands(chunks: &[[Arc<Vec<Cand>>; 2]], bi: usize) -> Vec<&Cand> {
-    let mut v: Vec<&Cand> = chunks.iter().flat_map(|c| c[bi].iter()).collect();
+    let f = flt();
+    let mut v: Vec<&Cand> = chunks.iter().flat_map(|c| c[bi].iter()).filter(|c| f.keep(c)).collect();
     v.sort_by_key(|c| c.tf);
     v
 }
@@ -862,6 +1188,7 @@ pub fn spawn(app: Arc<App>) {
 
 /// Bring the candidate table up to date, then make every re-choice that is due.
 fn step(app: &App) -> anyhow::Result<()> {
+    FLT.with(|x| x.set(Flt::live()));
     let now = now_ms();
     let from: Ms = {
         let c = crate::store::open_ro(&app.db_path)?;
@@ -872,10 +1199,11 @@ fn step(app: &App) -> anyhow::Result<()> {
         st.data_from = Some(from);
         st.bank
     };
-    // ---- chunks
+    // ---- chunks: finished 4-hour blocks come from the disk cache (same method version); the
+    // rest are measured, several blocks at a time.
+    let mut todo: Vec<Ms> = Vec::new();
     let mut start = boundary(from);
     while start < now {
-        let end = start + EVERY_MS;
         let need = {
             let st = ST.lock();
             match st.chunks.get(&start) {
@@ -884,12 +1212,30 @@ fn step(app: &App) -> anyhow::Result<()> {
             }
         };
         if need {
-            ST.lock().status = format!("measuring moves {} UTC", fmt_utc(start));
-            let built = build_chunk(&app.db_path, start, end.min(now + 1), now)?;
-            let complete = end + EXIT_HORIZON_MS <= now;
-            ST.lock().chunks.insert(start, Chunk { built_ms: now, complete, c: built.map(Arc::new) });
+            let complete = start + EVERY_MS + EXIT_HORIZON_MS <= now;
+            match complete.then(|| load_chunk(app, start)).flatten() {
+                Some(c) => {
+                    ST.lock().chunks.insert(start, Chunk { built_ms: now, complete: true, c: c.map(Arc::new) });
+                }
+                None => todo.push(start),
+            }
         }
-        start = end;
+        start += EVERY_MS;
+    }
+    for batch in todo.chunks(BUILD_THREADS) {
+        ST.lock().status = format!("measuring moves {} UTC ({} blocks left)", fmt_utc(batch[0]), todo.len());
+        let built: Vec<(Ms, anyhow::Result<[Vec<Cand>; 2]>)> = std::thread::scope(|sc| {
+            let hs: Vec<_> = batch.iter().map(|&st| (st, sc.spawn(move || build_chunk(&app.db_path, st, (st + EVERY_MS).min(now + 1), now)))).collect();
+            hs.into_iter().map(|(st, h)| (st, h.join().unwrap_or_else(|_| Err(anyhow::anyhow!("build thread panicked"))))).collect()
+        });
+        for (st, r) in built {
+            let b = r?;
+            let complete = st + EVERY_MS + EXIT_HORIZON_MS <= now;
+            if complete {
+                save_chunk(app, st, &b);
+            }
+            ST.lock().chunks.insert(st, Chunk { built_ms: now, complete, c: b.map(Arc::new) });
+        }
     }
     // ---- re-choices due: every boundary from 8 h after the data starts
     let first = boundary(from + FIRST_AFTER_MS) + EVERY_MS;
@@ -897,6 +1243,9 @@ fn step(app: &App) -> anyhow::Result<()> {
     let chunks = snapshot();
     while t <= boundary(now) {
         for (bi, base) in BASES.iter().enumerate() {
+            if !TRADED[bi] {
+                continue; // research only: no rules chosen
+            }
             let have = ST.lock().runs.iter().any(|r| r.ts == t && r.base == *base);
             if have {
                 continue;
@@ -975,7 +1324,8 @@ fn trade_json(base: &str, t: &Taken) -> Value {
     let (c, x, f) = (t.c, &t.x, &t.f);
     json!({"base": base, "ts": c.tf, "exit_ts": x.ts, "match_id": c.match_id, "sport": c.sport, "home": c.home, "away": c.away,
         "outcome": c.outcome, "dir": c.dir, "trigger": c.trigger, "entry": f.entry, "exit": f.exit, "pnl": f.pnl, "spent": f.spent,
-        "stake": t.stake, "filled": f.filled, "reason": if x.caught { "caught up" } else { "gave up" }, "after_pause": c.pause})
+        "stake": t.stake, "filled": f.filled, "reason": if x.caught { "caught up" } else { "gave up" }, "after_pause": c.pause,
+        "move": c.bm[0], "books": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "px": c.px})
 }
 
 /// Balance after each closed trade: [[exit time, balance], ...], starting at `from`.
@@ -1058,7 +1408,8 @@ pub fn view(_app: &App) -> Value {
 /// open-money caps, its own cash), fills on the recorded book. `walk_forward`: each 4-hour window
 /// trades the rules picked before it (defaults before the first pick) = what the bot would have
 /// done; else today's rules on all of it (in-sample). `one_book`: the 1-bookmaker shadow.
-pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool) -> Value {
+pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, f: Flt) -> Value {
+    FLT.with(|x| x.set(f));
     let now = now_ms();
     let chunks = snapshot();
     let (runs, warm) = {
@@ -1084,37 +1435,242 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool) 
             s.0.min_books = 1;
         }
     }
+    for s in &mut segs {
+        if cfg.give_up_s > 0 {
+            s.0.give_up_s = cfg.give_up_s;
+        }
+        s.0.max_followed = s.0.max_followed.min(SAFE_MAX_FOLLOWED);
+    }
+    // Every trade either set would take, then one wallet in time order. The safe set first; the
+    // wider set only where the safe set did not take the move (2 minutes per match).
+    let mut picks: Vec<(&Cand, Exit, bool, f64, bool)> = Vec::new(); // (candidate, sale, wider set?, edge, walk)
+    for (p, from, to) in &segs {
+        let (ci, _) = sale_idx(p);
+        run_policy(&cands, p, *from, *to, now, |_, c, x| {
+            picks.push((c, *x, false, c.edge[1][ci], may_walk(c, p, ci)));
+            true
+        });
+    }
+    let n_safe = picks.len();
+    let cands_b: Vec<&Cand> = if cfg.b_enabled && !one_book {
+        FLT.with(|x| x.set(Flt { hours: f.hours, ..Flt::wider() }));
+        let v = all_cands(&chunks, 0);
+        FLT.with(|x| x.set(f));
+        v
+    } else {
+        Vec::new()
+    };
+    if !cands_b.is_empty() {
+        let pb = policy_b();
+        let (ci, _) = sale_idx(&pb);
+        let mut extra = Vec::new();
+        run_policy(&cands_b, &pb, 0, now + 1, now, |_, c, x| {
+            let taken = picks[..n_safe].iter().any(|s| s.0.match_id == c.match_id && (s.0.tf - c.tf).abs() < snipe::SAME_MOVE_MS);
+            if !taken {
+                extra.push((c, *x, true, c.edge[1][ci], may_walk(c, &pb, ci)));
+            }
+            !taken
+        });
+        picks.extend(extra);
+    }
+    picks.sort_by_key(|p| p.0.tf);
     let start = cfg.c.start;
     let (mut cash, mut closed) = (start, 0.0);
     let mut open: Vec<(Ms, f64, f64)> = Vec::new();
     // (fill ts, exit ts, pnl, spent, sport, reason)
     let mut done: Vec<(Ms, Ms, f64, f64, String, bool)> = Vec::new();
-    for (p, from, to) in &segs {
-        let (ci, _) = sale_idx(p);
-        run_policy(&cands, p, *from, *to, now, |_, c, x| {
-            open.retain(|o| {
-                if o.0 <= c.tf {
-                    cash += o.1 + o.2;
-                    closed += o.2;
-                    false
-                } else {
-                    true
-                }
-            });
-            let open_cost: f64 = open.iter().map(|o| o.1).sum();
-            let k = if cfg.edge_sizing { (c.edge[1][ci] / 0.04).clamp(0.5, 3.0) } else { 1.0 };
-            let stake = (cfg.pct * (start + closed) * k).min(cfg.c.max_trade).min(cash).min(cfg.c.max_open - open_cost);
-            if stake < snipe::MIN_FILL {
-                return false;
+    let mut rows: Vec<Value> = Vec::new();
+    // The wider set's own daily loss stop: (UTC day, result so far that day).
+    let mut b_day: (Ms, f64) = (0, 0.0);
+    let mut b_open: Vec<(Ms, f64)> = Vec::new();
+    for (c, x, wider, edge, walk) in picks {
+        open.retain(|o| {
+            if o.0 <= c.tf {
+                cash += o.1 + o.2;
+                closed += o.2;
+                false
+            } else {
+                true
             }
-            let Some(f) = fill(c, x, stake, p.walk_book) else { return false };
-            cash -= f.spent;
-            open.push((x.ts, f.spent, f.pnl));
-            done.push((c.tf, x.ts, f.pnl, f.spent, c.sport.clone(), x.caught));
-            true
         });
+        let day = c.tf - c.tf.rem_euclid(86_400_000);
+        if b_day.0 != day {
+            b_day = (day, 0.0);
+        }
+        b_open.retain(|o| {
+            if o.0 <= c.tf {
+                if o.0 >= day {
+                    b_day.1 += o.1;
+                }
+                false
+            } else {
+                true
+            }
+        });
+        let open_cost: f64 = open.iter().map(|o| o.1).sum();
+        let stake = if wider {
+            if cfg.b_daily_loss > 0.0 && b_day.1 <= -cfg.b_daily_loss {
+                continue; // the wider set is done for the day
+            }
+            (cfg.b_pct * (start + closed)).min(cfg.b_max_trade)
+        } else {
+            let k = if cfg.edge_sizing { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
+            (cfg.pct * (start + closed) * k).min(cfg.c.max_trade)
+        }
+        .min(cash)
+        .min(cfg.c.max_open - open_cost);
+        if stake < snipe::MIN_FILL {
+            continue;
+        }
+        let Some(fl) = fill(c, &x, stake, walk) else { continue };
+        cash -= fl.spent;
+        open.push((x.ts, fl.spent, fl.pnl));
+        if wider {
+            b_open.push((x.ts, fl.pnl));
+        }
+        done.push((c.tf, x.ts, fl.pnl, fl.spent, c.sport.clone(), x.caught));
+        rows.push(json!({"t": c.tf, "x": x.ts, "pnl": fl.pnl, "spent": fl.spent, "sport": c.sport, "tr": c.trigger, "caught": x.caught, "px": c.px, "entry": fl.entry, "stake": stake, "filled": fl.filled, "exit": fl.exit, "set": if wider { "wider" } else { "safe" },
+            "bm": c.bm[0], "k": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "cx": c.cx, "m": c.match_id, "home": c.home, "o": c.outcome}));
     }
-    sim_summary(start, cands.first().map(|c| c.tf), now, done.iter().map(|d| (d.0, d.1, d.2, d.3, d.4.as_str(), d.5)).collect())
+    let mut out = sim_summary(start, cands.first().map(|c| c.tf), now, done.iter().map(|d| (d.0, d.1, d.2, d.3, d.4.as_str(), d.5)).collect());
+    out["list"] = json!(rows);
+    out
+}
+
+/// Why a rule and its filters pass over a measured move (None = they take it).
+fn why_not(c: &Cand, p: &Policy, f: &Flt) -> Option<&'static str> {
+    let (ci, _) = sale_idx(p);
+    if c.bm[0] < p.min_move {
+        return Some("move_too_small");
+    }
+    if c.books[0] < p.min_books || c.books[1] < p.min_books {
+        return Some("too_few_books");
+    }
+    if c.fol[0] > p.max_followed || c.fol[1] > p.max_followed {
+        return Some("already_moved");
+    }
+    if c.sp[0] > p.max_spread + 1e-9 || c.sp[1] > p.max_spread + 1e-9 {
+        return Some("spread_too_wide");
+    }
+    if let Some(why) = f.check(&c.sport, &c.trigger, c.tf, c.px - SLIP_BUY + SLIP, c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx) {
+        return Some(why);
+    }
+    if c.edge[0][ci] < p.min_edge || c.edge[1][ci] < p.min_edge {
+        return Some("gap_too_small");
+    }
+    if p.skip_after_pause && c.pause {
+        return Some("after_pause");
+    }
+    None
+}
+
+/// The live bot against the replay over the same hours: is the replay telling the truth about
+/// what the bot does? Every live trade (paper or real) since `from` is paired with the replay's
+/// trade on the same move (same game, within 30 s): buy price, sale price and return side by
+/// side. Trades only one side took are listed with the reason: for a live-only trade, the rule
+/// the replay failed it on (or that the replay never measured the move); for a replay-only
+/// trade, what the live bot logged for that move (`bot_signals`).
+pub fn parity(db: &std::path::Path, cfg: &crate::bots::SnipeCfg, real: bool, from: Ms) -> Value {
+    let sim = bot_sim(cfg, true, false, Flt::live());
+    if sim["building"].as_bool() == Some(true) {
+        return sim;
+    }
+    let now = now_ms();
+    let Ok(c) = crate::store::open_ro(db) else { return json!({"error": "database"}) };
+    let live: Vec<(i64, Ms, i64, Value)> = c
+        .prepare("SELECT id, ts_ms, match_id, data FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND ts_ms >= ?2 ORDER BY ts_ms")
+        .and_then(|mut st| {
+            st.query_map(params![real as i64, from], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Ms>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))
+                .map(|it| it.filter_map(|x| x.ok()).filter_map(|(a, b, m, d)| Some((a, b, m, serde_json::from_str(&d).ok()?))).collect())
+        })
+        .unwrap_or_default();
+    let rows: Vec<&Value> = sim["list"].as_array().map(|a| a.iter().filter(|r| r["t"].as_i64().unwrap_or(0) >= from).collect()).unwrap_or_default();
+    // Every measured move, whatever the rules, to explain a live trade the replay did not take.
+    let chunks = snapshot();
+    FLT.with(|x| x.set(Flt::default()));
+    let raw = all_cands(&chunks, 0);
+    let mut safe = active_rules();
+    safe.max_followed = safe.max_followed.min(SAFE_MAX_FOLLOWED);
+    let near = |m: i64, t: Ms, rt: Ms| m > 0 && (t - rt).abs() <= 30_000;
+    let mut used = vec![false; rows.len()];
+    let (mut both, mut only_live) = (Vec::new(), Vec::new());
+    let (mut d_entry, mut d_exit, mut d_ret) = (Vec::new(), Vec::new(), Vec::new());
+    for (id, ts, m, v) in &live {
+        let (entry, exit) = (v["entry"].as_f64(), v["exit"].as_f64());
+        let ret = v["pnl"].as_f64().zip(v["cost"].as_f64()).map(|(p, c)| p / c.max(1e-9));
+        let head = json!({"id": id, "ts": ts, "match_id": m, "home": v["home"], "outcome": v["outcome"], "set": v["set"], "entry": entry, "exit": exit, "return": ret, "reason": v["reason"], "cost": v["cost"]});
+        let k = rows.iter().enumerate().filter(|(k, r)| !used[*k] && near(*m, *ts, r["t"].as_i64().unwrap_or(0)) && r["m"].as_i64() == Some(*m)).map(|(k, _)| k).next();
+        match k {
+            Some(k) => {
+                used[k] = true;
+                let r = rows[k];
+                let r_ret = r["pnl"].as_f64().zip(r["spent"].as_f64()).map(|(p, c)| p / c.max(1e-9));
+                if let (Some(a), Some(b)) = (entry, r["entry"].as_f64()) {
+                    d_entry.push(a - b);
+                }
+                if let (Some(a), Some(b)) = (exit, r["exit"].as_f64()) {
+                    d_exit.push(a - b);
+                }
+                if let (Some(a), Some(b)) = (ret, r_ret) {
+                    d_ret.push(a - b);
+                }
+                both.push(json!({"live": head, "replay": {"t": r["t"], "set": r["set"], "entry": r["entry"], "exit": r["exit"], "return": r_ret, "caught": r["caught"], "filled": r["filled"]}}));
+            }
+            None => {
+                let wider = v["set"] == "wider";
+                let (p, f) = if wider { (policy_b(), Flt::wider()) } else { (safe, Flt::live()) };
+                let why = match raw.iter().find(|c| c.match_id == *m && (c.tf - ts).abs() <= 30_000) {
+                    None => "the replay measured no such move",
+                    Some(c) => why_not(c, &p, &f).unwrap_or("taken by the rules, lost to the wallet or another trade on the game"),
+                };
+                let mut h = head;
+                h["replay_says"] = json!(why);
+                only_live.push(h);
+            }
+        }
+    }
+    let only_replay: Vec<Value> = rows
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| !used[*k])
+        .map(|(_, r)| {
+            let (t, m) = (r["t"].as_i64().unwrap_or(0), r["m"].as_i64().unwrap_or(0));
+            let said: Vec<String> = c
+                .prepare_cached("SELECT DISTINCT result FROM bot_signals WHERE match_id = ?1 AND ts_ms BETWEEN ?2 AND ?3")
+                .and_then(|mut st| st.query_map(params![m, t - 20_000, t + 20_000], |x| x.get::<_, String>(0)).map(|it| it.filter_map(|x| x.ok()).collect()))
+                .unwrap_or_default();
+            json!({"t": t, "match_id": m, "home": r["home"], "outcome": r["o"], "set": r["set"], "entry": r["entry"], "exit": r["exit"],
+                "return": r["pnl"].as_f64().zip(r["spent"].as_f64()).map(|(p, c)| p / c.max(1e-9)),
+                "live_says": if said.is_empty() { vec!["no signal logged (bot off, or the move not seen live)".to_string()] } else { said }})
+        })
+        .collect();
+    let mean = |v: &[f64]| if v.is_empty() { None } else { Some(v.iter().sum::<f64>() / v.len() as f64) };
+    json!({"from": from, "to": now, "real": real,
+        "summary": {"live_trades": live.len(), "replay_trades": rows.len(), "both": both.len(), "only_live": only_live.len(), "only_replay": only_replay.len(),
+            "entry_diff": mean(&d_entry), "exit_diff": mean(&d_exit), "return_diff": mean(&d_ret)},
+        "both": both, "only_live": only_live, "only_replay": only_replay})
+}
+
+/// Every Polymarket candidate (no rule filter) with its features and the result per $ of a
+/// $25 trade at catch-up 100%, for each give-up and stop-loss (research).
+pub fn research() -> Value {
+    if !ST.lock().warm {
+        return json!({"building": true});
+    }
+    let chunks = snapshot();
+    FLT.with(|x| x.set(Flt::default()));
+    let cands = all_cands(&chunks, 0);
+    let r = |x: Option<Exit>, c: &Cand| x.and_then(|x| fill(c, &x, 25.0, true).map(|f| ((f.pnl / 25.0 * 1e4).round() / 1e4, (x.ts - c.tf) / 1000, x.caught)));
+    let rows: Vec<Value> = cands
+        .iter()
+        .map(|c| {
+            json!({"t": c.tf, "m": c.match_id, "s": c.sport, "tr": c.trigger, "k": c.books, "bm": c.bm, "fol": c.fol, "sp": c.sp, "e": c.edge[1][2], "px": c.px,
+                "p": c.pause, "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng,
+                "x": (0..GIVE.len()).map(|gi| r(c.exits[2][gi], c)).collect::<Vec<_>>(),
+                "cx": c.cx, "xs": EXV.iter().enumerate().map(|(si, _)| (0..GIVE.len()).map(|gi| r(c.stop_exits[si][2][gi], c)).collect::<Vec<_>>()).collect::<Vec<_>>()})
+        })
+        .collect();
+    json!({"give": GIVE, "exv": EXV, "rows": rows})
 }
 
 /// Shared summary for whole-dataset simulations: trades (fill ts, exit ts, pnl, dollars spent,
@@ -1205,7 +1761,26 @@ mod tests {
             buy,
             pause: false,
             exits: [[None; 5]; 3],
+            stop_exits: [[[None; 5]; 3]; 5],
+            cx: Default::default(),
+            pm_tr: 0.0,
+            b_tr5: 0.0,
+            b_tr10: 0.0,
+            b_rng: 0.0,
         }
+    }
+
+    #[test]
+    fn walks_only_when_the_gain_clears_the_minimum_after_2c() {
+        let mut p = policy_b(); // min edge 2c, walks the book
+        let mut c = cand(0.50, Some((200.0, 1000.0)));
+        c.edge = [[0.05; 3]; 2];
+        assert!(may_walk(&c, &p, 2)); // 5c gain - 2c = 3c >= 2c
+        c.edge = [[0.03; 3]; 2];
+        assert!(!may_walk(&c, &p, 2)); // 3c - 2c = 1c < 2c: best price only
+        p.walk_book = false;
+        c.edge = [[0.10; 3]; 2];
+        assert!(!may_walk(&c, &p, 2));
     }
 
     #[test]
@@ -1253,7 +1828,7 @@ pub fn dump(app: &App, reaction: Ms, confirm: Ms) -> anyhow::Result<Value> {
                         ex.push(c.exits[ci][gi].and_then(|x| fill(c, &x, 25.0, true)).map(|f| (f.pnl / 25.0 * 10_000.0).round() / 10_000.0));
                     }
                 }
-                out.push(json!({"b": BASES[bi], "m": c.match_id, "s": c.sport, "o": c.outcome, "d": c.dir, "tr": c.trigger, "t": c.tf,
+                out.push(json!({"b": BASES[bi], "m": c.match_id, "s": c.sport, "o": c.outcome, "d": c.dir, "tr": c.trigger, "t": c.tf, "cx": c.cx,
                     "k": c.books, "bm": c.bm, "fol": c.fol, "sp": c.sp, "e": c.edge[1], "px": c.px, "p": c.pause, "dep": c.buy.is_some(), "x": ex}));
             }
         }

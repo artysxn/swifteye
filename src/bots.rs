@@ -69,11 +69,27 @@ pub struct SnipeCfg {
     pub edge_sizing: bool,
     /// Also paper-trade the same rules with 1 bookmaker (shadow, for comparison).
     pub shadow_one_book: bool,
+    /// The wider rule set (more trades, lower win rate) trades too, with its own small stake:
+    /// share of the balance, most dollars a trade, and its own daily loss stop (0 = none).
+    pub b_enabled: bool,
+    pub b_pct: f64,
+    pub b_max_trade: f64,
+    pub b_daily_loss: f64,
+    /// Give up after this many seconds (0 = what the Adaptive rules say).
+    pub give_up_s: i64,
+    /// Trade only between these UTC hours [from, to); equal = all day.
+    pub hours_utc: [u8; 2],
+}
+
+impl SnipeCfg {
+    pub fn hours(&self) -> Option<[u8; 2]> {
+        (self.hours_utc[0] != self.hours_utc[1]).then_some(self.hours_utc)
+    }
 }
 
 impl Default for SnipeCfg {
     fn default() -> Self {
-        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true }
+        SnipeCfg { c: Common::default(), pct: 0.01, edge_sizing: true, shadow_one_book: true, b_enabled: true, b_pct: 0.06, b_max_trade: 12.0, b_daily_loss: 15.0, give_up_s: 900, hours_utc: [12, 21] }
     }
 }
 
@@ -224,6 +240,19 @@ pub fn game_room(c: &Connection, match_id: i64) -> f64 {
     (settings().game_cap - exposure(c, match_id)).max(0.0)
 }
 
+/// The same for the snipe bot's real or paper side alone: a paper position (the paper twin of a
+/// real trade, the wider set) never takes a real trade's room in a game, and the other way round.
+pub fn snipe_game_room(c: &Connection, match_id: i64, real: bool) -> f64 {
+    let open: f64 = c
+        .query_row(
+            "SELECT COALESCE(SUM(json_extract(data, '$.cost')), 0) FROM bot_trades WHERE match_id = ?1 AND closed_ms IS NULL AND bot = ?2 AND real = ?3",
+            params![match_id, SNIPE, real as i64],
+            |r| r.get(0),
+        )
+        .unwrap_or(0.0);
+    (settings().game_cap - open).max(0.0)
+}
+
 /// Start of today (UTC), ms.
 fn today() -> Ms {
     let now = now_ms();
@@ -233,7 +262,9 @@ fn today() -> Ms {
 /// Snipe ledger (one bot name, paper or real): (closed P&L, open cost, today's closed P&L, trades, wins).
 pub fn snipe_ledger(c: &Connection, bot: &str, real: bool) -> (f64, f64, f64, usize, usize) {
     let t0 = today();
-    let since = if real { 0 } else { settings().snipe.c.paper_since };
+    // Real money during a test run: the run's own trades only, so it starts from its bankroll
+    // whatever earlier real trades did.
+    let since = if real { settings().run.map(|r| r.start_ms).unwrap_or(0) } else { settings().snipe.c.paper_since };
     let mut st = match c.prepare("SELECT closed_ms, data FROM bot_trades WHERE bot = ?1 AND real = ?2 AND ts_ms >= ?3") {
         Ok(s) => s,
         Err(_) => return (0.0, 0.0, 0.0, 0, 0),
@@ -426,9 +457,39 @@ pub fn update(app: &App, edit: &Value) -> anyhow::Result<Value> {
         event("paper wallets restarted");
     }
     if let Some(v) = edit.get("snipe") {
-        common(&mut s.snipe.c, v);
-        if let Some(x) = num(v, "pct", 0.001, 0.2) {
-            s.snipe.pct = x;
+        // During a test run the wallet settings belong to the run: edits go to the settings
+        // that come back when it ends.
+        let w: &mut SnipeCfg = match s.run.as_mut() {
+            Some(r) => &mut r.prev,
+            None => &mut s.snipe,
+        };
+        common(&mut w.c, v);
+        if let Some(x) = num(v, "pct", 0.001, 0.5) {
+            w.pct = x;
+        }
+        let both: Vec<&mut SnipeCfg> = match s.run.as_mut() {
+            Some(r) => vec![&mut r.prev, &mut s.snipe],
+            None => vec![&mut s.snipe],
+        };
+        for w in both {
+            if let Some(x) = boolv(v, "b_enabled") {
+                w.b_enabled = x;
+            }
+            if let Some(x) = num(v, "b_pct", 0.0, 0.5) {
+                w.b_pct = x;
+            }
+            if let Some(x) = num(v, "b_max_trade", 0.0, 1e7) {
+                w.b_max_trade = x;
+            }
+            if let Some(x) = num(v, "b_daily_loss", 0.0, 1e7) {
+                w.b_daily_loss = x;
+            }
+            if let Some(x) = num(v, "give_up_s", 0.0, 7200.0) {
+                w.give_up_s = x as i64;
+            }
+            if let Some(h) = v.get("hours_utc").and_then(|x| x.as_array()).filter(|a| a.len() == 2) {
+                w.hours_utc = [h[0].as_u64().unwrap_or(0).min(23) as u8, h[1].as_u64().unwrap_or(0).min(24) as u8];
+            }
         }
         if let Some(x) = boolv(v, "edge_sizing") {
             s.snipe.edge_sizing = x;
@@ -513,8 +574,8 @@ pub fn sim(app: &Arc<App>, kind: &str) -> Value {
     let s = settings();
     let now = now_ms();
     let (part, max_age) = match kind {
-        "arb" => (serde_json::to_string(&(&s.arb, s.game_cap)).unwrap_or_default(), 900_000),
-        "snipe-wf" | "snipe-current" | "snipe-shadow" => (serde_json::to_string(&s.snipe).unwrap_or_default() + &serde_json::to_string(&crate::adaptive::active_rules()).unwrap_or_default(), 600_000),
+        k if k.starts_with("arb") => (serde_json::to_string(&(&s.arb, s.game_cap)).unwrap_or_default(), 900_000),
+        k if k.starts_with("snipe") => (serde_json::to_string(&s.snipe).unwrap_or_default() + &serde_json::to_string(&crate::adaptive::active_rules()).unwrap_or_default(), 600_000),
         _ => return json!({"state": "error", "error": "unknown simulation"}),
     };
     let key = format!("{kind}|{part}");
@@ -547,9 +608,49 @@ pub fn sim(app: &Arc<App>, kind: &str) -> Value {
     tokio::task::spawn_blocking(move || {
         let r: anyhow::Result<Value> = match kind2.as_str() {
             "arb" => crate::arbsim::run(&app2.db_path, &s2.arb, s2.game_cap, &prog),
-            "snipe-wf" => Ok(crate::adaptive::bot_sim(&s2.snipe, true, false)),
-            "snipe-current" => Ok(crate::adaptive::bot_sim(&s2.snipe, false, false)),
-            _ => Ok(crate::adaptive::bot_sim(&s2.snipe, true, true)),
+            // Research: only gaps after the Kalshi book fix, optionally pre-match too.
+            k if k.starts_with("arb-post") => {
+                let mut a = s2.arb.clone();
+                a.live_only = !k.contains("-all");
+                if let Some(m) = k.split("min=").nth(1).and_then(|x| x.parse::<f64>().ok()) {
+                    a.min_live = m;
+                    a.min_pre = m;
+                }
+                crate::arbsim::run_since(&app2.db_path, &a, s2.game_cap, &prog, crate::arbsim::KALSHI_FIX_MS, k.contains("-kfirst"))
+            }
+            "snipe-wf" => Ok(crate::adaptive::bot_sim(&s2.snipe, true, false, crate::adaptive::Flt::live())),
+            // The settings that apply outside a test run (the run's own are fixed small stakes).
+            "snipe-plan" => Ok(crate::adaptive::bot_sim(s2.run.as_ref().map(|r| &r.prev).unwrap_or(&s2.snipe), true, false, crate::adaptive::Flt::live())),
+            "snipe-plan-safe" => {
+                let mut c = s2.run.as_ref().map(|r| r.prev.clone()).unwrap_or(s2.snipe.clone());
+                c.b_enabled = false;
+                Ok(crate::adaptive::bot_sim(&c, true, false, crate::adaptive::Flt::live()))
+            }
+            "snipe-nocap" => Ok(crate::adaptive::bot_sim(&s2.snipe, true, false, crate::adaptive::Flt { cap: false, ..crate::adaptive::Flt::live() })),
+            "snipe-current" => Ok(crate::adaptive::bot_sim(&s2.snipe, false, false, crate::adaptive::Flt::live())),
+            // What-if wallet: snipe-w:start=1000,max=300,open=1000,pct=0.2,bmax=60,bpct=0.06,bloss=75
+            // (paper replay only; nothing is saved to the settings).
+            k if k.starts_with("snipe-w:") => {
+                let mut c = s2.run.as_ref().map(|r| r.prev.clone()).unwrap_or(s2.snipe.clone());
+                for kv in k[8..].split(',') {
+                    let (key, v) = kv.split_once('=').unwrap_or((kv, ""));
+                    let Ok(x) = v.parse::<f64>() else { continue };
+                    match key {
+                        "start" => c.c.start = x,
+                        "max" => c.c.max_trade = x,
+                        "open" => c.c.max_open = x,
+                        "pct" => c.pct = x,
+                        "bmax" => c.b_max_trade = x,
+                        "bpct" => c.b_pct = x,
+                        "bloss" => c.b_daily_loss = x,
+                        "wider" => c.b_enabled = x != 0.0,
+                        _ => {}
+                    }
+                }
+                Ok(crate::adaptive::bot_sim(&c, true, false, crate::adaptive::Flt::live()))
+            }
+            k if k.starts_with("snipe-x:") => Ok(crate::adaptive::bot_sim(&s2.snipe, true, false, parse_flt(&k[8..]))),
+            _ => Ok(crate::adaptive::bot_sim(&s2.snipe, true, true, crate::adaptive::Flt::live())),
         };
         let mut sims = SIMS.lock();
         if let Some(slot) = sims.get_mut(&kind2) {
@@ -655,7 +756,7 @@ pub async fn accounts(app: Arc<App>) -> Value {
 
 /// Start a timed real test run: $`bankroll` of the Polymarket account, ~$`stake` a trade.
 pub fn start_run(app: &App, hours: i64, confirm: &str) -> anyhow::Result<Value> {
-    anyhow::ensure!([4, 8, 16, 24].contains(&hours), "4, 8, 16 or 24 hours");
+    anyhow::ensure!([4, 8, 9, 16, 24].contains(&hours), "4, 8, 9, 16 or 24 hours");
     anyhow::ensure!(confirm.trim() == "REAL MONEY", "type REAL MONEY to confirm");
     let miss = real_ready(app, SNIPE);
     anyhow::ensure!(miss.is_empty(), "missing: {}", miss.join(", "));
@@ -663,19 +764,35 @@ pub fn start_run(app: &App, hours: i64, confirm: &str) -> anyhow::Result<Value> 
     anyhow::ensure!(s.run.is_none(), "a test run is already going");
     anyhow::ensure!(!s.kill, "the kill switch is on");
     let now = now_ms();
-    let (bankroll, stake) = (40.0, 12.0);
-    s.run = Some(Run { id: now, start_ms: now, end_ms: now + hours * 3_600_000, bankroll, stake, prev: s.snipe.clone() });
-    // Fixed small stakes: 30% of $40 is $12, capped at $12 (the bot's $10 minimum order fits).
+    let (bankroll, stake) = (RUN_BANKROLL, RUN_STAKE);
+    // Started outside the trading hours, the run's hours count from when the window opens (the
+    // bot takes no trade before that anyway).
+    let begin = match s.snipe.hours() {
+        Some([a, b]) => {
+            let day = now - now.rem_euclid(86_400_000);
+            let (open, close) = (day + a as Ms * 3_600_000, day + b as Ms * 3_600_000);
+            if a < b && now < open {
+                open
+            } else if a < b && now >= close {
+                open + 86_400_000
+            } else {
+                now
+            }
+        }
+        None => now,
+    };
+    s.run = Some(Run { id: now, start_ms: now, end_ms: begin + hours * 3_600_000, bankroll, stake, prev: s.snipe.clone() });
+    // Fixed small stakes: 30% of $50 is $15, capped at $15 (the bot's $10 minimum order fits).
     s.snipe.c.enabled = true;
     s.snipe.c.real = true;
     s.snipe.c.bankroll = bankroll;
     s.snipe.pct = 0.30;
     s.snipe.c.max_trade = stake;
     s.snipe.c.max_open = bankroll;
-    s.snipe.c.daily_loss = 15.0;
+    s.snipe.c.daily_loss = RUN_LOSS;
     save(app, &s)?;
     *SET.write() = s;
-    event(format!("snipe: {hours} h REAL test run started (${bankroll} bankroll, ~${stake} a trade)"));
+    event(format!("snipe: {hours} h REAL test run started (${bankroll} bankroll, ~${stake} a trade{})", if begin > now { ", trading from the window's opening" } else { "" }));
     Ok(view(app))
 }
 
@@ -710,11 +827,90 @@ pub fn extend_run(app: &App, hours: i64) -> anyhow::Result<Value> {
     Ok(json!({"end_ms": end}))
 }
 
-/// Called every 30 s: ends a run at its end time.
-pub fn tick_run(app: &App) {
-    if settings().run.as_ref().is_some_and(|r| now_ms() >= r.end_ms) {
+/// Called every 30 s: ends a run at its end time, or early when a safety trigger fires (the
+/// returned text goes to Telegram). Open real positions are still sold by their own watchers.
+pub fn tick_run(app: &App) -> Option<String> {
+    let r = settings().run?;
+    if now_ms() >= r.end_ms {
         let _ = stop_run(app, "time up");
+        return None;
     }
+    let why = run_guard(app, &r)?;
+    let rep = stop_run(app, &format!("safety stop: {why}")).ok()?;
+    Some(format!(
+        "🛑 Real test run stopped: {why}.\nReal money is off; the paper wallet keeps trading. {} real trades, {} won, {:+.2}.",
+        rep["closed"], rep["wins"], rep["pnl"].as_f64().unwrap_or(0.0)
+    ))
+}
+
+/// The real test run: bankroll, stake a trade, and the loss that ends it.
+pub const RUN_BANKROLL: f64 = 50.0;
+pub const RUN_STAKE: f64 = 15.0;
+pub const RUN_LOSS: f64 = 15.0;
+/// Safety triggers: the run ends early when real money does worse than the replay says it
+/// should (replay, safe set: ~19 of 20 trades win, a loser costs about half its stake, the paper
+/// twin of a trade fills within a cent or two).
+const GUARD_WIN_SHARE: f64 = 0.60;
+const GUARD_WIN_MIN_TRADES: usize = 4;
+const GUARD_ONE_TRADE_LOSS: f64 = 0.80;
+const GUARD_FAILED_ORDERS: usize = 3;
+const GUARD_TWIN_GAP: f64 = 0.10;
+
+/// Why the running real test should stop now (None = all as expected).
+fn run_guard(app: &App, r: &Run) -> Option<String> {
+    let c = crate::store::open_ro(&app.db_path).ok()?;
+    let rows = |real: bool| -> Vec<Value> {
+        c.prepare("SELECT data FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND ts_ms >= ?2 AND closed_ms IS NOT NULL ORDER BY closed_ms")
+            .and_then(|mut st| st.query_map(params![real as i64, r.start_ms], |x| x.get::<_, String>(0)).map(|it| it.filter_map(|x| x.ok()).filter_map(|s| serde_json::from_str(&s).ok()).collect()))
+            .unwrap_or_default()
+    };
+    let real = rows(true);
+    let failed: usize = c
+        .query_row("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1", params![r.start_ms], |x| x.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
+    run_guard_on(&real, &rows(false), failed)
+}
+
+/// The triggers on closed real trades (oldest first), the paper trades of the same hours, and
+/// the count of real orders that failed or did not fill.
+fn run_guard_on(real: &[Value], paper: &[Value], failed_orders: usize) -> Option<String> {
+    let pnl = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0);
+    let ret = |t: &Value| pnl(t) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
+    let total: f64 = real.iter().map(pnl).sum();
+    if total <= -RUN_LOSS {
+        return Some(format!("real money is down ${:.2}, past the ${RUN_LOSS:.0} limit", -total));
+    }
+    // A loss here is more than 5% of the stake: a give-up a cent under the buy price is a scratch.
+    if real.len() >= 2 && real[real.len() - 2..].iter().all(|t| ret(t) < -0.05) {
+        return Some("two losing real trades in a row (the replay expects about 1 loser in 20)".into());
+    }
+    let wins = real.iter().filter(|t| pnl(t) > 0.0).count();
+    if real.len() >= GUARD_WIN_MIN_TRADES && (wins as f64) < GUARD_WIN_SHARE * real.len() as f64 {
+        return Some(format!("only {wins} of {} real trades won (the replay expects about 19 of 20)", real.len()));
+    }
+    if let Some(t) = real.iter().find(|t| ret(t) <= -GUARD_ONE_TRADE_LOSS) {
+        return Some(format!("one real trade lost {:.0}% of its stake ({})", -ret(t) * 100.0, t["home"].as_str().unwrap_or("")));
+    }
+    if failed_orders >= GUARD_FAILED_ORDERS {
+        return Some(format!("{failed_orders} real orders failed or did not fill"));
+    }
+    // Real against its paper twin (the same move, bought within 30 s): real fills clearly worse
+    // than paper means the paper model flatters the bot.
+    let gaps: Vec<f64> = real
+        .iter()
+        .filter_map(|t| {
+            let (m, ts) = (t["match_id"].as_i64()?, t["ts"].as_i64()?);
+            let twin = paper.iter().find(|p| p["match_id"].as_i64() == Some(m) && p["set"] == t["set"] && (p["ts"].as_i64().unwrap_or(0) - ts).abs() <= 30_000)?;
+            Some(ret(t) - ret(twin))
+        })
+        .collect();
+    if gaps.len() >= 2 {
+        let mean = gaps.iter().sum::<f64>() / gaps.len() as f64;
+        if mean <= -GUARD_TWIN_GAP {
+            return Some(format!("real trades return {:.0} points less than their paper twins over {} trades", -mean * 100.0, gaps.len()));
+        }
+    }
+    None
 }
 
 /// What a run did: real snipe trades and the signals in its window.
@@ -780,6 +976,13 @@ pub fn chart(app: &App, match_id: i64, outcome: &str, from: Ms, to: Ms) -> Value
     json!({"minutes": mins.iter().map(|(t, (b, a))| json!([t, b, a])).collect::<Vec<_>>(), "signals": sig, "trades": tr})
 }
 
+/// Live trades against the replay over the last `hours` (see `adaptive::parity`).
+pub fn parity(app: &Arc<App>, real: bool, hours: f64) -> Value {
+    let s = settings();
+    let cfg = s.run.as_ref().map(|r| r.prev.clone()).unwrap_or(s.snipe.clone());
+    crate::adaptive::parity(&app.db_path, &cfg, real, now_ms() - (hours.clamp(0.1, 24.0 * 30.0) * 3_600_000.0) as Ms)
+}
+
 /// Finished simulations saved next to the database (`sims.json`), so a baseline survives restarts:
 /// {kind: {"result": .., "computed_ms": .., "settings": ..}}.
 static SAVED: LazyLock<parking_lot::Mutex<Option<(PathBuf, Value)>>> = LazyLock::new(Default::default);
@@ -796,6 +999,36 @@ fn save_sim(db: &std::path::Path, kind: &str, result: &Value, settings: &str) {
     *SAVED.lock() = Some((p, all));
 }
 
+/// "cap=1,pm=0.03,book=0.05,rev=0.5,noise=1,stop=0.5" -> filters (missing = off; cap defaults on).
+fn parse_flt(s: &str) -> crate::adaptive::Flt {
+    let mut f = crate::adaptive::Flt { cap: true, ..Default::default() };
+    for kv in s.split(',') {
+        let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+        let x = v.parse::<f64>().ok();
+        match k {
+            "cap" => f.cap = v != "0",
+            "pm" => f.pm_trend = x,
+            "book" => f.book_trend = x,
+            "rev" => f.rev = x,
+            "noise" => f.noise = x,
+            "stop" => f.stop = x,
+            "revert" => f.revert = v != "0",
+            "cons" => f.cons = x,
+            "shock" => f.shock = x,
+            "follow" => f.follow = x,
+            "lead" => f.lead = x,
+            "z" => f.z = x,
+            "fams" => f.fams = x.map(|v| v as usize),
+            "nobb" => f.no_basketball = v != "0",
+            "maxpx" => f.max_px = x,
+            "skipfeeds" => f.skip_feeds = v != "0",
+            "picked" => f = crate::adaptive::Flt::picked(),
+            _ => {}
+        }
+    }
+    f
+}
+
 /// The newest simulation of a kind: this run's, else the saved baseline. (result, computed ms)
 pub fn sim_cached(kind: &str) -> Option<(Value, Ms)> {
     if let Some(x) = SIMS.lock().get(kind).and_then(|x| x.result.clone().map(|r| (r, x.computed_ms))) {
@@ -804,6 +1037,90 @@ pub fn sim_cached(kind: &str) -> Option<(Value, Ms)> {
     let g = SAVED.lock();
     let (_, all) = g.as_ref()?;
     Some((all[kind]["result"].clone(), all[kind]["computed_ms"].as_i64().unwrap_or(0))).filter(|x| x.0.is_object())
+}
+
+/// When the current rules went live (two rule sets, consensus checks): trades before it ran on
+/// other rules and are no evidence for these.
+pub const RULES_SINCE_MS: Ms = 1_795_065_960_000;
+
+/// The control panel of the snipe bot, paper or real: its money over time (every closed trade),
+/// the open trades with the price they could be sold at now, today's signals, and its state.
+pub fn panel(app: &App, real: bool) -> Value {
+    let s = settings();
+    let now = now_ms();
+    let Ok(c) = crate::store::open_ro(&app.db_path) else { return json!({"error": "database not readable"}) };
+    // Real: the test run's own money while one runs, else the bot's real bankroll since the start.
+    let (start, since, scope) = match (&s.run, real) {
+        (Some(r), true) => (r.bankroll, r.start_ms, "run"),
+        (_, true) => (s.snipe.c.bankroll, 0, "real"),
+        (_, false) => (s.snipe.c.start, s.snipe.c.paper_since, "paper"),
+    };
+    let rows: Vec<(Ms, Option<Ms>, Value)> = c
+        .prepare("SELECT ts_ms, closed_ms, data FROM bot_trades WHERE bot = ?1 AND real = ?2 AND ts_ms >= ?3 ORDER BY ts_ms")
+        .and_then(|mut st| {
+            st.query_map(params![SNIPE, real as i64, since], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, Option<Ms>>(1)?, r.get::<_, String>(2)?)))
+                .map(|it| it.filter_map(|x| x.ok()).filter_map(|(t, cl, d)| serde_json::from_str(&d).ok().map(|v| (t, cl, v))).collect())
+        })
+        .unwrap_or_default();
+    let day0 = today();
+    let (mut closed, mut today_pnl, mut open_cost) = (0.0, 0.0, 0.0);
+    let mut trades = Vec::new();
+    for (ts, cl, v) in &rows {
+        let (dir, entry) = (v["dir"].as_f64().unwrap_or(1.0), v["entry"].as_f64().unwrap_or(0.0));
+        let n = v["contracts"].as_f64().unwrap_or(0.0);
+        // Where it sells: Polymarket has made `catch` of the bookmakers' move.
+        let need = v["catch"].as_f64().unwrap_or(1.0) * v["move"].as_f64().unwrap_or(0.0);
+        let target = v["pre_mid"].as_f64().map(|pre| (if dir > 0.0 { pre } else { 1.0 - pre } + need - v["spread"].as_f64().unwrap_or(0.0) / 2.0).clamp(0.0, 1.0));
+        let mut t = json!({
+            "ts": ts, "closed_ms": cl, "match_id": v["match_id"], "home": v["home"], "away": v["away"], "sport": v["sport"], "outcome": v["outcome"], "dir": dir,
+            "set": v["set"].as_str().unwrap_or("safe"), "contracts": n, "entry": entry, "cost": v["cost"], "exit": v["exit"], "pnl": v["pnl"], "reason": v["reason"],
+            "trigger": v["trigger"], "target": target, "give_up_ms": v["give_up_s"].as_i64().map(|g| ts + g * 1000),
+            // Trades from before the current rules (19 Nov 05:26 UTC) carry no rule-set tag.
+            "old": v["set"].is_null(),
+        });
+        match cl {
+            Some(t_close) => {
+                let p = v["pnl"].as_f64().unwrap_or(0.0);
+                closed += p;
+                if *t_close >= day0 {
+                    today_pnl += p;
+                }
+            }
+            None => {
+                open_cost += v["cost"].as_f64().unwrap_or(0.0);
+                // What it would fetch now: the best bid of the side held.
+                let o = v["outcome"].as_str().and_then(crate::venue::outcome_of);
+                let bid = o.and_then(|o| crate::venue::pm_contract(v["match_id"].as_i64().unwrap_or(0), o)).and_then(|(_, l, _)| if dir > 0.0 { l.bids.first().map(|x| x.0) } else { l.asks.first().map(|x| 1.0 - x.0) });
+                t["bid_now"] = json!(bid);
+                t["value_now"] = json!(bid.map(|b| n * b));
+            }
+        }
+        trades.push(t);
+    }
+    // Today's decisions (UTC day).
+    let signals: Vec<Value> = c
+        .prepare("SELECT result, COUNT(*) FROM bot_signals WHERE ts_ms >= ?1 GROUP BY result ORDER BY 2 DESC")
+        .and_then(|mut st| st.query_map([day0], |r| Ok(json!({"result": r.get::<_, String>(0)?, "n": r.get::<_, i64>(1)?}))).map(|it| it.filter_map(|x| x.ok()).collect()))
+        .unwrap_or_default();
+    // The trading window.
+    let window = match s.snipe.hours() {
+        Some([a, b]) if a < b => {
+            let d0 = now - now.rem_euclid(86_400_000);
+            let (open, close) = (d0 + a as Ms * 3_600_000, d0 + b as Ms * 3_600_000);
+            let inside = now >= open && now < close;
+            json!({"hours": [a, b], "open_now": inside, "next_open_ms": if now < open { open } else { open + 86_400_000 }, "closes_ms": if inside { json!(close) } else { Value::Null }})
+        }
+        _ => json!({"hours": Value::Null, "open_now": true}),
+    };
+    let wider_today: f64 = rows.iter().filter(|(_, cl, v)| cl.is_some_and(|t| t >= day0) && v["set"].as_str() == Some("wider")).map(|(_, _, v)| v["pnl"].as_f64().unwrap_or(0.0)).sum();
+    json!({
+        "real": real, "scope": scope, "start": start, "since": since, "now": now, "rules_since": RULES_SINCE_MS,
+        "balance": start + closed, "closed_pnl": closed, "today": today_pnl, "open_cost": open_cost, "wider_today": wider_today,
+        "trades": trades, "signals": signals, "window": window,
+        "run": s.run.as_ref().map(|r| json!({"start_ms": r.start_ms, "end_ms": r.end_ms, "bankroll": r.bankroll, "stake": r.stake})),
+        "mode": {"kill": s.kill, "enabled": s.snipe.c.enabled, "real": s.snipe.c.real},
+        "rules": crate::adaptive::active_rules(),
+    })
 }
 
 /// Everything the Bots page shows.
@@ -875,4 +1192,37 @@ pub fn view(app: &App) -> Value {
         },
         "orders": orders,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(m: i64, ts: i64, cost: f64, pnl: f64) -> Value {
+        json!({"match_id": m, "ts": ts, "cost": cost, "pnl": pnl, "set": "safe", "home": "A"})
+    }
+
+    #[test]
+    fn run_guard_triggers() {
+        let win = |m| t(m, m * 100_000, 15.0, 3.0);
+        // As expected: wins, one ordinary loser, a scratch.
+        assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], 0), None);
+        // The loss limit.
+        assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], 0).unwrap().contains("limit"));
+        // Two real losers in a row.
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], 0).unwrap().contains("in a row"));
+        // Too few winners after four trades.
+        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], 0).unwrap().contains("won"));
+        // Nearly a whole stake on one trade.
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], 0).unwrap().contains("lost 87%"));
+        // Orders that fail.
+        assert!(run_guard_on(&[win(1)], &[], 3).unwrap().contains("orders"));
+        // Real clearly worse than its paper twins (same game, bought within 30 s).
+        let real = [t(1, 100_000, 15.0, 0.5), t(2, 200_000, 15.0, 0.6)];
+        let paper = [t(1, 101_000, 100.0, 18.0), t(2, 202_000, 100.0, 16.0)];
+        assert!(run_guard_on(&real, &paper, 0).unwrap().contains("paper twins"));
+        // Twins that agree: nothing.
+        let paper = [t(1, 101_000, 100.0, 4.0), t(2, 202_000, 100.0, 5.0)];
+        assert_eq!(run_guard_on(&real, &paper, 0), None);
+    }
 }

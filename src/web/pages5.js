@@ -77,10 +77,10 @@ SE.pages.suspicious = {
     }
     function settingsForm() {
       const s = data.settings;
-      const f = (k, label, tip, step = 1, suffix = '') => `<div class="field"><label data-tip="${esc(tip)}">${label}</label><div style="display:flex;gap:8px;align-items:center"><input class="input" type="number" step="${step}" data-s="${k}" value="${s[k]}" style="width:110px">${suffix}</div></div>`;
+      const f = (k, label, tip, step = 1, suffix = '') => `<div class="field"><label data-tip="${esc(tip)}">${label}</label><div>${SE.num({ attr: `data-s="${k}"`, value: s[k], step, pre: suffix === '$' ? '$' : '', suf: suffix === '$' ? '' : suffix, w: suffix && suffix !== '$' ? 136 : 110 })}</div></div>`;
       $('#sS').innerHTML = `<div class="grid g-2"><div>
         ${f('big_bet_usd', 'Big bet', 'A bet (fills of one wallet within 60 s) of at least this many dollars.', 50, '$')}
-        ${f('underdog_below', 'Underdog below', 'A bet bought below this price is on the underdog.', 0.05, 'price (0.40 = 40%)')}
+        ${f('underdog_below', 'Underdog below', 'A bet bought below this price is on the underdog (0.40 = 40¢).', 0.05)}
         ${f('alert_score', 'Alert score', 'Games at or above this score are flagged and sent to Telegram.', 5, 'of 100')}
         ${f('baseline_days', 'Normal games from', 'Finished lower-tier games of this many days form the baseline.', 1, 'days')}
       </div><div>
@@ -251,7 +251,7 @@ SE.snipeBot = (el) => {
     return `<p class="note"><b>Order size</b> at a ${money(t.stake)} stake, on these rules and the ${(b.depth_known || 0).toLocaleString('en-US')} moves with a recorded order book: best price only ${one(t.best_price_only)}; up to 2¢ past it ${one(t.walk_2c)}.</p>`;
   };
 
-  el.innerHTML = `<div class="bank-bar"><label data-tip="Each market (Polymarket, Kalshi) starts with this paper balance.">Starting balance <span class="bank-in">$<input class="input" id="bStart" type="number" min="100" step="100"></span></label><label data-tip="Every trade stakes this share of the balance at that moment (start plus closed P&amp;L), at most the cash not tied up in open trades.">Stake per trade <span class="bank-in"><input class="input" id="bPct" type="number" min="0.1" max="100" step="0.1">% of the balance</span></label><button class="btn" id="bSave">${ic('save')}Save</button><span class="faint">Saving re-runs the whole history with the new money (a few minutes).</span></div>` +
+  el.innerHTML = `<div class="bank-bar"><label data-tip="Each market (Polymarket, Kalshi) starts with this paper balance.">Starting balance ${SE.num({ id: 'bStart', min: 100, step: 100, pre: '$', w: 110 })}</label><label data-tip="Every trade stakes this share of the balance at that moment (start plus closed P&amp;L), at most the cash not tied up in open trades.">Stake per trade ${SE.num({ id: 'bPct', min: 0.1, max: 100, step: 0.1, suf: '%', w: 86 })}</label><button class="btn" id="bSave">${ic('save')}Save</button><span class="faint">Saving re-runs the whole history with the new money (a few minutes).</span></div>` +
     `<div id="bStatus" class="page-sub" style="margin-top:0"></div>` +
     P.sec('account_balance_wallet', 'Open positions', '<div id="bPos"></div>', '', 'Paper positions not yet paid out: Polymarket × Kalshi arbitrage (auto or sent with Order) until the game ends. Snipe trades open and close within minutes and show under Paper trades.') +
     `<div id="bBases"></div>` +

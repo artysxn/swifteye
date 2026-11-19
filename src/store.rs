@@ -164,6 +164,9 @@ pub fn open(path: &Path) -> Result<Connection> {
 pub fn open_ro(path: &Path) -> Result<Connection> {
     let c = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
     c.busy_timeout(Duration::from_secs(5))?;
+    // Reads straight from the OS page cache (no read call per page, shared by every reader) and
+    // a bigger private cache: the replay build reads gigabytes.
+    let _ = c.execute_batch("PRAGMA mmap_size = 8589934592; PRAGMA cache_size = -32768; PRAGMA temp_store = MEMORY;");
     Ok(c)
 }
 

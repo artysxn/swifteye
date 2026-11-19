@@ -96,7 +96,9 @@ pub fn spawn(app: Arc<App>) {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let a2 = a.clone();
-                let _ = tokio::task::spawn_blocking(move || bots::tick_run(&a2)).await;
+                if let Ok(Some(msg)) = tokio::task::spawn_blocking(move || bots::tick_run(&a2)).await {
+                    let _ = crate::telegram::send("bot", &msg).await;
+                }
             }
         });
     }
@@ -171,9 +173,12 @@ fn on_change(app: &Arc<App>, ch: &Change) {
             tokio::time::sleep(Duration::from_millis(wake as u64)).await;
         }
         let a = app.clone();
+        let t_meas = now_ms();
         let feat = tokio::task::spawn_blocking(move || measure(&a, m, o, dir, book, t0)).await.ok().flatten();
-        let Some(feat) = feat else { return };
-        let rules = crate::adaptive::active_rules();
+        let Some(mut feat) = feat else { return };
+        feat.measure_ms = now_ms() - t_meas;
+        let mut rules = crate::adaptive::active_rules();
+        rules.max_followed = rules.max_followed.min(crate::adaptive::SAFE_MAX_FOLLOWED);
         let mut one = rules;
         one.min_books = 1;
         let fill_at = t0 + REACTION + CONFIRM + FILL;
@@ -182,14 +187,42 @@ fn on_change(app: &Arc<App>, ch: &Change) {
             tokio::time::sleep(Duration::from_millis(wait as u64)).await;
         }
         if let Some(real) = main {
-            match gate(&feat, &rules) {
-                Ok(()) => enter(&app, SNIPE, real, &feat, &rules).await,
-                Err(why) => note(SNIPE, why, feat.json()),
+            let safe = crate::adaptive::Flt::live();
+            match gate(&feat, &rules, &safe) {
+                Ok(()) => {
+                    // Real money always has a paper twin on the same move, with the paper
+                    // wallet's own stakes: the pair shows what paper gets wrong. Started first
+                    // and on its own task, so it never delays the real order.
+                    if real {
+                        let (a, f2) = (app.clone(), feat.clone());
+                        tokio::spawn(async move { enter(&a, SNIPE, false, &f2, &rules, false).await });
+                    }
+                    enter(&app, SNIPE, real, &feat, &rules, false).await
+                }
+                Err(why) => {
+                    // Not a safe-set trade: the wider set (smaller stake, its own daily stop)?
+                    let pb = crate::adaptive::policy_b();
+                    let set = bots::settings().snipe;
+                    if !set.b_enabled {
+                        note(SNIPE, why, feat.json());
+                    } else if let Err(why_b) = gate(&feat, &pb, &crate::adaptive::Flt::wider()) {
+                        note(SNIPE, why, json!({"f": feat.json(), "wider": why_b}));
+                    } else {
+                        // During a real test run the wider set trades on paper: real money only
+                        // where the evidence is strongest.
+                        let real_b = real && bots::settings().run.is_none();
+                        if set.b_daily_loss > 0.0 && wider_today(&app, real_b) <= -set.b_daily_loss {
+                            note(SNIPE, "wider_set_daily_stop", feat.json());
+                        } else {
+                            enter(&app, SNIPE, real_b, &feat, &pb, true).await;
+                        }
+                    }
+                }
             }
         }
         if shadow {
-            match gate(&feat, &one) {
-                Ok(()) => enter(&app, SNIPE_SHADOW, false, &feat, &one).await,
+            match gate(&feat, &one, &crate::adaptive::Flt::live()) {
+                Ok(()) => enter(&app, SNIPE_SHADOW, false, &feat, &one, false).await,
                 Err(why) => note(SNIPE_SHADOW, why, Value::Null),
             }
         }
@@ -212,6 +245,12 @@ struct Feat {
     dec: [f64; 2],
     pause: bool,
     gap: bool,
+    /// [Polymarket 10-min trend, trigger book 5-min net move, its 10-min trend, its 10-min range].
+    tr: [f64; 4],
+    /// The move against the whole market and this game's history.
+    cx: crate::consensus::Ctx,
+    /// How long measuring took (ms).
+    measure_ms: Ms,
     sport: String,
     home: String,
     away: String,
@@ -219,7 +258,7 @@ struct Feat {
 
 impl Feat {
     fn json(&self) -> Value {
-        json!({"match_id": self.m, "outcome": self.o.as_str(), "dir": self.dir, "trigger": self.trigger, "books": self.books, "move": self.bm, "followed": self.fol, "spread": self.sp})
+        json!({"match_id": self.m, "outcome": self.o.as_str(), "dir": self.dir, "trigger": self.trigger, "books": self.books, "move": self.bm, "followed": self.fol, "spread": self.sp, "tr": self.tr, "dec": self.dec, "cx": self.cx, "sport": self.sport, "measure_ms": self.measure_ms})
     }
     /// Expected gain per contract if Polymarket catches up to `catch` of the move (test i).
     fn edge(&self, i: usize, catch: f64) -> f64 {
@@ -274,6 +313,10 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
     let pre_mid = (q0.0 + q0.1) / 2.0;
     let fol = |x: &snipe::Q, b: f64| ((x.0 + x.1) / 2.0 - pre_mid) * dir / b;
     let dec = |x: &snipe::Q| if dir > 0.0 { x.1 + SLIP } else { 1.0 - x.0 + SLIP };
+    let (a, b, cc, d) = crate::adaptive::trends(&c, q.as_mut(), trigger, m, os, dir, t0, pre_mid, b0, b2);
+    let Some(cx) = crate::consensus::Series::load(&c, m, os, t0 - 31 * 60_000, td2).ctx(dir, pre, td2) else {
+        return skip("no_consensus");
+    };
     let (sport, home, away): (String, String, String) = c.query_row("SELECT sport, home, away FROM matches WHERE id = ?1", [m], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap_or_default();
     Some(Feat {
         m,
@@ -283,19 +326,40 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
         t0,
         pre_mid,
         bm,
-        books: [platforms_moved(&c, m, os, dir, pre, td), platforms_moved(&c, m, os, dir, pre, td2)],
+        // Independent bookmakers = feed families that moved (as the replay counts them).
+        books: [cx.fam_moved, cx.fam_moved],
         fol: [fol(&q1, bm[0]), fol(&q2, bm[1])],
         sp: [q1.1 - q1.0, q2.1 - q2.0],
         dec: [dec(&q1), dec(&q2)],
         pause: crate::adaptive::after_pause(&c, trigger, m, os, t0),
         gap: snipe::reopened(&c, trigger, m, os, pre, td2) || snipe::reopened(&c, "polymarket", m, os, pre, td2),
+        tr: [a, b, cc, d],
+        cx,
+        measure_ms: 0,
         sport,
         home,
         away,
     })
 }
 
-fn gate(f: &Feat, r: &crate::adaptive::Policy) -> Result<(), &'static str> {
+/// Today's (UTC) result of the wider set's closed trades.
+fn wider_today(app: &App, real: bool) -> f64 {
+    let now = now_ms();
+    let day = now - now.rem_euclid(86_400_000);
+    crate::store::open_ro(&app.db_path)
+        .ok()
+        .and_then(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(json_extract(data, '$.pnl')), 0) FROM bot_trades WHERE bot = ?1 AND real = ?2 AND closed_ms >= ?3 AND json_extract(data, '$.set') = 'wider'",
+                params![SNIPE, real as i64, day],
+                |r| r.get::<_, f64>(0),
+            )
+            .ok()
+        })
+        .unwrap_or(0.0)
+}
+
+fn gate(f: &Feat, r: &crate::adaptive::Policy, flt: &crate::adaptive::Flt) -> Result<(), &'static str> {
     if f.gap {
         return Err("data_gap");
     }
@@ -314,9 +378,9 @@ fn gate(f: &Feat, r: &crate::adaptive::Policy) -> Result<(), &'static str> {
     if !f.dec.iter().all(|d| (0.02..=0.98).contains(d)) {
         return Err("price_out_of_range");
     }
-    // Above 90c there is almost no room left to gain but the whole stake is at risk.
-    if f.dec.iter().any(|d| *d > 0.90) {
-        return Err("price_too_high");
+    // Above 90c (no room to gain), trends against us, bounces and swingy games: see adaptive::Flt.
+    if let Some(why) = flt.check(&f.sport, f.trigger, now_ms(), f.dec[0].max(f.dec[1]), f.bm, f.tr, &f.cx) {
+        return Err(why);
     }
     if f.edge(0, r.catch) < r.min_edge || f.edge(1, r.catch) < r.min_edge {
         return Err("gap_too_small");
@@ -360,8 +424,11 @@ fn take(levels: &[(f64, f64)], max_px: f64, dollars: f64) -> (f64, f64) {
     (n, if n > 0.0 { cost / n.max(1e-9) } else { 0.0 })
 }
 
-async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy) {
+async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy, wider: bool) {
     let s = bots::settings();
+    // During a real test run the saved settings are the run's small real stakes; paper keeps the
+    // wallet the settings had before it (and get back after it).
+    let sn = if real { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
     let Some((token, asks, _, fee)) = our_book(f.m, f.o, f.dir) else {
         note(bot, "no_live_book", f.json());
         return;
@@ -378,18 +445,24 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     let (cash, balance, open, room) = {
         let Ok(c) = crate::store::open_ro(&app.db_path) else { return };
         let (closed, open, _, _, _) = bots::snipe_ledger(&c, bot, real);
-        let bal = s.snipe.c.start + closed;
+        let bal = sn.c.start + closed;
         // Real: this bot's own bankroll (not the whole account); paper: its paper cash.
-        (if real { bots::real_free(&c, SNIPE) } else { bal - open }, if real { s.snipe.c.bankroll + closed } else { bal }, open, if bot == SNIPE { bots::game_room(&c, f.m) } else { f64::INFINITY })
+        (if real { bots::real_free(&c, SNIPE) } else { bal - open }, if real { sn.c.bankroll + closed } else { bal }, open, if bot == SNIPE { bots::snipe_game_room(&c, f.m, real) } else { f64::INFINITY })
     };
     let edge = f.edge(1, r.catch);
-    let k = if s.snipe.edge_sizing { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
-    let stake = (s.snipe.pct * balance * k).min(s.snipe.c.max_trade).min(cash).min(s.snipe.c.max_open - open).min(room);
+    let k = if sn.edge_sizing && !wider { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
+    // The safe set: share of the balance x edge, up to the trade cap. The wider set: its own
+    // small flat stake.
+    let stake = if wider { (sn.b_pct * balance).min(sn.b_max_trade) } else { (sn.pct * balance * k).min(sn.c.max_trade) }.min(cash).min(sn.c.max_open - open).min(room);
+    let give_up_s = if !wider && sn.give_up_s > 0 { sn.give_up_s } else { r.give_up_s };
     if stake < snipe::MIN_FILL {
         note(bot, "no_cash", f.json());
         return;
     }
-    let max_px = if r.walk_book { best + 0.02 } else { best };
+    // Past the best price (up to 2c) only as far as the expected gain still clears the rule's
+    // minimum at that price: every level bought must be worth buying on its own.
+    let room = edge - (best + SLIP - f.dec[1]) - r.min_edge;
+    let max_px = if r.walk_book { best + ((room * 100.0 + 1e-6).floor() / 100.0).clamp(0.0, 0.02) } else { best };
     let (mut n, mut avg) = take(&asks, max_px, stake);
     if n < 1.0 || n * avg < snipe::MIN_FILL {
         note(bot, "too_thin", f.json());
@@ -414,7 +487,9 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         match placed {
             Ok(x) if x.filled >= 1.0 => {
                 bots::log_order(app, bot, "polymarket", true, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x}));
-                n = x.filled.floor();
+                // Everything received, to the hundredth of a share (a fill under the limit returns
+                // a little more than ordered; the whole of it is sold later).
+                n = (x.filled * 100.0 + 1e-6).floor() / 100.0;
                 avg = x.avg;
             }
             Ok(x) => {
@@ -433,7 +508,10 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         // and, on a game already playing, matches only after the live-sports delay (both measured
         // by the test runs): the fill takes what rests at or under the limit THEN.
         let live = crate::store::open_ro(&app.db_path).map(|c| crate::timing::live(&c, f.m, now_ms())).unwrap_or(true);
-        let wait = crate::timing::get().pm_fill_ms(live);
+        // A real order leaves `pm_send_lag_ms` after the second test (cash claim, signing: this
+        // paper path skips them), then the reply and the matching delay.
+        let tmg = crate::timing::get();
+        let wait = (f.t0 + REACTION + CONFIRM + tmg.pm_send_lag_ms - now_ms()).max(0) + tmg.pm_match_ms(live);
         tokio::time::sleep(Duration::from_millis(wait.max(0) as u64)).await;
         let Some((_, asks2, _, _)) = our_book(f.m, f.o, f.dir) else {
             note(bot, "gone_at_match", f.json());
@@ -445,16 +523,18 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
             note(bot, "gone_at_match", json!({"match_id": f.m, "outcome": f.o.as_str(), "waited_ms": wait, "limit": max_px}));
             return;
         }
+        // No slippage on top: real buys paid exactly what rested at the match (19 Nov, 5 of 5).
         n = n2;
-        avg = avg2 + SLIP;
+        avg = avg2;
     }
     let fee_in = venue::pm_fee(fee, n, avg);
     let v = json!({
         "bot": bot, "real": real, "ts": now_ms(), "match_id": f.m, "sport": f.sport, "home": f.home, "away": f.away,
         "outcome": f.o.as_str(), "dir": f.dir, "trigger": f.trigger, "move_ms": f.t0, "token": token,
         "pre_mid": f.pre_mid, "move": f.bm[0], "spread": f.sp[0], "books": f.books, "followed": f.fol, "edge": edge, "edge_x": k,
-        "catch": r.catch, "give_up_s": r.give_up_s, "fee_rate": fee.rate,
-        "contracts": n, "entry": avg, "fee_in": fee_in, "cost": n * avg + fee_in, "stake": stake,
+        "catch": r.catch, "give_up_s": give_up_s, "fee_rate": fee.rate, "set": if wider { "wider" } else { "safe" },
+        "contracts": n, "entry": avg, "fee_in": fee_in, "cost": n * avg + fee_in, "stake": stake, "limit": max_px, "best": best,
+        "tr": f.tr, "stop_px": crate::adaptive::Flt::live().stop_px(avg, f.bm[0]), "cx": f.cx, "revert": crate::adaptive::Flt::live().revert,
     });
     let id = {
         let Ok(w) = Connection::open(&app.db_path) else { return };
@@ -504,7 +584,18 @@ async fn monitor(app: Arc<App>, id: i64, v: Value) {
             (Some(b), Some(a)) => snipe::caught_up(&(b, a, now, "book"), dir, pre_mid, need, s1) || (if dir > 0.0 { b } else { 1.0 - a }) >= 0.99,
             _ => false,
         };
-        if !caught && now < give_end {
+        // Stop-loss: the bought side can only be sold well under the buy price -> out now.
+        let mut stopped = !caught && v["stop_px"].as_f64().zip(bid.zip(ask)).is_some_and(|(sp, (b, a))| (if dir > 0.0 { b } else { 1.0 - a }) <= sp);
+        // "Reason gone": the bookmakers' consensus gave back half its move (checked every 2 s).
+        if !caught && !stopped && v["revert"].as_bool() == Some(true) && now % 2000 < 1000 {
+            let (cn0, mv) = (v["cx"]["cons_now"].as_f64().unwrap_or(0.0), v["cx"]["cons_move"].as_f64().unwrap_or(0.0));
+            if let Ok(c) = crate::store::open_ro(&app.db_path) {
+                if let Some(cn) = crate::consensus::Series::load(&c, m, o.as_str(), now - 60_000, now).cons_at(now) {
+                    stopped = (cn - cn0) * dir <= -0.5 * mv.max(0.01);
+                }
+            }
+        }
+        if !caught && !stopped && now < give_end {
             continue;
         }
         // Bought shares can be sold only once settled (measured ~1.8 s after the buy).
@@ -535,6 +626,10 @@ async fn monitor(app: Arc<App>, id: i64, v: Value) {
                 }
                 Err(e) => {
                     bots::log_order(&app, &bot, "polymarket", false, &json!({"side": "sell", "token": token, "limit": limit, "shares": left, "error": format!("{e:#}")}));
+                    // If a fractional size was the problem, the next try sells whole shares.
+                    if left.fract() > 0.0 && left >= 1.0 {
+                        left = left.floor();
+                    }
                     tokio::time::sleep(Duration::from_secs(4)).await;
                     continue;
                 }
@@ -568,7 +663,7 @@ async fn monitor(app: Arc<App>, id: i64, v: Value) {
                 continue;
             }
         }
-        close(&app, id, &v, &bot, real, got, fees_out, now, if caught { "caught up" } else { "gave up" });
+        close(&app, id, &v, &bot, real, got, fees_out, now, if caught { "caught up" } else if stopped { "sold early (stop / reason gone)" } else { "gave up" });
         return;
     }
 }

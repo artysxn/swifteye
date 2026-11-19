@@ -512,7 +512,8 @@ pub(crate) fn platform(book: &str) -> &str {
     match book {
         "linebet" | "melbet" | "betwinner" | "megapari" | "paripesa" | "22bet" | "22bit" | "1xbit" => "1xbet",
         "unibet" | "leovegas" | "paf" => "kambi",
-        "fonbet" | "pari" => "fonbet",
+        // mostbet repeats fonbet's prices (84% of ticks identical within 3 s).
+        "fonbet" | "pari" | "mostbet" => "fonbet",
         "vinn" | "betking" => "altenar",
         b => b,
     }

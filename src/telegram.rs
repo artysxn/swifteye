@@ -137,6 +137,25 @@ impl Default for PaperAlerts {
     }
 }
 
+/// The snipe bot's own messages (paper or real): what gets sent.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct BotAlerts {
+    pub enabled: bool,
+    /// A message for each buy.
+    pub buys: bool,
+    /// A message for each sale.
+    pub sells: bool,
+    /// The price chart with each sale, and the balance chart after it.
+    pub charts: bool,
+}
+
+impl Default for BotAlerts {
+    fn default() -> Self {
+        BotAlerts { enabled: true, buys: true, sells: true, charts: true }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct TgCfg {
@@ -152,6 +171,9 @@ pub struct TgCfg {
     pub arbs: ArbAlerts,
     pub paper: PaperAlerts,
     pub suspicious: SuspAlerts,
+    pub bot_alerts: BotAlerts,
+    /// Clock of the times in messages: "oslo" (Norway: CET, CEST in summer) or "utc".
+    pub tz: String,
 }
 
 impl Default for TgCfg {
@@ -167,6 +189,8 @@ impl Default for TgCfg {
             arbs: ArbAlerts::default(),
             paper: PaperAlerts::default(),
             suspicious: SuspAlerts::default(),
+            bot_alerts: BotAlerts::default(),
+            tz: "oslo".into(),
         }
     }
 }
@@ -341,7 +365,7 @@ async fn bot_loop(app: Arc<App>) {
         // The command menu in Telegram (once per token).
         if !c.token.is_empty() && menu_set != c.token {
             let cmds = json!({"commands": [
-                {"command": "balance", "description": "Chart of the bot's real balance ($40 test run)"},
+                {"command": "balance", "description": "Chart of the bot's real balance (test run)"},
                 {"command": "balancepaper", "description": "Chart of the paper balance"},
                 {"command": "projected", "description": "What money turns into: /projected 24h [start]"},
                 {"command": "log", "description": "All real-money orders"},
@@ -389,9 +413,12 @@ async fn bot_loop(app: Arc<App>) {
             let entry = v["entry"].as_f64().unwrap_or(0.0);
             if id > last_id {
                 last_id = id;
+                if !(c.bot_alerts.enabled && c.bot_alerts.buys) {
+                    continue;
+                }
                 let (target, give) = pays_at(&v);
-                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢\n💰 Cash in {}: when Polymarket reaches {}¢ (≈{}); at the latest {} (gives up)",
-                    entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0,
+                let text = format!("🟢 <b>Snipe bought</b> · {tag}\n{}\n{name} · {side}\n{n:.0} @ {:.1}¢ = ${:.2} · trigger {} ({} books), edge {:.1}¢\n💰 Cash in {}: when Polymarket reaches {}¢ (≈{}); at the latest {} (gives up)",
+                    buy_type(&v), entry * 100.0, v["cost"].as_f64().unwrap_or(0.0), esc(v["trigger"].as_str().unwrap_or("")), v["books"][1], v["edge"].as_f64().unwrap_or(0.0) * 100.0,
                     eta_text(&app, v["ts"].as_i64().unwrap_or(0)),
                     target.map(|x| format!("{:.1}", x * 100.0)).unwrap_or("?".into()),
                     target.map(|x| money_s(n * (x - entry))).unwrap_or_default(),
@@ -401,13 +428,16 @@ async fn bot_loop(app: Arc<App>) {
             if let Some(cl) = v["closed_ms"].as_i64() {
                 if cl > closed_seen {
                     closed_seen = cl;
+                    if !(c.bot_alerts.enabled && c.bot_alerts.sells) {
+                        continue;
+                    }
                     let pnl = v["pnl"].as_f64().unwrap_or(0.0);
-                    let caption = format!("{} <b>Snipe sold</b> · {tag}\n{name} · {side}\n{n:.0}: {:.1}¢ → {:.1}¢ ({}) · <b>{}${:.2}</b>",
-                        if pnl >= 0.0 { "✅" } else { "❌" }, entry * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")),
+                    let caption = format!("{} <b>Snipe sold</b> · {tag}\n{}\n{name} · {side}\n{n:.0}: {:.1}¢ → {:.1}¢ ({}) · <b>{}${:.2}</b>",
+                        if pnl >= 0.0 { "✅" } else { "❌" }, buy_type(&v), entry * 100.0, v["exit"].as_f64().unwrap_or(0.0) * 100.0, esc(v["reason"].as_str().unwrap_or("")),
                         if pnl >= 0.0 { "+" } else { "-" }, pnl.abs());
                     let a2 = app.clone();
                     let v2 = v.clone();
-                    let chart = tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten();
+                    let chart = if c.bot_alerts.charts { tokio::task::spawn_blocking(move || trade_chart(&a2, &v2)).await.ok().flatten() } else { None };
                     let value = bot_balance(&app, v["real"].as_bool() == Some(true));
                     let sent = match chart {
                         Some(cfgj) => {
@@ -421,8 +451,10 @@ async fn bot_loop(app: Arc<App>) {
                     }
                     let a3 = app.clone();
                     let real = v["real"].as_bool() == Some(true);
-                    if let Ok(Some((ch, cap))) = tokio::task::spawn_blocking(move || balance_chart(&a3, real)).await {
-                        let _ = send_chart(&ch, &cap).await;
+                    if c.bot_alerts.charts {
+                        if let Ok(Some((ch, cap))) = tokio::task::spawn_blocking(move || balance_chart(&a3, real)).await {
+                            let _ = send_chart(&ch, &cap).await;
+                        }
                     }
                 }
             }
@@ -438,6 +470,31 @@ fn pays_at(v: &Value) -> (Option<f64>, Option<Ms>) {
     let target = pre.zip(mv).map(|(pre, _)| if v["dir"].as_f64().unwrap_or(1.0) > 0.0 { pre + need - sp / 2.0 } else { 1.0 - pre + need - sp / 2.0 });
     let give = v["ts"].as_i64().zip(v["give_up_s"].as_i64()).map(|(t, g)| t + g * 1000);
     (target.map(|x| x.clamp(0.0, 1.0)), give)
+}
+
+/// What kind of snipe this is, from the price paid and what moved:
+/// price band (long shot / mid / favourite / near-certain) · direction · outcome kind.
+fn buy_type(v: &Value) -> String {
+    let e = v["entry"].as_f64().unwrap_or(0.0);
+    let band = match e {
+        x if x < 0.30 => "🎲 Long shot (<30¢)",
+        x if x < 0.70 => "⚖️ Mid-price (30–70¢)",
+        x if x <= 0.90 => "⭐ Favourite (70–90¢)",
+        _ => "🔒 Near-certain (>90¢)",
+    };
+    let o = v["outcome"].as_str().unwrap_or("");
+    let what = match (o, v["dir"].as_f64().unwrap_or(1.0) > 0.0) {
+        ("draw", true) => "draw got likelier",
+        ("draw", false) => "draw ruled out (bought No)",
+        (_, true) => "side got likelier",
+        (_, false) => "side faded (bought No)",
+    };
+    let set = match v["set"].as_str() {
+        Some("wider") => " · wider set (small stake)",
+        Some("safe") => " · safe set",
+        _ => "",
+    };
+    format!("{band} · {what}{set}")
 }
 
 /// How long a winning snipe usually takes to cash in: the median time from buy to sale of the
@@ -488,7 +545,7 @@ fn trade_chart(app: &App, v: &Value) -> Option<Value> {
     }
     let keys: Vec<Ms> = mins.keys().copied().collect();
     let idx = |t: Ms| keys.iter().rposition(|k| *k <= t).unwrap_or(0);
-    let labels: Vec<String> = keys.iter().map(|k| time::OffsetDateTime::from_unix_timestamp(k / 1000).map(|d| format!("{:02}:{:02}", d.hour(), d.minute())).unwrap_or_default()).collect();
+    let labels: Vec<String> = keys.iter().map(|k| { let (d, _) = local(*k); format!("{:02}:{:02}", d.hour(), d.minute()) }).collect();
     let cents = |x: Option<f64>| x.map(|p| (p * 1000.0).round() / 10.0);
     let mut buy = vec![Value::Null; keys.len()];
     let mut sell = vec![Value::Null; keys.len()];
@@ -536,7 +593,7 @@ async fn account_value(app: &App, real: bool) -> String {
     }
 }
 
-/// The bot's own balance: during a real test run, its bankroll ($40) plus the run's results;
+/// The bot's own balance: during a real test run, its bankroll plus the run's results;
 /// otherwise its real bankroll plus its real results; for a paper trade, the paper wallet.
 fn bot_balance(app: &App, real: bool) -> String {
     let st = crate::bots::settings();
@@ -555,7 +612,7 @@ fn bot_balance(app: &App, real: bool) -> String {
     }
 }
 
-/// The bot's balance over time: starts at its money (the test run's $40, else its real bankroll;
+/// The bot's balance over time: starts at its money (the test run's bankroll, else its real bankroll;
 /// paper: the paper start) and steps by each closed trade's result. (Chart.js config, caption)
 fn balance_chart(app: &App, real: bool) -> Option<(Value, String)> {
     let st = crate::bots::settings();
@@ -576,7 +633,7 @@ fn balance_chart(app: &App, real: bool) -> Option<(Value, String)> {
     };
     let mut q = c.prepare("SELECT closed_ms, json_extract(data, '$.pnl') FROM bot_trades WHERE bot = 'snipe' AND real = ?1 AND closed_ms IS NOT NULL AND ts_ms >= ?2 AND closed_ms <= ?3 ORDER BY closed_ms").ok()?;
     let pts: Vec<(Ms, f64)> = q.query_map(params![real as i64, from, to], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))).ok()?.filter_map(|x| x.ok()).collect();
-    let fmt_t = |ms: Ms| time::OffsetDateTime::from_unix_timestamp(ms / 1000).map(|d| format!("{:02}/{:02} {:02}:{:02}", d.day(), u8::from(d.month()), d.hour(), d.minute())).unwrap_or_default();
+    let fmt_t = |ms: Ms| dmhm(ms);
     let mut labels = vec![fmt_t(from.max(pts.first().map(|p| p.0 - 60_000).unwrap_or(now)).min(now))];
     let mut vals = vec![(start_bal * 100.0).round() / 100.0];
     let mut bal = start_bal;
@@ -658,6 +715,8 @@ pub fn view(app: &App) -> Value {
         "arbs": c.arbs,
         "paper": c.paper,
         "suspicious": c.suspicious,
+        "bot_alerts": c.bot_alerts,
+        "tz": c.tz,
         "watch": watch,
         "log": LOG.lock().iter().cloned().collect::<Vec<_>>(),
     })
@@ -932,7 +991,7 @@ async fn on_message(app: &App, http: &reqwest::Client, m: &Value) -> Result<()> 
     reply(http, &c.token, chat, &msg).await
 }
 
-const HELP: &str = "<b>Snipe bot</b>\n/extend 4h — extend the running test run\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the $40 test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
+const HELP: &str = "<b>Snipe bot</b>\n/extend 4h — extend the running test run\n/projected 24h [start $] — what money turns into at the bot's rate (3d, 1w...)\n/log [n] — the bots' real-money orders\n/balance — chart of the bot's real balance (the real test run)\n/balancepaper — the paper balance chart\n/status — mode, balances, today, open trades, test run\n/open — open trades\n/trades — last 10 closed trades\n/run — the real test run (now or last)\n/chart — chart of the last closed trade\n/kill — stop opening trades (emergency)\n/unkill — resume\n/pause, /resume — updates off / on";
 
 fn money_s(x: f64) -> String {
     format!("{}${:.2}", if x < 0.0 { "-" } else { "+" }, x.abs())
@@ -953,7 +1012,7 @@ fn parse_span(s: &str) -> Option<f64> {
     (d > 0.0 && d <= 365.0).then_some(d)
 }
 
-/// The bot's money now: the test run's $40 ± results while one runs, else its real bankroll ±
+/// The bot's money now: the test run's bankroll ± results while one runs, else its real bankroll ±
 /// real results.
 fn bot_value(app: &App) -> f64 {
     let st = crate::bots::settings();
@@ -982,7 +1041,7 @@ fn projected(app: &App, arg: &str) -> String {
     if let Some((x, at)) = crate::bots::sim_cached("snipe-wf") {
         let (s0, pnl, d) = (x["start"].as_f64().unwrap_or(0.0), x["pnl"].as_f64().unwrap_or(0.0), x["days"].as_f64().unwrap_or(0.0));
         if s0 > 0.0 && d > 0.0 {
-            let when = time::OffsetDateTime::from_unix_timestamp(at / 1000).map(|t| format!("{:02}/{:02} {:02}:{:02} UTC", t.day(), u8::from(t.month()), t.hour(), t.minute())).unwrap_or_default();
+            let when = format!("{} {}", dmhm(at), local(at).1);
             out.push_str(&line(&format!("Replay of all data (baseline from {when})"), pnl / s0 / d, &format!("{} trades over {d:.1} days", x["trades"])));
             any = true;
         }
@@ -1029,7 +1088,7 @@ fn real_log(app: &App, n: i64) -> String {
         if *ok {
             net += if side.starts_with("buy") { -usd } else { usd };
         }
-        let t = time::OffsetDateTime::from_unix_timestamp(ts / 1000).map(|x| format!("{:02}/{:02} {:02}:{:02}", x.day(), u8::from(x.month()), x.hour(), x.minute())).unwrap_or_default();
+        let t = dmhm(*ts);
         let what = if *ok && filled > 0.0 {
             format!("{} {filled:.0} @ {:.1}¢ = ${usd:.2}", if side.starts_with("buy") { "BUY" } else { "SELL" }, avg * 100.0)
         } else {
@@ -1051,7 +1110,8 @@ fn bot_status(app: &App) -> String {
     let mut t = format!(
         "<b>Snipe bot</b> · {mode}\n📝 Paper: ${:.2} ({}), today {}, {pn} trades {pw} won, ${po:.2} open\n💵 Real: {} total, today {}, {rn} trades {rw} won, ${ro:.2} open, ${:.2} free of ${:.0}\nRules: {}+ books, {:.0} pt move, ≤{:.0}% followed, gain ≥{:.0}¢, give up {} min\nStake {:.0}% (max ${:.0}), daily loss stop ${:.0}",
         s.snipe.c.start + pc, money_s(pc), money_s(pd), money_s(rc), money_s(rd), crate::bots::real_free(&c, crate::bots::SNIPE), s.snipe.c.bankroll,
-        r.min_books, r.min_move * 100.0, r.max_followed * 100.0, r.min_edge * 100.0, r.give_up_s / 60, s.snipe.pct * 100.0, s.snipe.c.max_trade, s.snipe.c.daily_loss
+        r.min_books.max(crate::adaptive::Flt::live().fams.unwrap_or(1)), r.min_move * 100.0, r.max_followed.min(crate::adaptive::SAFE_MAX_FOLLOWED) * 100.0, r.min_edge * 100.0,
+        (if s.snipe.give_up_s > 0 { s.snipe.give_up_s } else { r.give_up_s }) / 60, s.snipe.pct * 100.0, s.snipe.c.max_trade, s.snipe.c.daily_loss
     );
     if let Some(run) = &s.run {
         let rep = crate::bots::run_report(app, run, now_ms());
@@ -1060,8 +1120,33 @@ fn bot_status(app: &App) -> String {
     t
 }
 
+/// A moment on the clock the messages use: Norway's by default (CET; CEST from the last Sunday
+/// of March to the last Sunday of October, switching at 01:00 UTC), or UTC. (time, zone name)
+fn local(ms: Ms) -> (time::OffsetDateTime, &'static str) {
+    let utc = time::OffsetDateTime::from_unix_timestamp(ms.div_euclid(1000)).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    if cfg().tz == "utc" {
+        return (utc, "UTC");
+    }
+    let last_sunday = |m: time::Month| -> Option<time::OffsetDateTime> {
+        let d = time::Date::from_calendar_date(utc.year(), m, 31).ok()?;
+        let d = d - time::Duration::days(d.weekday().number_days_from_sunday() as i64);
+        Some(d.with_hms(1, 0, 0).ok()?.assume_utc())
+    };
+    let summer = matches!((last_sunday(time::Month::March), last_sunday(time::Month::October)), (Some(a), Some(b)) if utc >= a && utc < b);
+    let off = time::UtcOffset::from_hms(if summer { 2 } else { 1 }, 0, 0).unwrap_or(time::UtcOffset::UTC);
+    (utc.to_offset(off), if summer { "CEST" } else { "CET" })
+}
+
+/// "14:05 CET"
 fn hhmm(ms: Ms) -> String {
-    time::OffsetDateTime::from_unix_timestamp(ms / 1000).map(|d| format!("{:02}:{:02} UTC", d.hour(), d.minute())).unwrap_or_default()
+    let (d, z) = local(ms);
+    format!("{:02}:{:02} {z}", d.hour(), d.minute())
+}
+
+/// "19/11 14:05" (no zone name: for lists and chart labels)
+fn dmhm(ms: Ms) -> String {
+    let (d, _) = local(ms);
+    format!("{:02}/{:02} {:02}:{:02}", d.day(), u8::from(d.month()), d.hour(), d.minute())
 }
 
 fn trade_list(app: &App, open: bool, n: i64) -> String {
@@ -1317,6 +1402,35 @@ pub async fn alert_suspicious(kind: &str, text: &str) {
 }
 
 /// "Send test" on the page.
+/// What the bot would answer to a read-only command (the Telegram page shows it; nothing is sent).
+pub fn preview(app: &App, cmd: &str) -> Option<String> {
+    let (cmd, arg) = cmd.trim().split_once(' ').map(|(a, b)| (a, b.trim())).unwrap_or((cmd.trim(), ""));
+    Some(match cmd {
+        "/status" => bot_status(app),
+        "/open" => trade_list(app, true, 10),
+        "/trades" => trade_list(app, false, 10),
+        "/run" => run_text(app),
+        "/projected" => projected(app, if arg.is_empty() { "24h" } else { arg }),
+        "/log" => real_log(app, arg.parse::<i64>().unwrap_or(20).clamp(1, 60)),
+        "/help" => HELP.into(),
+        _ => return None,
+    })
+}
+
+/// Send a command's answer to the linked chat from the page ("/balance" and "/balancepaper" send
+/// the balance chart).
+pub async fn push(app: &Arc<App>, cmd: &str) -> Result<()> {
+    let cmd = cmd.trim().to_string();
+    if cmd == "/balance" || cmd == "/balancepaper" {
+        let (a, real) = (app.clone(), cmd == "/balance");
+        let (ch, cap) = tokio::task::spawn_blocking(move || balance_chart(&a, real)).await?.ok_or_else(|| anyhow!("no balance history yet"))?;
+        return send_chart(&ch, &cap).await;
+    }
+    let (a, c2) = (app.clone(), cmd.clone());
+    let text = tokio::task::spawn_blocking(move || preview(&a, &c2)).await?.ok_or_else(|| anyhow!("unknown command {cmd}"))?;
+    send("bot", &text).await
+}
+
 pub async fn test(app: &App) -> Result<()> {
     send("test", &format!("Test from Swifteye. {}", status_text(&cfg()))).await?;
     let _ = app;

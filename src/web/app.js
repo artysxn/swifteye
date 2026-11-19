@@ -717,6 +717,18 @@ SE.table = (el, cols, opts = {}) => {
   return { set(r) { rows = r || []; draw(); }, rows: () => rows };
 };
 
+/**
+ * A number field: the unit inside the box ($ before, %, min, points after), no spin arrows; the
+ * arrow keys still step it. o: { id, attr (extra attributes), value, step, min, max, pre, suf,
+ * w (px), tip, placeholder }. Read it as before, through the input's id or data attribute.
+ */
+SE.num = (o = {}) => {
+  const a = (k, v) => (v == null || v === '' ? '' : ` ${k}="${SE.esc(String(v))}"`);
+  return `<label class="numf${o.pre ? ' pre' : ''}"${o.w ? ` style="width:${o.w}px"` : ''}${a('data-tip', o.tip)}>${o.pre ? `<span class="u">${SE.esc(o.pre)}</span>` : ''}` +
+    `<input type="number" inputmode="decimal"${a('id', o.id)}${a('value', o.value)}${a('step', o.step)}${a('min', o.min)}${a('max', o.max)}${a('placeholder', o.placeholder)} ${o.attr || ''}>` +
+    `${o.suf ? `<span class="u">${SE.esc(o.suf)}</span>` : ''}</label>`;
+};
+
 /** Segmented control. options: [[value, label, tooltip?]] */
 SE.seg = (el, options, value, onChange) => {
   el.classList.add('seg');

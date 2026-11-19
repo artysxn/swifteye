@@ -116,6 +116,13 @@ pub struct Progress {
 }
 
 pub fn run(db: &std::path::Path, cfg: &ArbCfg, game_cap: f64, prog: &Progress) -> anyhow::Result<Value> {
+    run_since(db, cfg, game_cap, prog, 0, false)
+}
+
+/// The same, trading only gaps seen at or after `since` (e.g. after the Kalshi book fix).
+/// `kalshi_first`: buy the Kalshi leg first (no matching delay there), then Polymarket; a failed
+/// second leg sells the Kalshi contracts back.
+pub fn run_since(db: &std::path::Path, cfg: &ArbCfg, game_cap: f64, prog: &Progress, since: Ms, kalshi_first: bool) -> anyhow::Result<Value> {
     let c = crate::store::open_ro(db)?;
     let now = now_ms();
     let games: Vec<(i64, String, Ms)> = c
@@ -175,7 +182,7 @@ pub fn run(db: &std::path::Path, cfg: &ArbCfg, game_cap: f64, prog: &Progress) -
                 let live = *start > 0 && *start <= s.ts;
                 let payout = start + GAME_LEN_MS;
                 let pays_soon = *start > 0 && payout <= s.ts + PAYOUT_MS && payout > s.ts;
-                if !pays_soon || (!live && cfg.live_only) {
+                if !pays_soon || (!live && cfg.live_only) || s.ts < since {
                     continue;
                 }
                 let min_p = if live { cfg.min_live } else { cfg.min_pre };
@@ -211,28 +218,56 @@ pub fn run(db: &std::path::Path, cfg: &ArbCfg, game_cap: f64, prog: &Progress) -
                     continue;
                 }
                 let tm = crate::timing::get();
-                let t_pm = s.ts + tm.pm_fill_ms(live);
-                let t_k = t_pm + tm.kalshi_order_ms;
-                let (Some(s1), Some(s2)) = (at(t_pm), at(t_k)) else { continue };
-                last_cand = s.ts;
-                let (p1, sz1) = side_px(s1, true);
-                if !s1.p.ok || p1 > pm_lim + 1e-9 || sz1 < 1.0 {
-                    gone += 1;
-                    continue; // nothing bought
+                let (t_k, max_n, unit);
+                if kalshi_first {
+                    let t_k1 = s.ts + tm.kalshi_order_ms;
+                    let t_pm = t_k1 + tm.pm_fill_ms(live);
+                    let (Some(s1), Some(s2)) = (at(t_k1), at(t_pm)) else { continue };
+                    last_cand = s.ts;
+                    let (k1, ksz1) = side_px(s1, false);
+                    if !s1.k.ok || k1 > k_lim + 1e-9 || ksz1 < 1.0 {
+                        gone += 1;
+                        continue; // nothing bought
+                    }
+                    let k_n = ksz1.floor();
+                    let (p2, sz2) = side_px(s2, true);
+                    if !s2.p.ok || p2 > pm_lim + 1e-9 || sz2 < 1.0 {
+                        // Leg failure: sell the Kalshi contracts back (Kalshi Yes when the
+                        // Polymarket leg was No, and the other way round).
+                        let t_back = t_pm + tm.kalshi_order_ms;
+                        let back = at(t_back).filter(|x| x.k.ok).map(|x| if pm_yes { 1.0 - x.k.ask } else { x.k.bid }).unwrap_or(0.0);
+                        let net = back - K_RATE * back * (1.0 - back);
+                        cands.push(Cand { t: t_k1, m: *m, sport: sport.clone(), unit: unit_k(k1), max_n: k_n, exit_t: t_back, exit_value: net, unwound: false, live, failed: true });
+                        continue;
+                    }
+                    t_k = t_pm;
+                    max_n = k_n.min(sz2.floor());
+                    unit = unit_pm(p2) + unit_k(k1);
+                } else {
+                    let t_pm = s.ts + tm.pm_fill_ms(live);
+                    let t_k0 = t_pm + tm.kalshi_order_ms;
+                    let (Some(s1), Some(s2)) = (at(t_pm), at(t_k0)) else { continue };
+                    last_cand = s.ts;
+                    let (p1, sz1) = side_px(s1, true);
+                    if !s1.p.ok || p1 > pm_lim + 1e-9 || sz1 < 1.0 {
+                        gone += 1;
+                        continue; // nothing bought
+                    }
+                    let pm_n = sz1.floor();
+                    let pm_unit = unit_pm(p1);
+                    let (k2, ksz2) = side_px(s2, false);
+                    if !s2.k.ok || k2 > k_lim + 1e-9 || ksz2 < 1.0 {
+                        // Leg failure: sell the Polymarket shares back after they settle + the sale matches.
+                        let t_back = t_k0 + tm.pm_settle_ms + tm.pm_fill_ms(live);
+                        let back = at(t_back).filter(|x| x.p.ok).map(|x| if pm_yes { x.p.bid } else { 1.0 - x.p.ask }).unwrap_or(0.0);
+                        let net = back - PM_RATE * back * (1.0 - back);
+                        cands.push(Cand { t: t_pm, m: *m, sport: sport.clone(), unit: pm_unit, max_n: pm_n, exit_t: t_back, exit_value: net, unwound: false, live, failed: true });
+                        continue;
+                    }
+                    t_k = t_k0;
+                    max_n = pm_n.min(ksz2.floor());
+                    unit = pm_unit + unit_k(k2);
                 }
-                let pm_n = sz1.floor();
-                let pm_unit = unit_pm(p1);
-                let (k2, ksz2) = side_px(s2, false);
-                if !s2.k.ok || k2 > k_lim + 1e-9 || ksz2 < 1.0 {
-                    // Leg failure: sell the Polymarket shares back after they settle + the sale matches.
-                    let t_back = t_k + tm.pm_settle_ms + tm.pm_fill_ms(live);
-                    let back = at(t_back).filter(|x| x.p.ok).map(|x| if pm_yes { x.p.bid } else { 1.0 - x.p.ask }).unwrap_or(0.0);
-                    let net = back - PM_RATE * back * (1.0 - back);
-                    cands.push(Cand { t: t_pm, m: *m, sport: sport.clone(), unit: pm_unit, max_n: pm_n, exit_t: t_back, exit_value: net, unwound: false, live, failed: true });
-                    continue;
-                }
-                let max_n = pm_n.min(ksz2.floor());
-                let unit = pm_unit + unit_k(k2);
                 // Exit: the first later state whose sale fetches `unwind_at` of the locked profit
                 // for every pair, else the payout.
                 let (mut exit_t, mut exit_value, mut unwound) = (payout, 1.0, false);

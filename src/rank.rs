@@ -129,7 +129,11 @@ fn quant(v: &[i64], q: f64) -> Option<i64> {
 }
 
 pub fn compute(db: &Path, p: &Params) -> Result<Rankings> {
-    let c = crate::store::open_ro(db)?;
+    compute_with(&crate::store::open_ro(db)?, p)
+}
+
+/// The same on an open connection (the replay passes an in-memory copy of one block).
+pub fn compute_with(c: &rusqlite::Connection, p: &Params) -> Result<Rankings> {
     let lo = p.since - p.window_ms - p.settle_ms;
     let hi = p.until + p.window_ms + p.settle_ms;
     let ids: Vec<i64> = {

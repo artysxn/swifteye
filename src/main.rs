@@ -6,6 +6,7 @@ mod arbtrack;
 mod books;
 mod bots;
 mod clock;
+mod consensus;
 mod data;
 mod diag;
 mod engine;

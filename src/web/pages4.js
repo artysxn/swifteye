@@ -65,10 +65,10 @@ SE.tier = {
     const f = this.get();
     const preset = Object.entries(TIERS).find(([, t]) => ['liq', 'vol', 'moves', 'price'].every((k) => t[k] === f[k]))?.[0] || 'custom';
     el.innerHTML = `<div class="tierbar"><span class="muted" data-tip="Rough match tier from the Polymarket / Kalshi listing: big, busy markets are usually the top games. A match passes when either market meets every minimum.">Market size</span><div id="tSeg"></div>
-      <label data-tip="Money resting in the order book (Polymarket liquidity, Kalshi liquidity in dollars).">Liquidity ≥ $<input class="input" type="number" min="0" step="1000" data-k="liq" value="${f.liq}"></label>
-      <label data-tip="Traded in the last 24 hours, in dollars (Kalshi contracts valued at their last price).">24 h volume ≥ $<input class="input" type="number" min="0" step="1000" data-k="vol" value="${f.vol}"></label>
-      <label data-tip="Price changes Swifteye recorded on the market in the last hour: how alive it is.">Moves / hour ≥ <input class="input" type="number" min="0" step="1" data-k="moves" value="${f.moves}"></label>
-      <label data-tip="Price of the least likely outcome, in cents. Drops one-sided games whose market barely trades.">Cheapest outcome ≥ <input class="input" type="number" min="0" max="50" step="1" data-k="price" value="${f.price}">c</label></div>`;
+      <label data-tip="Money resting in the order book (Polymarket liquidity, Kalshi liquidity in dollars).">Liquidity ≥ ${SE.num({ attr: 'data-k="liq"', value: f.liq, step: 1000, min: 0, pre: '$', w: 112 })}</label>
+      <label data-tip="Traded in the last 24 hours, in dollars (Kalshi contracts valued at their last price).">24 h volume ≥ ${SE.num({ attr: 'data-k="vol"', value: f.vol, step: 1000, min: 0, pre: '$', w: 112 })}</label>
+      <label data-tip="Price changes Swifteye recorded on the market in the last hour: how alive it is.">Moves / hour ≥ ${SE.num({ attr: 'data-k="moves"', value: f.moves, step: 1, min: 0, w: 76 })}</label>
+      <label data-tip="Price of the least likely outcome, in cents. Drops one-sided games whose market barely trades.">Cheapest outcome ≥ ${SE.num({ attr: 'data-k="price"', value: f.price, step: 1, min: 0, max: 50, suf: '¢', w: 76 })}</label></div>`;
     const apply = (nf) => { this.set(nf); onChange(); };
     SE.seg($('#tSeg', el), [['all', 'All'], ['high', 'High tier', 'Liquidity ≥ $50k, 24 h volume ≥ $5k, 20+ price moves an hour.'], ['mid', 'Mid and up', 'Liquidity ≥ $5k, 24 h volume ≥ $500, at least one price move in the last hour.'], ...(preset === 'custom' ? [['custom', 'Custom']] : [])], preset, (v) => {
       if (!TIERS[v]) return;
@@ -87,128 +87,220 @@ SE.tier = {
 SE.pages.telegram = {
   title: 'Telegram',
   render(el) {
-    el.innerHTML = P.head(`<span style="display:inline-flex;align-items:center;gap:12px">${SE.tgLogo(30)}Telegram</span>`, '<span id="tgChip"></span>') + '<div id="tgBody"><div class="empty">Loading</div></div>';
-    let s = null;
+    el.innerHTML = P.head(`<span style="display:inline-flex;align-items:center;gap:12px">${SE.tgLogo(30)}Telegram</span>`, '<span id="tgActs"></span>') +
+      P.stats(
+        P.stat('tgS1', 'power_settings_new', 'Status'),
+        P.stat('tgS2', 'person', 'Chat'),
+        P.stat('tgS3', 'send', 'Sent', 'Messages since the last restart.'),
+        P.stat('tgS4', 'schedule', 'Last message'),
+        P.stat('tgS5', 'notifications_active', 'Watching', 'Matches with the bell on.')) +
+      `<div class="grid g-main" style="margin-top:40px"><div>` +
+        P.sec('notifications', 'Messages', '<div id="tgList"></div>') +
+        P.sec('forum', 'Ask the bot', '<div class="tp-ask" id="tgAsk"></div><div id="tgPrev"></div>', '', 'The answers its chat commands give. Nothing is sent unless you press Send.') +
+        P.sec('sports_esports', 'Odds moves by sport', '<div id="tgGames"></div>', `<button class="btn sm ghost" id="tgGamesT"></button>`, 'Each sport follows the Odds moves settings unless you give it its own. A sport switched off is silent, watched matches included.') +
+        P.sec('link', 'Connection', '<div id="tgConn"></div>') +
+      `</div><div>` +
+        P.sec('history', 'Sent', '<div class="feed" id="tgFeed"></div>') +
+        P.sec('notifications_active', 'Watched matches', '<div id="tgWatch"></div>') +
+      `</div></div>`;
+    let s = null, lastSig = '', gamesOpen = false;
+    const open = new Set(SE.pref('tgOpen') || []);
     const save = async (edit, msg = 'Saved') => {
-      try { s = await api('/telegram', { body: edit }); draw(); SE.toast(msg); } catch (e) { SE.toast(e.message); }
+      try { s = await api('/telegram', { body: edit }); lastSig = ''; draw(); if (msg) SE.toast(msg); } catch (e) { SE.toast(e.message, 6000); }
     };
-    const sw = (id, on) => `<label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label>`;
-    const MARKETS = [['1x2', '1X2 / winner'], ['total', 'Total'], ['handicap', 'Handicap'], ['btts', 'Both score']];
+    const sw = (id, on, tip = '') => `<label class="switch" ${tip ? `data-tip="${esc(tip)}"` : ''}><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label>`;
+    const MARKETS = [['1x2', '1X2'], ['total', 'Total'], ['handicap', 'Handicap'], ['btts', 'Both score']];
     const openGames = new Set();
     const gdef = { enabled: true, min_move_pts: null, markets: null, sources: null, cooldown_s: null, arb_enabled: true, arb_min_profit_pct: null };
     const gameOf = (k) => ({ ...gdef, ...(s.odds.games?.[k] || {}) });
     const custom = (g) => g.min_move_pts != null || g.markets || g.sources || g.cooldown_s != null || g.arb_min_profit_pct != null || !g.arb_enabled;
-    function gameRow(k) {
-      const g = gameOf(k), o = s.odds, a = s.arbs;
-      const mk = g.markets || o.markets;
-      const chip = !g.enabled ? '<span class="chip bad">Off</span>' : custom(g) ? '<span class="chip ok">Custom</span>' : '<span class="chip">Default</span>';
-      const sum = g.enabled ? `<span class="faint" style="margin-left:10px">≥ ${g.min_move_pts ?? o.min_move_pts} pts${g.arb_enabled ? '' : ' · arb off'}</span>` : '';
-      return `<details class="tg-game" data-g="${esc(k)}" ${openGames.has(k) ? 'open' : ''} style="border-bottom:1px solid var(--line)">
-        <summary style="display:flex;align-items:center;gap:12px;padding:11px 0;cursor:pointer;list-style:none">
-          <span style="display:inline-flex;align-items:center;gap:8px;min-width:190px;font-weight:550">${SE.sportIcon(k)}${esc(SE.sportName(k))}</span>${chip}${sum}
-          <span style="margin-left:auto" data-tip="Odds-move alerts for this game">${sw('gOn-' + k, g.enabled)}</span>
-        </summary>
-        <div style="padding:0 0 12px 0">
-          <div class="field"><label data-tip="Empty = the general value (${o.min_move_pts} points).">Smallest move</label><div style="display:flex;gap:8px;align-items:center"><input class="input" type="number" data-gf="min_move_pts" min="0.1" step="0.5" placeholder="${o.min_move_pts}" value="${g.min_move_pts ?? ''}" style="width:90px">points</div></div>
-          <div class="field"><label>Markets</label><div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center"><label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" data-gsame="markets" ${g.markets ? '' : 'checked'}>Same</label>${MARKETS.map(([m, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500;${g.markets ? '' : 'opacity:.45'}"><input type="checkbox" data-gm="${m}" ${mk.includes(m) ? 'checked' : ''} ${g.markets ? '' : 'disabled'}>${l}</label>`).join('')}</div></div>
-          <div class="field"><label>Sources</label><div data-gseg="sources"></div></div>
-          <div class="field"><label>Repeat after</label><div data-gseg="cooldown_s"></div></div>
-          <div class="field"><label data-tip="Pre-match arbitrage on this game.">Arbitrage</label><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${sw('gArb-' + k, g.arb_enabled)}<span class="muted">Smallest return</span><input class="input" type="number" data-gf="arb_min_profit_pct" step="0.5" placeholder="${a.min_profit_pct}" value="${g.arb_min_profit_pct ?? ''}" style="width:90px">%</div></div>
-          <div class="field"><label></label><div><button class="btn ghost" data-greset="${esc(k)}">${ic('restart_alt')}Use general settings</button></div></div>
-        </div></details>`;
+
+    // ---------------------------------------------------------------- numbers + actions
+    function drawTop() {
+      const linked = s.linked, on = s.enabled, last = s.log[0];
+      const lamp = !linked ? 'bad' : on ? 'ok pulse' : 'warn';
+      P.set('tgS1', `<span class="lamp ${lamp}"></span>${!linked ? 'Not linked' : on ? 'Sending' : 'Paused'}`, s.bot?.username ? `@${esc(s.bot.username)}` : s.bot?.error ? `<span class="down">${esc(s.bot.error)}</span>` : 'no bot yet');
+      P.set('tgS2', linked ? `<span style="font-size:22px">@${esc(s.linked_as || '')}</span>` : '<span class="faint">-</span>', linked ? 'linked' : 'press Start in the bot');
+      P.set('tgS3', String(s.log.length), s.log.filter((m) => !m.ok).length ? `<span class="down">${s.log.filter((m) => !m.ok).length} failed</span>` : 'all delivered');
+      P.set('tgS4', last ? `<span style="font-size:22px">${esc(SE.fmtAgo(last.ts_ms))}</span>` : '<span class="faint">-</span>', last ? esc(last.kind) : 'nothing yet');
+      P.set('tgS5', String(s.watch.length), s.watch.length === 1 ? 'match' : 'matches');
+      const acts = linked
+        ? `<button class="btn" id="tgTest">${ic('send')}Test</button>` + (on ? `<button class="btn danger" id="tgPause">${ic('pause')}Pause</button>` : `<button class="btn primary" id="tgResume">${ic('play_arrow')}Resume</button>`)
+        : (s.token_set ? `<a class="btn primary" href="${esc(s.link_url)}" target="_blank" rel="noopener">${SE.tgLogo(16)}Open in Telegram</a>` : '');
+      const host = $('#tgActs');
+      if (host.dataset.h !== acts) {
+        host.dataset.h = acts;
+        host.style.display = 'inline-flex'; host.style.gap = '8px';
+        host.innerHTML = acts;
+        $('#tgTest')?.addEventListener('click', async () => { try { await api('/telegram/test', { method: 'POST' }); SE.toast('Test sent'); load(); } catch (e) { SE.toast(e.message, 6000); } });
+        $('#tgPause')?.addEventListener('click', () => save({ enabled: false }, 'Paused'));
+        $('#tgResume')?.addEventListener('click', () => save({ enabled: true }, 'Resumed'));
+      }
     }
-    function gameGroup(title, keys) {
-      const nOff = keys.filter((k) => !gameOf(k).enabled).length;
-      return `<div class="sn-row" style="margin:18px 0 4px">${esc(title)} <span class="faint">${nOff ? nOff + ' off' : 'all on'}</span></div>
-        <div style="display:flex;gap:8px;margin-bottom:6px"><button class="btn ghost" data-gall="${title === 'Sports' ? 'sports' : 'games'}:1">All on</button><button class="btn ghost" data-gall="${title === 'Sports' ? 'sports' : 'games'}:0">All off</button></div>${keys.map(gameRow).join('')}`;
-    }
-    function wireGames() {
-      const gs = (k) => $(`details[data-g="${k}"]`);
-      $$('details.tg-game').forEach((d) => {
-        const k = d.dataset.g, g = gameOf(k);
-        d.addEventListener('toggle', () => (d.open ? openGames.add(k) : openGames.delete(k)));
-        // Clicks on the switch must not fold the row.
-        $('summary label.switch', d).addEventListener('click', (e) => e.stopPropagation());
-        $('#gOn-' + k).addEventListener('change', (e) => save({ odds: { games: { [k]: { enabled: e.target.checked } } } }, SE.sportName(k) + (e.target.checked ? ' alerts on' : ' alerts off')));
-        $('#gArb-' + k).addEventListener('change', (e) => save({ odds: { games: { [k]: { arb_enabled: e.target.checked } } } }));
-        $$('[data-gf]', d).forEach((i) => i.addEventListener('change', () => save({ odds: { games: { [k]: { [i.dataset.gf]: i.value === '' ? null : +i.value } } } })));
-        $('[data-gsame="markets"]', d).addEventListener('change', (e) => save({ odds: { games: { [k]: { markets: e.target.checked ? null : [...s.odds.markets] } } } }));
-        $$('[data-gm]', d).forEach((c) => c.addEventListener('change', () => save({ odds: { games: { [k]: { markets: $$('[data-gm]', d).filter((x) => x.checked).map((x) => x.dataset.gm) } } } })));
-        SE.seg($('[data-gseg="sources"]', d), [['', 'Same'], ['all', 'All'], ['books', 'Bookmakers'], ['predictions', 'Polymarket + Kalshi']], g.sources || '', (v) => save({ odds: { games: { [k]: { sources: v || null } } } }));
-        SE.seg($('[data-gseg="cooldown_s"]', d), [['', 'Same'], [30, '30 s'], [60, '1 min'], [300, '5 min'], [900, '15 min']], g.cooldown_s ?? '', (v) => save({ odds: { games: { [k]: { cooldown_s: v === '' ? null : +v } } } }));
-      });
-      $$('[data-greset]').forEach((b) => b.addEventListener('click', () => save({ odds: { games: { [b.dataset.greset]: { ...gdef } } } }, 'Using general settings')));
-      $$('[data-gall]').forEach((b) => b.addEventListener('click', () => {
-        const [grp, on] = b.dataset.gall.split(':');
-        const keys = (grp === 'sports' ? SE.SPORTS : SE.GAMES).map((x) => x[0]);
-        save({ odds: { games: Object.fromEntries(keys.map((k) => [k, { enabled: on === '1' }])) } }, on === '1' ? 'All on' : 'All off');
-      }));
-    }
-    function draw() {
-      const o = s.odds, a = s.arbs;
-      $('#tgChip').innerHTML = s.linked ? `<span class="chip ok">${ic('check_circle')}Linked${s.linked_as ? ' as @' + esc(s.linked_as) : ''}</span>` : '<span class="chip bad">Not linked</span>';
-      const bot = s.bot?.username ? `<a href="${esc(s.bot_url)}" target="_blank" rel="noopener">@${esc(s.bot.username)}</a> <span class="chip ok">Running</span>` : s.bot?.error ? `<span class="chip bad">${esc(s.bot.error)}</span>` : '<span class="muted">Checking</span>';
-      $('#tgBody').innerHTML = `<div class="grid g-main"><div>
-        ${P.sec('link', 'Connection', `
-          <div class="field"><label>Bot</label><div>${bot}</div></div>
-          <div class="field"><label data-tip="From @BotFather. Stored in telegram.json next to the database, never in the code.">Bot token</label><div style="display:flex;gap:8px"><input class="input mono" id="tgTok" placeholder="${esc(s.token_hint || 'Paste the token from @BotFather')}" autocomplete="off"><button class="btn" id="tgTokS">${ic('save')}Save</button></div></div>
-          <div class="field"><label data-tip="Your own Telegram username. When you send /start to the bot from this account it links automatically.">Your handle</label><div style="display:flex;gap:8px"><input class="input" id="tgH" placeholder="@yourname" value="${s.handle ? '@' + esc(s.handle) : ''}"><button class="btn" id="tgHS">${ic('save')}Save</button></div></div>
-          <div class="field"><label>Your account</label><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${s.linked
-            ? `<span class="chip ok">@${esc(s.linked_as || '')}</span><button class="btn" id="tgTest">${ic('send')}Send test</button><button class="btn ghost" id="tgUn">${ic('link_off')}Unlink</button>`
-            : `<a class="btn primary" href="${esc(s.link_url)}" target="_blank" rel="noopener">${SE.tgLogo(16)}Open in Telegram</a><span class="muted">then press Start</span>`}</div></div>
-          <p class="note" style="margin-top:14px">Open in Telegram links this install to the account you press Start with. Or save your handle and send /start to the bot. Only that chat gets alerts and answers. In the chat: /status, /arbs, /watching, /pause, /resume.</p>`)}
-        ${P.sec('notifications', 'Alerts', `
-          <div class="field"><label>Send alerts</label><div>${sw('tgOn', s.enabled)}</div></div>
-          <div class="field"><label data-tip="A message when a price moves on a watched match. Turn the bell on for a match on the Matches page or the match page.">Odds moves</label><div>${sw('tgOdds', o.enabled)}</div></div>
-          <div class="field"><label>Which matches</label><div id="tgWo"></div></div>
-          <div class="field"><label data-tip="Change in implied probability, in percentage points. 2.00 to 1.90 is 2.6 points.">Smallest move</label><div style="display:flex;gap:8px;align-items:center"><input class="input" type="number" id="tgMin" min="0.5" step="0.5" value="${o.min_move_pts}" style="width:90px">points</div></div>
-          <div class="field"><label>Markets</label><div style="display:flex;gap:16px;flex-wrap:wrap">${[['1x2', '1X2 / winner'], ['total', 'Total'], ['handicap', 'Handicap'], ['btts', 'Both score']].map(([k, l]) => `<label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" data-mk="${k}" ${o.markets.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}</div></div>
-          <div class="field"><label>Sources</label><div id="tgSrc"></div></div>
-          <div class="field"><label data-tip="The same price on the same source does not alert again within this time.">Repeat after</label><div id="tgCd"></div></div>
-          <div class="field"><label data-tip="Pre-match arbitrage from the Arbitrage Scout, checked every 30 s. The same one is sent again after an hour or when it gets a point better.">Arbitrage</label><div>${sw('tgArb', a.enabled)}</div></div>
-          <div class="field"><label>Smallest return</label><div style="display:flex;gap:8px;align-items:center"><input class="input" type="number" id="tgArbMin" step="0.5" value="${a.min_profit_pct}" style="width:90px">%<span class="muted" style="margin-left:18px">Stake for the split $</span><input class="input" type="number" id="tgStake" min="1" step="10" value="${a.stake}" style="width:100px"></div></div>
-          <div class="field"><label data-tip="Paper bot activity, checked every minute. Paper money only. On by default; the other alert types are off by default.">Paper bot activity</label><div>${sw('tgPaper', s.paper.enabled)}</div></div>
-          <div class="field"><label data-tip="Each snipe trade when it closes (bought and sold within minutes).">· Snipe trades</label><div>${sw('tgPaperT', s.paper.trades)}</div></div>
-          <div class="field"><label data-tip="Polymarket × Kalshi arbitrage: bought, sold early, paid out.">· Arbitrage positions</label><div>${sw('tgPaperA', s.paper.arbs)}</div></div>
-          <div class="field"><label data-tip="Current paper balances on Polymarket and Kalshi, and the arbitrage total, under every message.">· Standings</label><div>${sw('tgPaperS', s.paper.standings)}</div></div>
-          <div class="field"><label data-tip="Games flagged on the Suspicious page. Thresholds are set there.">Suspicious matches</label><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">${sw('tgSus', s.suspicious?.enabled !== false)}<label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" id="tgSusA" ${s.suspicious?.activity !== false ? 'checked' : ''}>Heavily bet CS2 games</label><label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="checkbox" id="tgSusL" ${s.suspicious?.lines !== false ? 'checked' : ''}>Pre-match line moves</label><a href="#/suspicious" class="muted">Thresholds</a></div></div>`)}
-        ${P.sec('sports_esports', 'By game', `
-          <p class="note" style="margin:0 0 12px">Each game can follow the settings above or use its own. Leave a box empty or on <i>Same</i> to use the general value. A game switched off is silent, bell-watched matches included.</p>
-          ${gameGroup('Sports', SE.SPORTS.map((x) => x[0]))}${gameGroup('E-sports', SE.GAMES.map((x) => x[0]))}`)}
-      </div><div>
-        ${P.sec('notifications_active', 'Watched matches', s.watch.length ? `<div>${s.watch.map((w) => `<div class="field" style="grid-template-columns:minmax(0,1fr) auto"><a href="#/match/${w.id}">${SE.vs(w.home, w.away)} <span class="faint">${w.start_ms ? SE.fmtKick(w.start_ms) : ''}</span></a>${SE.bell(w.id)}</div>`).join('')}</div>` : `<div class="empty">${ic('notifications_off')}No matches yet. Press the bell on a match.</div>`)}
-        ${P.sec('history', 'Sent', s.log.length ? s.log.map((m) => `<div class="tg-msg ${m.ok ? '' : 'err'}"><div class="faint">${SE.fmtTime(m.ts_ms)} · ${esc(m.kind)}${m.ok ? '' : ' · failed: ' + esc(m.error || '')}</div><div>${m.text.replace(/\n/g, '<br>')}</div></div>`).join('') : '<div class="empty">Nothing sent yet.</div>')}
-      </div></div>`;
-      SE.paintBells();
-      wireGames();
-      SE.seg($('#tgWo'), [['true', 'Watched only'], ['false', 'Every match in scope', 'Every match Swifteye shows. Can be a lot of messages.']], String(o.watched_only), (v) => save({ odds: { watched_only: v === 'true' } }));
-      SE.seg($('#tgSrc'), [['all', 'All'], ['books', 'Bookmakers'], ['predictions', 'Polymarket + Kalshi']], o.sources, (v) => save({ odds: { sources: v } }));
-      SE.seg($('#tgCd'), [[30, '30 s'], [60, '1 min'], [300, '5 min'], [900, '15 min']], o.cooldown_s, (v) => save({ odds: { cooldown_s: +v } }));
+
+    // ---------------------------------------------------------------- messages
+    function drawList() {
+      const o = s.odds, a = s.arbs, b = s.bot_alerts || {}, pa = s.paper, su = s.suspicious || {};
+      const yes = (v) => (v ? 'on' : 'off');
+      const opt = (label, ctl, tip = '') => `<div class="opt"><span ${tip ? `data-tip="${esc(tip)}"` : ''}>${label}</span>${ctl}</div>`;
+      const item = (key, icon, name, on, sub, opts) =>
+        `<div class="li"><span class="tile ${on ? 'on' : ''}">${ic(icon)}</span><div class="main"><div class="nm">${name}</div><div class="sb">${sub}</div></div>` +
+        `<div class="end"><button class="more-b" data-open="${key}" data-tip="Options">${ic(open.has(key) ? 'expand_less' : 'tune')}</button>${sw('t-' + key, on)}</div></div>` +
+        (open.has(key) ? `<div class="li-opts">${opts}</div>` : '');
+      $('#tgList').innerHTML =
+        item('bot', 'smart_toy', 'Snipe bot trades', b.enabled !== false, `buys ${yes(b.buys !== false)} · sales ${yes(b.sells !== false)} · charts ${yes(b.charts !== false)}`,
+          opt('Buys', sw('bBuys', b.buys !== false)) + opt('Sales', sw('bSells', b.sells !== false)) + opt('Charts', sw('bCharts', b.charts !== false), 'The trade\'s price chart and the balance chart with each sale.')) +
+        item('odds', 'swap_vert', 'Odds moves', o.enabled, `${o.watched_only ? 'watched matches' : 'every match'} · ${o.min_move_pts}+ points`,
+          opt('Matches', '<div id="tgWo"></div>') +
+          opt('Smallest move', SE.num({ id: 'tgMin', value: o.min_move_pts, step: 0.5, min: 0.5, suf: 'pts', w: 96 }), 'Change in implied probability, in percentage points.') +
+          opt('Markets', `<span class="checks">${MARKETS.map(([k, l]) => `<label><input type="checkbox" data-mk="${k}" ${o.markets.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}</span>`) +
+          opt('Sources', '<div id="tgSrc"></div>') +
+          opt('Repeat after', '<div id="tgCd"></div>', 'The same price on the same source does not alert again within this time.')) +
+        item('arb', 'currency_exchange', 'Arbitrage', a.enabled, `${a.min_profit_pct}%+ return`,
+          opt('Smallest return', SE.num({ id: 'tgArbMin', value: a.min_profit_pct, step: 0.5, suf: '%', w: 86 })) +
+          opt('Stake for the split', SE.num({ id: 'tgStake', value: a.stake, step: 10, min: 1, pre: '$', w: 96 }))) +
+        item('sus', 'gpp_maybe', 'Suspicious matches', su.enabled !== false, `CS2 betting ${yes(su.activity !== false)} · line moves ${yes(su.lines !== false)}`,
+          opt('Heavily bet CS2 games', sw('tgSusA', su.activity !== false)) + opt('Pre-match line moves', sw('tgSusL', su.lines !== false)) + opt('Thresholds', '<a href="#/suspicious">Suspicious page</a>')) +
+        item('paper', 'history_edu', 'Rule-picker paper record', pa.enabled, `trades ${yes(pa.trades)} · arbitrage ${yes(pa.arbs)}`,
+          opt('Closed trades', sw('tgPaperT', pa.trades)) + opt('Paper arbitrage', sw('tgPaperA', pa.arbs)) + opt('Balances under each message', sw('tgPaperS', pa.standings)));
       const on = (id, fn) => $('#' + id)?.addEventListener('change', (e) => fn(e.target));
-      on('tgOn', (t) => save({ enabled: t.checked }, t.checked ? 'Alerts on' : 'Alerts paused'));
-      on('tgOdds', (t) => save({ odds: { enabled: t.checked } }));
-      on('tgArb', (t) => save({ arbs: { enabled: t.checked } }));
-      on('tgPaper', (t) => save({ paper: { enabled: t.checked } }));
+      on('t-bot', (t) => save({ bot_alerts: { enabled: t.checked } }));
+      on('t-odds', (t) => save({ odds: { enabled: t.checked } }));
+      on('t-arb', (t) => save({ arbs: { enabled: t.checked } }));
+      on('t-sus', (t) => save({ suspicious: { enabled: t.checked } }));
+      on('t-paper', (t) => save({ paper: { enabled: t.checked } }));
+      on('bBuys', (t) => save({ bot_alerts: { buys: t.checked } }));
+      on('bSells', (t) => save({ bot_alerts: { sells: t.checked } }));
+      on('bCharts', (t) => save({ bot_alerts: { charts: t.checked } }));
       on('tgPaperT', (t) => save({ paper: { trades: t.checked } }));
       on('tgPaperA', (t) => save({ paper: { arbs: t.checked } }));
       on('tgPaperS', (t) => save({ paper: { standings: t.checked } }));
-      on('tgSus', (t) => save({ suspicious: { enabled: t.checked } }));
       on('tgSusA', (t) => save({ suspicious: { activity: t.checked } }));
       on('tgSusL', (t) => save({ suspicious: { lines: t.checked } }));
       on('tgMin', (t) => save({ odds: { min_move_pts: +t.value || 3 } }));
       on('tgArbMin', (t) => save({ arbs: { min_profit_pct: +t.value || 0 } }));
       on('tgStake', (t) => save({ arbs: { stake: +t.value || 100 } }));
       $$('[data-mk]').forEach((c) => c.addEventListener('change', () => save({ odds: { markets: $$('[data-mk]').filter((x) => x.checked).map((x) => x.dataset.mk) } })));
+      if ($('#tgWo')) {
+        SE.seg($('#tgWo'), [['true', 'Watched'], ['false', 'All', 'Every match Swifteye shows. Can be a lot.']], String(o.watched_only), (v) => save({ odds: { watched_only: v === 'true' } }));
+        SE.seg($('#tgSrc'), [['all', 'All'], ['books', 'Bookmakers'], ['predictions', 'Prediction markets']], o.sources, (v) => save({ odds: { sources: v } }));
+        SE.seg($('#tgCd'), [[30, '30 s'], [60, '1 min'], [300, '5 min'], [900, '15 min']], o.cooldown_s, (v) => save({ odds: { cooldown_s: +v } }));
+      }
+      $$('[data-open]').forEach((bt) => bt.addEventListener('click', () => {
+        const k = bt.dataset.open;
+        if (open.has(k)) open.delete(k); else open.add(k);
+        SE.setPref('tgOpen', [...open]);
+        drawList();
+      }));
+    }
+
+    // ---------------------------------------------------------------- ask the bot
+    const ASK = [['/status', 'Status', 'monitor_heart'], ['/open', 'Open', 'hourglass_top'], ['/trades', 'Trades', 'receipt_long'], ['/run', 'Test run', 'timer'], ['/projected 24h', 'Projection', 'trending_up'], ['/log', 'Orders', 'list_alt']];
+    function drawAsk() {
+      $('#tgAsk').innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap">` + ASK.map(([c, l, i]) => `<button class="btn" data-ask="${esc(c)}" data-tip="${esc(c)}">${ic(i)}${l}</button>`).join('') +
+        `<button class="btn ghost" data-push="/balance" data-tip="Sends the real balance chart to the chat.">${ic('show_chart')}Send chart</button></div>`;
+      $$('[data-ask]').forEach((b) => b.addEventListener('click', async () => {
+        const cmd = b.dataset.ask;
+        $('#tgPrev').innerHTML = `<div class="answer"><span class="skeleton">Loading the answer</span></div>`;
+        try {
+          const r = await api('/telegram/preview?cmd=' + encodeURIComponent(cmd));
+          $('#tgPrev').innerHTML = `<div class="answer">${r.text.replace(/\n/g, '<br>')}<div class="foot"><span class="mono">${esc(cmd)}</span><button class="btn sm" id="tgPush" ${s.linked ? '' : 'disabled'}>${ic('send')}Send to Telegram</button></div></div>`;
+          $('#tgPush')?.addEventListener('click', () => push(cmd));
+        } catch (e) { $('#tgPrev').innerHTML = `<div class="answer down">${esc(e.message)}</div>`; }
+      }));
+      $$('[data-push]').forEach((b) => b.addEventListener('click', () => push(b.dataset.push)));
+    }
+    async function push(cmd) {
+      try { await api('/telegram/push', { body: { cmd } }); SE.toast('Sent'); load(); } catch (e) { SE.toast(e.message, 7000); }
+    }
+
+    // ---------------------------------------------------------------- sent, watched
+    const opened = new Set();
+    function drawFeed() {
+      $('#tgFeed').innerHTML = s.log.length
+        ? s.log.slice(0, 60).map((m, i) => `<div class="msg ${m.ok ? '' : 'err'} ${opened.has(m.ts_ms) ? 'open' : ''}" data-i="${m.ts_ms}"><div class="top"><span>${esc(m.kind)}</span><span>${SE.fmtTime(m.ts_ms).slice(0, 5)}</span></div><div class="body">${m.ok ? '' : `Failed: ${esc(m.error || '')}<br>`}${m.text.replace(/\n/g, '<br>')}</div></div>`).join('')
+        : `<div class="empty">${ic('chat_bubble')}Nothing sent yet</div>`;
+      $$('#tgFeed .msg').forEach((x) => x.addEventListener('click', () => { const k = +x.dataset.i; if (opened.has(k)) opened.delete(k); else opened.add(k); x.classList.toggle('open'); }));
+      $('#tgWatch').innerHTML = s.watch.length
+        ? s.watch.map((w) => `<div class="li"><span class="tile">${ic('sports_score')}</span><div class="main"><div class="nm"><a href="#/match/${w.id}">${SE.vs(w.home, w.away)}</a></div><div class="sb">${w.start_ms ? SE.fmtKick(w.start_ms) : ''}</div></div><div class="end">${SE.bell(w.id)}</div></div>`).join('')
+        : `<div class="empty">${ic('notifications_off')}No watched matches</div>`;
+      SE.paintBells();
+    }
+
+    // ---------------------------------------------------------------- by sport
+    function gameRow(k) {
+      const g = gameOf(k), o = s.odds, a = s.arbs;
+      const mk = g.markets || o.markets;
+      const sub = !g.enabled ? 'off' : custom(g) ? `own settings · ${g.min_move_pts ?? o.min_move_pts}+ points` : 'general settings';
+      return `<details class="tg-game" data-g="${esc(k)}" ${openGames.has(k) ? 'open' : ''}>
+        <summary class="li" style="cursor:pointer;list-style:none"><span class="tile ${g.enabled ? 'on' : ''}">${SE.sportIcon(k)}</span><div class="main"><div class="nm">${esc(SE.sportName(k))}</div><div class="sb">${sub}</div></div><div class="end">${sw('gOn-' + k, g.enabled)}</div></summary>
+        <div class="li-opts">
+          <div class="opt"><span>Smallest move</span>${SE.num({ attr: 'data-gf="min_move_pts"', value: g.min_move_pts ?? '', step: 0.5, min: 0.1, placeholder: o.min_move_pts, suf: 'pts', w: 96 })}</div>
+          <div class="opt"><span>Markets</span><span class="checks"><label><input type="checkbox" data-gsame="markets" ${g.markets ? '' : 'checked'}>Same</label>${MARKETS.map(([m, l]) => `<label style="${g.markets ? '' : 'opacity:.45'}"><input type="checkbox" data-gm="${m}" ${mk.includes(m) ? 'checked' : ''} ${g.markets ? '' : 'disabled'}>${l}</label>`).join('')}</span></div>
+          <div class="opt"><span>Sources</span><div data-gseg="sources"></div></div>
+          <div class="opt"><span>Repeat after</span><div data-gseg="cooldown_s"></div></div>
+          <div class="opt"><span>Arbitrage</span><span style="display:flex;gap:10px;align-items:center">${SE.num({ attr: 'data-gf="arb_min_profit_pct"', value: g.arb_min_profit_pct ?? '', step: 0.5, placeholder: a.min_profit_pct, suf: '%', w: 86 })}${sw('gArb-' + k, g.arb_enabled)}</span></div>
+          <div class="opt"><span></span><button class="btn sm ghost" data-greset="${esc(k)}">${ic('restart_alt')}Use general settings</button></div>
+        </div></details>`;
+    }
+    function drawGames() {
+      const all = [...SE.SPORTS, ...SE.GAMES].map((x) => x[0]);
+      const off = all.filter((k) => !gameOf(k).enabled).length, own = all.filter((k) => gameOf(k).enabled && custom(gameOf(k))).length;
+      $('#tgGamesT').innerHTML = gamesOpen ? `${ic('expand_less')}Hide` : `${ic('expand_more')}${off ? off + ' off' : 'All on'}${own ? ` · ${own} custom` : ''}`;
+      if (!gamesOpen) { $('#tgGames').innerHTML = ''; return; }
+      const grp = (title, keys, id) => `<div style="display:flex;gap:8px;align-items:center;margin:14px 0 2px"><b>${esc(title)}</b><span style="margin-left:auto"></span><button class="btn sm ghost" data-gall="${id}:1">All on</button><button class="btn sm ghost" data-gall="${id}:0">All off</button></div>${keys.map(gameRow).join('')}`;
+      $('#tgGames').innerHTML = grp('Sports', SE.SPORTS.map((x) => x[0]), 'sports') + grp('E-sports', SE.GAMES.map((x) => x[0]), 'games');
+      $$('details.tg-game').forEach((d) => {
+        const k = d.dataset.g, g = gameOf(k);
+        d.addEventListener('toggle', () => (d.open ? openGames.add(k) : openGames.delete(k)));
+        $('summary label.switch', d).addEventListener('click', (e) => e.stopPropagation());
+        $('#gOn-' + k).addEventListener('change', (e) => save({ odds: { games: { [k]: { enabled: e.target.checked } } } }, SE.sportName(k) + (e.target.checked ? ' on' : ' off')));
+        $('#gArb-' + k).addEventListener('change', (e) => save({ odds: { games: { [k]: { arb_enabled: e.target.checked } } } }));
+        $$('[data-gf]', d).forEach((i) => i.addEventListener('change', () => save({ odds: { games: { [k]: { [i.dataset.gf]: i.value === '' ? null : +i.value } } } })));
+        $('[data-gsame="markets"]', d).addEventListener('change', (e) => save({ odds: { games: { [k]: { markets: e.target.checked ? null : [...s.odds.markets] } } } }));
+        $$('[data-gm]', d).forEach((c) => c.addEventListener('change', () => save({ odds: { games: { [k]: { markets: $$('[data-gm]', d).filter((x) => x.checked).map((x) => x.dataset.gm) } } } })));
+        SE.seg($('[data-gseg="sources"]', d), [['', 'Same'], ['all', 'All'], ['books', 'Bookmakers'], ['predictions', 'Prediction markets']], g.sources || '', (v) => save({ odds: { games: { [k]: { sources: v || null } } } }));
+        SE.seg($('[data-gseg="cooldown_s"]', d), [['', 'Same'], [30, '30 s'], [60, '1 min'], [300, '5 min'], [900, '15 min']], g.cooldown_s ?? '', (v) => save({ odds: { games: { [k]: { cooldown_s: v === '' ? null : +v } } } }));
+      });
+      $$('[data-greset]').forEach((b) => b.addEventListener('click', () => save({ odds: { games: { [b.dataset.greset]: { ...gdef } } } }, 'Using general settings')));
+      $$('[data-gall]').forEach((b) => b.addEventListener('click', () => {
+        const [grp2, on] = b.dataset.gall.split(':');
+        const keys = (grp2 === 'sports' ? SE.SPORTS : SE.GAMES).map((x) => x[0]);
+        save({ odds: { games: Object.fromEntries(keys.map((k) => [k, { enabled: on === '1' }])) } }, on === '1' ? 'All on' : 'All off');
+      }));
+    }
+    $('#tgGamesT').addEventListener('click', () => { gamesOpen = !gamesOpen; drawGames(); });
+
+    // ---------------------------------------------------------------- connection
+    function drawConn() {
+      if ($('#tgConn').contains(document.activeElement)) return;
+      const row = (icon, name, sub, end) => `<div class="li"><span class="tile">${ic(icon)}</span><div class="main"><div class="nm">${name}</div>${sub ? `<div class="sb">${sub}</div>` : ''}</div><div class="end">${end}</div></div>`;
+      $('#tgConn').innerHTML =
+        row('smart_toy', 'Bot', s.bot?.username ? `@${esc(s.bot.username)}` : s.bot?.error ? `<span class="down">${esc(s.bot.error)}</span>` : 'none yet',
+          `<input class="input mono" id="tgTok" placeholder="${esc(s.token_hint || 'Token from @BotFather')}" autocomplete="off" style="width:220px"><button class="btn" id="tgTokS">${ic('save')}</button>`) +
+        row('alternate_email', 'Your handle', 'sending /start from it links the chat',
+          `<input class="input" id="tgH" placeholder="@yourname" value="${s.handle ? '@' + esc(s.handle) : ''}" style="width:160px"><button class="btn" id="tgHS">${ic('save')}</button>`) +
+        row('schedule', 'Times in messages', s.tz === 'utc' ? 'UTC' : 'Norway (CET, CEST in summer)', '<div id="tgTz"></div>') +
+        row('chat', 'Chat', s.linked ? `@${esc(s.linked_as || '')}` : 'not linked',
+          s.linked ? `<button class="btn ghost" id="tgUn">${ic('link_off')}Unlink</button>` : `<a class="btn primary" href="${esc(s.link_url)}" target="_blank" rel="noopener">${SE.tgLogo(16)}Open in Telegram</a>`);
+      SE.seg($('#tgTz'), [['oslo', 'Norway'], ['utc', 'UTC']], s.tz === 'utc' ? 'utc' : 'oslo', (v) => save({ tz: v }, v === 'utc' ? 'Times in UTC' : 'Times in Norway time'));
       $('#tgTokS').addEventListener('click', () => save({ token: $('#tgTok').value.trim() }, 'Token saved'));
-      $('#tgHS').addEventListener('click', () => save({ handle: $('#tgH').value.trim() }, 'Handle saved. Now send /start to the bot.'));
-      $('#tgTest')?.addEventListener('click', async () => { try { await api('/telegram/test', { method: 'POST' }); SE.toast('Sent'); load(); } catch (e) { SE.toast(e.message); } });
+      $('#tgHS').addEventListener('click', () => save({ handle: $('#tgH').value.trim() }, 'Handle saved'));
       $('#tgUn')?.addEventListener('click', () => save({ unlink: true }, 'Unlinked'));
     }
-    async function load() {
-      const focused = document.activeElement?.closest?.('#tgBody input');
-      s = await api('/telegram');
-      if (!focused) draw();
+
+    function draw() {
+      drawTop();
+      const busy = document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName) && el.contains(document.activeElement);
+      const { log, ...rest } = s;
+      const sig = JSON.stringify(rest);
+      if (sig !== lastSig && !busy) { lastSig = sig; drawList(); drawGames(); drawConn(); }
+      drawFeed();
     }
+    async function load() {
+      try { s = await api('/telegram'); draw(); } catch (e) { if (!s) SE.toast(e.message, 6000); }
+    }
+    drawAsk();
     load();
     SE.every(5000, load);
   },
@@ -218,7 +310,7 @@ SE.pages.telegram = {
 SE.pages.arbs = {
   title: 'Arbitrage Scout',
   render(el) {
-    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake $<input class="input" id="aSt" type="number" min="1" step="10" value="${SE.pref('arbStake') || 100}" style="width:90px"></label><button class="btn" id="aHb">${ic('history')}History</button>`) +
+    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake ${SE.num({ id: 'aSt', min: 1, step: 10, value: SE.pref('arbStake') || 100, pre: '$', w: 96 })}</label><button class="btn" id="aHb">${ic('history')}History</button>`) +
       `<div class="panel" id="aHist" hidden><div class="sec-head" style="margin-bottom:10px"><h2>${ic('history')}Past arbitrage</h2><div class="tools"><span class="muted" id="aHn"></span></div></div><div id="aHt"></div></div>` +
       `<div class="src-filter" id="aBk"></div>` +
       P.stats(P.stat('aN', 'balance', 'Arbitrage now', 'Pre-match sets of bets that pay out more than they cost, whatever the result.', true), P.stat('aB', 'trending_up', 'Best return'), P.stat('aL', 'hourglass_bottom', 'Typical lifetime', 'Median time an arbitrage stayed open before closing on its own, from the live scan every 5 s. Ones that ended at kick-off or with a restart are left out.'), P.stat('aNear', 'near_me', 'Within 2% of one', 'Sets that cost up to 2% more than they pay: one price move away.')) +

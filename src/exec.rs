@@ -324,12 +324,15 @@ async fn pm_order_once(http: &reqwest::Client, c: &PmCreds, token: &str, buy: bo
     let prep_ms = crate::model::now_ms() - t_prep;
     let px = if buy { (price / tick).floor() * tick } else { (price / tick).ceil() * tick };
     let px = (px * 100.0).round() / 100.0; // cent prices: amounts keep 2 decimals
-    let n = shares.floor();
+    // Buys: whole shares. Sales: hundredths of a share, so everything bought can be sold (a buy
+    // filled under its limit returns a fraction more shares than ordered).
+    let n = if buy { shares.floor() } else { (shares * 100.0 + 1e-6).floor() / 100.0 };
     if n < 1.0 || !(0.01..=0.99).contains(&px) {
         bail!("order too small or price out of range ({n} @ {px})");
     }
-    let usdc = ((n * px) * 100.0).round() / 100.0;
-    let (maker_amount, taker_amount) = if buy { ((usdc * 1e6).round() as u64, (n * 1e6) as u64) } else { ((n * 1e6) as u64, (usdc * 1e6).round() as u64) };
+    // Dollars: cents on a buy; a sale of hundredths at a cent price needs 4 decimals.
+    let usdc = if buy { ((n * px) * 100.0).round() / 100.0 } else { ((n * px) * 1e4).round() / 1e4 };
+    let (maker_amount, taker_amount) = if buy { ((usdc * 1e6).round() as u64, (n * 1e6).round() as u64) } else { ((n * 1e6).round() as u64, (usdc * 1e6).round() as u64) };
     let o = PmOrder {
         salt: rand::random::<u32>() as u64,
         maker,
