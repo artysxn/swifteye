@@ -71,6 +71,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/bots/run/start", post(bots_run_start))
         .route("/bots/run/stop", post(bots_run_stop))
         .route("/bots/run/extend", post(bots_run_extend))
+        .route("/bots/run/bankroll", post(bots_run_bankroll))
         .route("/bots/run/chart", get(bots_run_chart))
         .route("/pm/api-from-key", post(pm_api_from_key))
         .route("/bots/test/{bot}", post(bots_test))
@@ -1247,10 +1248,29 @@ async fn bots_runs(State(app): S) -> Response {
     Json(tokio::task::spawn_blocking(move || crate::bots::runs(&app)).await.unwrap_or_default()).into_response()
 }
 
-/// Start a timed REAL test run of the snipe bot: {"hours": 4|8|9|16|24, "confirm": "REAL MONEY"}.
+/// The Polymarket cash now (None = not readable), to cap a real bankroll.
+async fn pm_cash_now(app: &Arc<App>) -> Option<f64> {
+    let pm = crate::pmacct::load(&app.db_path);
+    crate::exec::pm_cash(&crate::books::http_client(), &pm).await.ok()
+}
+
+/// Start a timed REAL test run of the snipe bot: {"hours": 4|8|9|16|24, "bankroll": 40, "confirm": "REAL MONEY"}.
 async fn bots_run_start(State(app): S, Json(b): Json<Value>) -> Response {
     let (h, conf) = (b["hours"].as_i64().unwrap_or(0), b["confirm"].as_str().unwrap_or("").to_string());
-    match tokio::task::spawn_blocking(move || crate::bots::start_run(&app, h, &conf)).await {
+    let bankroll = b["bankroll"].as_f64().unwrap_or(crate::bots::RUN_BANKROLL);
+    let cash = pm_cash_now(&app).await;
+    match tokio::task::spawn_blocking(move || crate::bots::start_run(&app, h, bankroll, cash, &conf)).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// Change the running test's real bankroll: {"bankroll": 60} (at most the account's cash).
+async fn bots_run_bankroll(State(app): S, Json(b): Json<Value>) -> Response {
+    let bankroll = b["bankroll"].as_f64().unwrap_or(0.0);
+    let cash = pm_cash_now(&app).await;
+    match tokio::task::spawn_blocking(move || crate::bots::set_run_bankroll(&app, bankroll, cash)).await {
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

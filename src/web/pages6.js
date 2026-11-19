@@ -154,7 +154,7 @@ SE.pages.bots = {
         : !sn.enabled
           ? `<button class="btn primary" data-a="on">${ic('power_settings_new')}Switch on</button>`
           : (run
-            ? `<button class="btn" data-a="extend">${ic('more_time')}Extend</button><button class="btn danger" data-a="stoprun">${ic('stop_circle')}End test run</button>`
+            ? `<button class="btn" data-a="amount">${ic('payments')}Amount</button><button class="btn" data-a="extend">${ic('more_time')}Extend</button><button class="btn danger" data-a="stoprun">${ic('stop_circle')}End test run</button>`
             : sn.real
               ? `<button class="btn" data-a="paper">${ic('undo')}Back to paper</button>`
               : `<button class="btn" data-a="run" ${needs}>${ic('timer')}Real test run</button>`) +
@@ -177,8 +177,9 @@ SE.pages.bots = {
         onOk: async () => { try { await api('/bots/real/snipe', { body: { real: true, confirm: 'REAL MONEY' } }); SE.toast('Real money on', 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } }),
       run: () => {
         let hours = 9;
-        ask({ danger: true, icon: 'timer', title: 'Start a real test run?', text: '$50 · $15 a trade · stops after −$15, two losses in a row, or fills clearly worse than paper. Safe set only; the wider set and a paper twin of every real trade run on the paper wallet.', extra: '<div id="bpRunH"></div>', type: 'REAL MONEY', ok: 'Start',
-          onOk: async () => { try { await api('/bots/run/start', { body: { hours, confirm: 'REAL MONEY' } }); SE.toast(`${hours} h test run started`, 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } });
+        ask({ danger: true, icon: 'timer', title: 'Start a real test run?', text: 'A trade is 30% of the amount. It stops itself after losing three eighths of it, two losses in a row, or fills clearly worse than paper. Safe set only; the paper wallet trades every move beside it.',
+          extra: `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${SE.num({ id: 'bpRunB', value: 40, step: 5, min: 35, pre: '$', w: 110, tip: 'Real money for this run. At most the cash on your Polymarket account.' })}<div id="bpRunH"></div></div>`, type: 'REAL MONEY', ok: 'Start',
+          onOk: async () => { try { await api('/bots/run/start', { body: { hours, bankroll: +$('#bpRunB').value || 40, confirm: 'REAL MONEY' } }); SE.toast(`${hours} h test run started`, 6000); setView('real'); } catch (e) { SE.toast(e.message, 7000); } } });
         SE.seg($('#bpRunH'), [[4, '4 h'], [8, '8 h'], [9, '9 h', 'One whole trading window (12:00 to 21:00 UTC).'], [16, '16 h'], [24, '24 h']], hours, (v) => { hours = +v; });
       },
       extend: () => {
@@ -187,6 +188,9 @@ SE.pages.bots = {
           onOk: async () => { try { await api('/bots/run/extend', { body: { hours: h } }); SE.toast(`Extended by ${h} h`); load(); } catch (e) { SE.toast(e.message, 6000); } } });
         SE.seg($('#bpExtH'), [[1, '1 h'], [2, '2 h'], [4, '4 h'], [8, '8 h']], h, (v) => { h = +v; });
       },
+      amount: () => ask({ icon: 'payments', title: 'Real money for this run', text: 'A trade is 30% of it. At most the cash on your Polymarket account.',
+        extra: SE.num({ id: 'bpRunB2', value: d.settings.snipe.bankroll, step: 5, min: 35, pre: '$', w: 110 }), ok: 'Save',
+        onOk: async () => { try { await api('/bots/run/bankroll', { body: { bankroll: +$('#bpRunB2').value } }); SE.toast('Amount saved'); load(); } catch (e) { SE.toast(e.message, 7000); } } }),
       stoprun: () => ask({ danger: true, icon: 'stop_circle', title: 'End the test run now?', text: 'Back to paper. Open trades still sell.', ok: 'End run',
         onOk: async () => { try { await api('/bots/run/stop', { method: 'POST' }); SE.toast('Test run ended'); load(); } catch (e) { SE.toast(e.message, 6000); } } }),
     };

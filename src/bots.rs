@@ -754,8 +754,49 @@ pub async fn accounts(app: Arc<App>) -> Value {
     })
 }
 
-/// Start a timed real test run: $`bankroll` of the Polymarket account, ~$`stake` a trade.
-pub fn start_run(app: &App, hours: i64, confirm: &str) -> anyhow::Result<Value> {
+/// The real side's stake a trade and the loss that ends the run, from its bankroll: 30% a trade
+/// ($12 of $40; the bot's $10 minimum order fits) and three eighths lost ($15 of $40).
+pub fn run_stake(bankroll: f64) -> f64 {
+    (0.30 * bankroll * 100.0).round() / 100.0
+}
+pub fn run_loss(bankroll: f64) -> f64 {
+    (0.375 * bankroll * 100.0).round() / 100.0
+}
+/// The least real bankroll (30% of it must reach the $10 minimum order) and the default.
+pub const RUN_MIN_BANKROLL: f64 = 35.0;
+pub const RUN_BANKROLL: f64 = 40.0;
+
+/// A real bankroll must fit the account: at most the Polymarket cash (as just read) less the reserve.
+fn check_bankroll(bankroll: f64, cash: Option<f64>, reserve: f64) -> anyhow::Result<()> {
+    anyhow::ensure!(bankroll >= RUN_MIN_BANKROLL, "at least ${RUN_MIN_BANKROLL:.0} (a trade is 30% of it and an order needs $10)");
+    let Some(cash) = cash else { anyhow::bail!("could not read the Polymarket balance, so the amount cannot be checked against it") };
+    let most = (cash - reserve).max(0.0);
+    anyhow::ensure!(bankroll <= most + 1e-9, "at most ${most:.2}: the account holds ${cash:.2} and ${reserve:.0} stays in reserve");
+    Ok(())
+}
+
+/// Change the real bankroll of the running test (stake and loss stop follow it).
+pub fn set_run_bankroll(app: &App, bankroll: f64, cash: Option<f64>) -> anyhow::Result<Value> {
+    let mut s = settings();
+    anyhow::ensure!(s.run.is_some(), "no test run going");
+    check_bankroll(bankroll, cash, s.pm_reserve)?;
+    if let Some(r) = s.run.as_mut() {
+        r.bankroll = bankroll;
+        r.stake = run_stake(bankroll);
+    }
+    s.snipe.c.bankroll = bankroll;
+    s.snipe.c.max_trade = run_stake(bankroll);
+    s.snipe.c.max_open = bankroll;
+    s.snipe.c.daily_loss = run_loss(bankroll);
+    save(app, &s)?;
+    *SET.write() = s;
+    event(format!("snipe: test run bankroll set to ${bankroll:.0} (${:.2} a trade, stops after -${:.2})", run_stake(bankroll), run_loss(bankroll)));
+    Ok(view(app))
+}
+
+/// Start a timed real test run: $`bankroll` of the Polymarket account (at most its cash),
+/// 30% of it a trade.
+pub fn start_run(app: &App, hours: i64, bankroll: f64, cash: Option<f64>, confirm: &str) -> anyhow::Result<Value> {
     anyhow::ensure!([4, 8, 9, 16, 24].contains(&hours), "4, 8, 9, 16 or 24 hours");
     anyhow::ensure!(confirm.trim() == "REAL MONEY", "type REAL MONEY to confirm");
     let miss = real_ready(app, SNIPE);
@@ -764,7 +805,8 @@ pub fn start_run(app: &App, hours: i64, confirm: &str) -> anyhow::Result<Value> 
     anyhow::ensure!(s.run.is_none(), "a test run is already going");
     anyhow::ensure!(!s.kill, "the kill switch is on");
     let now = now_ms();
-    let (bankroll, stake) = (RUN_BANKROLL, RUN_STAKE);
+    check_bankroll(bankroll, cash, s.pm_reserve)?;
+    let stake = run_stake(bankroll);
     // Started outside the trading hours, the run's hours count from when the window opens (the
     // bot takes no trade before that anyway).
     let begin = match s.snipe.hours() {
@@ -782,14 +824,14 @@ pub fn start_run(app: &App, hours: i64, confirm: &str) -> anyhow::Result<Value> 
         None => now,
     };
     s.run = Some(Run { id: now, start_ms: now, end_ms: begin + hours * 3_600_000, bankroll, stake, prev: s.snipe.clone() });
-    // Fixed small stakes: 30% of $50 is $15, capped at $15 (the bot's $10 minimum order fits).
+    // Fixed small stakes: 30% of the bankroll, capped at that (the bot's $10 minimum order fits).
     s.snipe.c.enabled = true;
     s.snipe.c.real = true;
     s.snipe.c.bankroll = bankroll;
     s.snipe.pct = 0.30;
     s.snipe.c.max_trade = stake;
     s.snipe.c.max_open = bankroll;
-    s.snipe.c.daily_loss = RUN_LOSS;
+    s.snipe.c.daily_loss = run_loss(bankroll);
     save(app, &s)?;
     *SET.write() = s;
     event(format!("snipe: {hours} h REAL test run started (${bankroll} bankroll, ~${stake} a trade{})", if begin > now { ", trading from the window's opening" } else { "" }));
@@ -843,10 +885,6 @@ pub fn tick_run(app: &App) -> Option<String> {
     ))
 }
 
-/// The real test run: bankroll, stake a trade, and the loss that ends it.
-pub const RUN_BANKROLL: f64 = 50.0;
-pub const RUN_STAKE: f64 = 15.0;
-pub const RUN_LOSS: f64 = 15.0;
 /// Safety triggers: the run ends early when real money does worse than the replay says it
 /// should (replay, safe set: ~19 of 20 trades win, a loser costs about half its stake, the paper
 /// twin of a trade fills within a cent or two).
@@ -868,17 +906,17 @@ fn run_guard(app: &App, r: &Run) -> Option<String> {
     let failed: usize = c
         .query_row("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1", params![r.start_ms], |x| x.get::<_, i64>(0))
         .unwrap_or(0) as usize;
-    run_guard_on(&real, &rows(false), failed)
+    run_guard_on(&real, &rows(false), failed, run_loss(r.bankroll))
 }
 
 /// The triggers on closed real trades (oldest first), the paper trades of the same hours, and
 /// the count of real orders that failed or did not fill.
-fn run_guard_on(real: &[Value], paper: &[Value], failed_orders: usize) -> Option<String> {
+fn run_guard_on(real: &[Value], paper: &[Value], failed_orders: usize, loss_limit: f64) -> Option<String> {
     let pnl = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0);
     let ret = |t: &Value| pnl(t) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
     let total: f64 = real.iter().map(pnl).sum();
-    if total <= -RUN_LOSS {
-        return Some(format!("real money is down ${:.2}, past the ${RUN_LOSS:.0} limit", -total));
+    if total <= -loss_limit {
+        return Some(format!("real money is down ${:.2}, past the ${loss_limit:.0} limit", -total));
     }
     // A loss here is more than 5% of the stake: a give-up a cent under the buy price is a scratch.
     if real.len() >= 2 && real[real.len() - 2..].iter().all(|t| ret(t) < -0.05) {
@@ -1206,23 +1244,29 @@ mod tests {
     fn run_guard_triggers() {
         let win = |m| t(m, m * 100_000, 15.0, 3.0);
         // As expected: wins, one ordinary loser, a scratch.
-        assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], 0), None);
+        assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], 0, 15.0), None);
         // The loss limit.
-        assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], 0).unwrap().contains("limit"));
+        assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], 0, 15.0).unwrap().contains("limit"));
         // Two real losers in a row.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], 0).unwrap().contains("in a row"));
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], 0, 15.0).unwrap().contains("in a row"));
         // Too few winners after four trades.
-        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], 0).unwrap().contains("won"));
+        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], 0, 15.0).unwrap().contains("won"));
         // Nearly a whole stake on one trade.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], 0).unwrap().contains("lost 87%"));
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], 0, 15.0).unwrap().contains("lost 87%"));
         // Orders that fail.
-        assert!(run_guard_on(&[win(1)], &[], 3).unwrap().contains("orders"));
+        assert!(run_guard_on(&[win(1)], &[], 3, 15.0).unwrap().contains("orders"));
         // Real clearly worse than its paper twins (same game, bought within 30 s).
         let real = [t(1, 100_000, 15.0, 0.5), t(2, 200_000, 15.0, 0.6)];
         let paper = [t(1, 101_000, 100.0, 18.0), t(2, 202_000, 100.0, 16.0)];
-        assert!(run_guard_on(&real, &paper, 0).unwrap().contains("paper twins"));
+        assert!(run_guard_on(&real, &paper, 0, 15.0).unwrap().contains("paper twins"));
+        // The bankroll rules: $35 at least, never more than the account's cash less the reserve.
+        assert!(check_bankroll(40.0, Some(192.74), 5.0).is_ok());
+        assert!(check_bankroll(30.0, Some(192.74), 5.0).is_err());
+        assert!(check_bankroll(190.0, Some(192.74), 5.0).is_err());
+        assert!(check_bankroll(40.0, None, 5.0).is_err());
+        assert_eq!((run_stake(40.0), run_loss(40.0)), (12.0, 15.0));
         // Twins that agree: nothing.
         let paper = [t(1, 101_000, 100.0, 4.0), t(2, 202_000, 100.0, 5.0)];
-        assert_eq!(run_guard_on(&real, &paper, 0), None);
+        assert_eq!(run_guard_on(&real, &paper, 0, 15.0), None);
     }
 }
