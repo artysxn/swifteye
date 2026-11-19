@@ -426,8 +426,9 @@ fn take(levels: &[(f64, f64)], max_px: f64, dollars: f64) -> (f64, f64) {
 
 async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy, wider: bool) {
     let s = bots::settings();
-    // During a real test run the saved settings are the run's small real stakes; paper keeps the
-    // wallet the settings had before it (and get back after it).
+    // Two wallets, nothing shared: real money uses the real wallet's fields (bankroll, r_pct,
+    // r_max_trade), paper the paper wallet's. During a test run the paper side reads the copy
+    // kept for after the run (the same numbers but for the Real switch).
     let sn = if real { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
     let Some((token, asks, _, fee)) = our_book(f.m, f.o, f.dir) else {
         note(bot, "no_live_book", f.json());

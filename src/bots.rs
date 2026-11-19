@@ -922,7 +922,11 @@ pub fn tick_run(app: &App) -> Option<String> {
 const GUARD_WIN_SHARE: f64 = 0.60;
 const GUARD_WIN_MIN_TRADES: usize = 4;
 const GUARD_ONE_TRADE_LOSS: f64 = 0.80;
-const GUARD_FAILED_ORDERS: usize = 3;
+/// Orders Polymarket refused (an error, not just "nothing filled": a sale that waits for a bid
+/// retries every second and a buy whose price ran is normal).
+const GUARD_REFUSED_ORDERS: usize = 3;
+/// Buys that found nothing to fill: a problem only when they are most of the attempts.
+const GUARD_UNFILLED_BUYS: usize = 4;
 const GUARD_TWIN_GAP: f64 = 0.10;
 
 /// Why the running real test should stop now (None = all as expected).
@@ -934,15 +938,17 @@ fn run_guard(app: &App, r: &Run) -> Option<String> {
             .unwrap_or_default()
     };
     let real = rows(true);
-    let failed: usize = c
-        .query_row("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1", params![r.start_ms], |x| x.get::<_, i64>(0))
-        .unwrap_or(0) as usize;
-    run_guard_on(&real, &rows(false), failed, settings().snipe.c.daily_loss)
+    let count = |sql: &str| -> usize { c.query_row(sql, params![r.start_ms], |x| x.get::<_, i64>(0)).unwrap_or(0) as usize };
+    let refused = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND COALESCE(json_extract(data, '$.error'), '') NOT IN ('', 'nothing filled')");
+    let unfilled_buys = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND json_extract(data, '$.side') = 'buy' AND json_extract(data, '$.error') = 'nothing filled'");
+    let filled_buys = count("SELECT COUNT(*) FROM bot_trades WHERE bot = 'snipe' AND real = 1 AND ts_ms >= ?1");
+    run_guard_on(&real, &rows(false), (refused, unfilled_buys, filled_buys), settings().snipe.c.daily_loss)
 }
 
 /// The triggers on closed real trades (oldest first), the paper trades of the same hours, and
-/// the count of real orders that failed or did not fill.
-fn run_guard_on(real: &[Value], paper: &[Value], failed_orders: usize, loss_limit: f64) -> Option<String> {
+/// the real orders: (refused by Polymarket, buys that found nothing to fill, buys that filled).
+fn run_guard_on(real: &[Value], paper: &[Value], orders: (usize, usize, usize), loss_limit: f64) -> Option<String> {
+    let (refused, unfilled_buys, filled_buys) = orders;
     let pnl = |t: &Value| t["pnl"].as_f64().unwrap_or(0.0);
     let ret = |t: &Value| pnl(t) / t["cost"].as_f64().unwrap_or(0.0).max(1e-9);
     let total: f64 = real.iter().map(pnl).sum();
@@ -960,8 +966,11 @@ fn run_guard_on(real: &[Value], paper: &[Value], failed_orders: usize, loss_limi
     if let Some(t) = real.iter().find(|t| ret(t) <= -GUARD_ONE_TRADE_LOSS) {
         return Some(format!("one real trade lost {:.0}% of its stake ({})", -ret(t) * 100.0, t["home"].as_str().unwrap_or("")));
     }
-    if failed_orders >= GUARD_FAILED_ORDERS {
-        return Some(format!("{failed_orders} real orders failed or did not fill"));
+    if refused >= GUARD_REFUSED_ORDERS {
+        return Some(format!("Polymarket refused {refused} real orders"));
+    }
+    if unfilled_buys >= GUARD_UNFILLED_BUYS && unfilled_buys > filled_buys {
+        return Some(format!("{unfilled_buys} of {} real buys found nothing to fill (the price runs before real orders match)", unfilled_buys + filled_buys));
     }
     // Real against its paper twin (the same move, bought within 30 s): real fills clearly worse
     // than paper means the paper model flatters the bot.
@@ -1275,21 +1284,25 @@ mod tests {
     fn run_guard_triggers() {
         let win = |m| t(m, m * 100_000, 15.0, 3.0);
         // As expected: wins, one ordinary loser, a scratch.
-        assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], 0, 15.0), None);
+        assert_eq!(run_guard_on(&[win(1), win(2), t(3, 300_000, 15.0, -7.0), win(4), t(5, 500_000, 15.0, -0.3), win(6), win(7)], &[], (0, 0, 0), 15.0), None);
         // The loss limit.
-        assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], 0, 15.0).unwrap().contains("limit"));
+        assert!(run_guard_on(&[t(1, 0, 15.0, -9.0), win(2), t(3, 0, 15.0, -9.5)], &[], (0, 0, 0), 15.0).unwrap().contains("limit"));
         // Two real losers in a row.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], 0, 15.0).unwrap().contains("in a row"));
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -3.0), t(3, 0, 15.0, -4.0)], &[], (0, 0, 0), 15.0).unwrap().contains("in a row"));
         // Too few winners after four trades.
-        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], 0, 15.0).unwrap().contains("won"));
+        assert!(run_guard_on(&[t(1, 0, 15.0, -2.0), win(2), t(3, 0, 15.0, -2.0), win(4), t(5, 0, 15.0, -0.1)], &[], (0, 0, 0), 15.0).unwrap().contains("won"));
         // Nearly a whole stake on one trade.
-        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], 0, 15.0).unwrap().contains("lost 87%"));
+        assert!(run_guard_on(&[win(1), t(2, 0, 15.0, -13.0)], &[], (0, 0, 0), 15.0).unwrap().contains("lost 87%"));
         // Orders that fail.
-        assert!(run_guard_on(&[win(1)], &[], 3, 15.0).unwrap().contains("orders"));
+        assert!(run_guard_on(&[win(1)], &[], (3, 0, 0), 15.0).unwrap().contains("orders"));
+        // Buys that find nothing: fine while most fill, a stop once they are most of the attempts.
+        assert_eq!(run_guard_on(&[win(1)], &[], (0, 4, 6), 15.0), None);
+        assert_eq!(run_guard_on(&[win(1)], &[], (2, 3, 1), 15.0), None);
+        assert!(run_guard_on(&[win(1)], &[], (0, 5, 2), 15.0).unwrap().contains("nothing to fill"));
         // Real clearly worse than its paper twins (same game, bought within 30 s).
         let real = [t(1, 100_000, 15.0, 0.5), t(2, 200_000, 15.0, 0.6)];
         let paper = [t(1, 101_000, 100.0, 18.0), t(2, 202_000, 100.0, 16.0)];
-        assert!(run_guard_on(&real, &paper, 0, 15.0).unwrap().contains("paper twins"));
+        assert!(run_guard_on(&real, &paper, (0, 0, 0), 15.0).unwrap().contains("paper twins"));
         // The bankroll rules: $35 at least, never more than the account's cash less the reserve.
         assert!(check_bankroll_with(40.0, Some(192.74), 5.0).is_ok());
         assert!(check_bankroll_with(5.0, Some(192.74), 5.0).is_err());
@@ -1300,6 +1313,6 @@ mod tests {
         assert_eq!((c.real_stake(40.0), c.real_stake(30.0), c.real_stake(1000.0)), (12.0, 9.0, 12.0));
         // Twins that agree: nothing.
         let paper = [t(1, 101_000, 100.0, 4.0), t(2, 202_000, 100.0, 5.0)];
-        assert_eq!(run_guard_on(&real, &paper, 0, 15.0), None);
+        assert_eq!(run_guard_on(&real, &paper, (0, 0, 0), 15.0), None);
     }
 }
