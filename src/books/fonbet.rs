@@ -25,6 +25,26 @@ pub struct Fonbet {
     blocked: HashMap<i64, bool>,
     misc: HashMap<i64, Value>,
     timers: HashMap<i64, String>,
+    /// Parts of games (child events: "1st map", "2nd set", "1st half" ...): the last price sent per
+    /// (game, kind, number, outcome), and the changes waiting for `parts()`.
+    parts_last: HashMap<(i64, &'static str, i64, Outcome), Option<f64>>,
+    parts_out: Vec<PartQuote>,
+}
+
+/// "1st map" -> ("map", 1); "2nd half" -> ("half", 2). Anything else (corners, cards, player bets) is not a part.
+fn part_of(name: &str) -> Option<(&'static str, i64)> {
+    let n = name.trim().to_ascii_lowercase();
+    let (ord, rest) = n.split_once(' ')?;
+    let num: i64 = ord.trim_end_matches(|c: char| c.is_ascii_alphabetic()).parse().ok()?;
+    let kind = match rest {
+        "map" => "map",
+        "set" => "set",
+        "half" => "half",
+        "quarter" => "quarter",
+        "period" => "period",
+        _ => return None,
+    };
+    (1..=9).contains(&num).then_some((kind, num))
 }
 
 impl Fonbet {
@@ -42,6 +62,8 @@ impl Fonbet {
             blocked: HashMap::new(),
             misc: HashMap::new(),
             timers: HashMap::new(),
+            parts_last: HashMap::new(),
+            parts_out: Vec::new(),
         }
     }
 
@@ -197,6 +219,50 @@ impl Book for Fonbet {
             }
             out.push(ev);
         }
+        // Parts of the games just listed: their child events' winner prices (921 / 922 / 923), only
+        // where the price changed. Recorded only (see `Book::parts`).
+        // Fonbet and PARI are one bookmaker with one set of prices: parts are kept from Fonbet only.
+        let shown: std::collections::HashSet<i64> = if self.name == "fonbet" { out.iter().filter_map(|e| e.id.parse().ok()).collect() } else { Default::default() };
+        for (&cid, e) in &self.events {
+            if e["level"].as_i64() != Some(2) {
+                continue;
+            }
+            let Some(parent) = e["parentId"].as_i64().filter(|p| shown.contains(p)) else { continue };
+            let Some((kind, n)) = part_of(&text(&e["name"])) else { continue };
+            let Some(fs) = self.factors.get(&cid) else { continue };
+            let blocked = self.blocked.get(&cid).copied().unwrap_or(false);
+            for (fid, o) in [(921, Outcome::Home), (922, Outcome::Draw), (923, Outcome::Away)] {
+                let Some(f) = fs.get(&fid) else { continue };
+                let price = if blocked { None } else { Some(f.0) };
+                let k = (parent, kind, n, o);
+                if self.parts_last.get(&k) != Some(&price) {
+                    self.parts_last.insert(k, price);
+                    self.parts_out.push(PartQuote { event: parent.to_string(), kind, line: n as f64, outcome: o, price });
+                }
+            }
+        }
+        self.parts_last.retain(|k, _| shown.contains(&k.0));
         Ok(Snapshot { events: out, recv_ms })
+    }
+    fn parts(&mut self) -> Vec<PartQuote> {
+        std::mem::take(&mut self.parts_out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parts_of_a_game_are_told_from_other_child_events() {
+        assert_eq!(part_of("1st map"), Some(("map", 1)));
+        assert_eq!(part_of("3rd map"), Some(("map", 3)));
+        assert_eq!(part_of("2nd half"), Some(("half", 2)));
+        assert_eq!(part_of("1st set"), Some(("set", 1)));
+        assert_eq!(part_of("4th quarter"), Some(("quarter", 4)));
+        // Corners, cards and player bets are not parts of the game's result.
+        assert_eq!(part_of("1st half corners"), None);
+        assert_eq!(part_of("Corners"), None);
+        assert_eq!(part_of(""), None);
     }
 }

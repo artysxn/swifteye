@@ -102,6 +102,29 @@ pub fn alive_ms(v: V) -> Ms {
     venue(v).read().alive_ms
 }
 
+/// How late Polymarket's last 8 socket messages arrived (receive time minus Polymarket's own
+/// timestamp), and how many have been seen.
+static PM_LAGS: std::sync::LazyLock<parking_lot::Mutex<([Ms; 8], usize)>> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(([0; 8], 0)));
+
+/// One Polymarket message arrived `lag` ms after its own timestamp.
+pub fn pm_lag(lag: Ms) {
+    let mut g = PM_LAGS.lock();
+    let i = g.1 % 8;
+    g.0[i] = lag;
+    g.1 += 1;
+}
+
+/// The backlog of Polymarket's price socket (ms): the SMALLEST delay among its last 8 messages.
+/// When the reader falls behind, every message is late; one old timestamp among fresh ones (a
+/// book sent again, a quiet market) says nothing. 0 until 8 messages have arrived.
+pub fn pm_lag_ms() -> Ms {
+    let g = PM_LAGS.lock();
+    if g.1 < 8 {
+        return 0;
+    }
+    g.0.iter().copied().min().unwrap_or(0)
+}
+
 /// A contract's book changed. Bids and asks in any order; stored best first.
 pub fn publish(v: V, contract: &str, mut bids: Vec<(f64, f64)>, mut asks: Vec<(f64, f64)>, now: Ms) {
     bids.retain(|l| l.1 > 0.0 && l.0 > 0.0 && l.0 < 1.0);
@@ -177,5 +200,31 @@ mod tests {
         // 100 shares at 50c, sports rate 0.05: $1.25.
         assert!((pm_fee(Fee::PM_SPORTS, 100.0, 0.5) - 1.25).abs() < 1e-9);
         assert!((pm_fee(Fee::PM_SPORTS, 100.0, 0.9) - 0.45).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod lag_tests {
+    use super::*;
+
+    #[test]
+    fn the_backlog_is_the_smallest_recent_delay() {
+        // Fewer than 8 messages: nothing is known yet.
+        for _ in 0..7 {
+            pm_lag(2_500);
+        }
+        assert_eq!(pm_lag_ms(), 0);
+        // The reader is behind: every message is late.
+        pm_lag(2_400);
+        assert_eq!(pm_lag_ms(), 2_400);
+        // One on-time message among late ones: no backlog (a backlog delays every message).
+        pm_lag(-60);
+        assert_eq!(pm_lag_ms(), -60);
+        // Back on time, with one old timestamp (a book sent again): still no backlog.
+        for _ in 0..7 {
+            pm_lag(30);
+        }
+        pm_lag(40_000);
+        assert_eq!(pm_lag_ms(), 30);
     }
 }

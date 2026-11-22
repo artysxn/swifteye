@@ -23,6 +23,10 @@ const SCAN_MS: u64 = 5_000;
 const KEEP_MIN: f64 = -0.03;
 /// Durations of finished ones from this far back feed the averages.
 const STATS_SPAN_MS: Ms = 14 * 86_400_000;
+/// From here on (20 Nov 2026, 04:41 UTC) the scout cross-checks every price and records how much
+/// can be taken. Older rows were never checked (most of their big returns were wrong links,
+/// swapped sides or one contract on offer): they stay in the table, marked, and out of the averages.
+pub const CHECKED_SINCE_MS: Ms = 1_795_149_695_000;
 
 pub fn opp_key(a: &Arb) -> String {
     format!("{}|{}|{}", a.match_id, a.market, a.line.map(|l| l.to_string()).unwrap_or_default())
@@ -78,6 +82,9 @@ pub fn spawn(app: Arc<App>) {
         let a2 = app.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if let Ok(c) = conn(&a2) {
+                // The largest total stake the prediction-market legs could take when it opened
+                // (added 20 Nov 2026; "duplicate column" on later starts is fine).
+                let _ = c.execute("ALTER TABLE arb_history ADD COLUMN takeable REAL", []);
                 // Whatever was open when we stopped has an unknown end.
                 let _ = c.execute("UPDATE arb_history SET end_ms = last_ms, end_reason = 'restart' WHERE end_ms IS NULL", []);
                 refresh_stats(&c);
@@ -99,7 +106,7 @@ fn quant(v: &[i64], q: f64) -> Option<i64> {
 }
 
 fn refresh_stats(c: &Connection) {
-    let since = now_ms() - STATS_SPAN_MS;
+    let since = (now_ms() - STATS_SPAN_MS).max(CHECKED_SINCE_MS);
     let mut durs: Vec<(String, i64, f64)> = Vec::new();
     if let Ok(mut st) = c.prepare(
         "SELECT market, (last_ms + end_ms) / 2 - first_ms, peak_profit FROM arb_history
@@ -151,7 +158,9 @@ fn step(app: &App, stats: bool) {
     let arbs = crate::arb::scan(app, KEEP_MIN, 100.0);
     let now = now_ms();
     let mut best: HashMap<String, &Arb> = HashMap::new();
-    for a in arbs.iter().filter(|a| a.profit > 0.0) {
+    // Only what holds up: cross-checked against other sources, and with a stake worth placing
+    // behind any prediction-market leg. The rest stays on the page under "All" and is not history.
+    for a in arbs.iter().filter(|a| a.profit > 0.0 && a.sound()) {
         let k = opp_key(a);
         if best.get(&k).is_none_or(|b| a.profit > b.profit) {
             best.insert(k, a);
@@ -179,9 +188,9 @@ fn step(app: &App, stats: bool) {
             let books = a.legs.iter().map(|l| l.book.as_str()).collect::<Vec<_>>().join(",");
             let legs = serde_json::to_string(&a.legs).unwrap_or_default();
             let ok = c.execute(
-                "INSERT INTO arb_history(key, match_id, sport, home, away, league, market, line, books, legs, first_ms, last_ms, open_profit, peak_profit, censored)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?12, ?13)",
-                params![k, a.match_id, a.sport, a.home, a.away, a.league, a.market, a.line, books, legs, now, a.profit, first_scan as i64],
+                "INSERT INTO arb_history(key, match_id, sport, home, away, league, market, line, books, legs, first_ms, last_ms, open_profit, peak_profit, censored, takeable)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?12, ?13, ?14)",
+                params![k, a.match_id, a.sport, a.home, a.away, a.league, a.market, a.line, books, legs, now, a.profit, first_scan as i64, a.takeable],
             );
             if ok.is_ok() {
                 st.open.insert(k.clone(), Open { id: c.last_insert_rowid(), first_ms: now, last_ms: now, peak: a.profit, start_ms: a.start_ms, censored: first_scan });
@@ -192,6 +201,12 @@ fn step(app: &App, stats: bool) {
         st.scans += 1;
     }
     if stats {
+        // Once a minute: how far each open one has got, so a restart cuts it at its real length
+        // (it used to be stored only at the end, and a restart left it at zero seconds).
+        let open: Vec<(i64, Ms, f64)> = ST.lock().open.values().map(|o| (o.id, o.last_ms, o.peak)).collect();
+        for (id, last, peak) in open {
+            let _ = c.execute("UPDATE arb_history SET last_ms = ?1, peak_profit = ?2 WHERE id = ?3 AND end_ms IS NULL", params![last, peak, id]);
+        }
         refresh_stats(&c);
     }
 }
@@ -260,8 +275,8 @@ pub fn history(app: &App, limit: i64) -> Value {
         .and_then(|c| {
             let mut st = c
                 .prepare(
-                    "SELECT match_id, sport, home, away, league, market, line, books, first_ms, last_ms, end_ms, end_reason, open_profit, peak_profit, censored
-                     FROM arb_history WHERE end_ms IS NOT NULL ORDER BY end_ms DESC LIMIT ?1",
+                    "SELECT match_id, sport, home, away, league, market, line, books, first_ms, last_ms, end_ms, end_reason, open_profit, peak_profit, censored, takeable
+                     FROM arb_history WHERE end_ms IS NOT NULL AND NOT (end_reason = 'restart' AND end_ms <= first_ms) ORDER BY end_ms DESC LIMIT ?1",
                 )
                 .ok()?;
             let it = st
@@ -270,9 +285,9 @@ pub fn history(app: &App, limit: i64) -> Value {
                     Ok(json!({
                         "match_id": r.get::<_, i64>(0)?, "sport": r.get::<_, Option<String>>(1)?, "home": r.get::<_, Option<String>>(2)?,
                         "away": r.get::<_, Option<String>>(3)?, "league": r.get::<_, Option<String>>(4)?, "market": r.get::<_, String>(5)?,
-                        "line": r.get::<_, Option<f64>>(6)?, "books": r.get::<_, Option<String>>(7)?, "first_ms": first, "end_ms": end,
+                        "line": r.get::<_, Option<f64>>(6)?, "books": r.get::<_, Option<String>>(7)?, "first_ms": first, "end_ms": end, "checked": first >= CHECKED_SINCE_MS,
                         "lasted_ms": (last + end) / 2 - first, "end_reason": r.get::<_, Option<String>>(11)?,
-                        "open_profit": r.get::<_, Option<f64>>(12)?, "peak_profit": r.get::<_, Option<f64>>(13)?, "censored": r.get::<_, i64>(14)? != 0,
+                        "open_profit": r.get::<_, Option<f64>>(12)?, "peak_profit": r.get::<_, Option<f64>>(13)?, "censored": r.get::<_, i64>(14)? != 0, "takeable": r.get::<_, Option<f64>>(15)?,
                     }))
                 })
                 .ok()?;

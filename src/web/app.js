@@ -741,8 +741,11 @@ SE.seg = (el, options, value, onChange) => {
 
 // ---------------------------------------------------------------- router
 SE.pages = {};
-let cleanup = null, timers = [];
-SE.every = (ms, fn) => { const t = setInterval(fn, ms); timers.push(t); return t; };
+let cleanup = null, timers = [], pageFns = [];
+// Timers rest while the tab is hidden: a tab left open in the background asked the server for
+// pages every few seconds, day and night, and those reads slowed the bots. Coming back to the
+// tab refreshes at once (see the visibilitychange listener below).
+SE.every = (ms, fn) => { const t = setInterval(() => { if (!document.hidden) fn(); }, ms); timers.push(t); pageFns.push(fn); return t; };
 SE.crumbs = () => {};
 function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -752,6 +755,7 @@ function route() {
   if (typeof cleanup === 'function') { try { cleanup(); } catch {} }
   timers.forEach(clearInterval);
   timers = [];
+  pageFns = [];
   SE.tipHide();
   $$('.nav a[data-route]').forEach((a) => a.classList.toggle('on', a.dataset.route === (key === 'match' ? 'live' : key)));
   const el = $('#page');
@@ -790,8 +794,14 @@ window.addEventListener('DOMContentLoaded', () => {
   connect();
   route();
   tickNav();
-  setInterval(tickNav, 15000);
+  setInterval(() => { if (!document.hidden) tickNav(); }, 15000);
   tickMe();
   SE.loadCtx();
-  setInterval(SE.loadCtx, 60000);
+  setInterval(() => { if (!document.hidden) SE.loadCtx(); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    tickNav();
+    SE.loadCtx();
+    for (const fn of pageFns.slice()) { try { const r = fn(); if (r && r.catch) r.catch(() => {}); } catch {} }
+  });
 });

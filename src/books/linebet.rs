@@ -18,6 +18,8 @@ pub struct Linebet {
     /// 1xBet sport ids to ask for.
     pub sports: Vec<i64>,
     pub pre: Pre,
+    /// Score detail of the last live fetch's games, by event id (`details`). Recorded only.
+    pub details: std::collections::HashMap<String, String>,
 }
 
 /// (1xBet sport id, our sport key); 40 = e-sports, titled per league.
@@ -75,9 +77,71 @@ impl Book for Linebet {
         let ids: Vec<String> = self.sports.iter().map(|s| s.to_string()).collect();
         let (v, recv_ms) = fetch_json(http.get(self.url("LiveFeed", &ids.join(",")))).await?;
         let mut events = parse(&v, true)?;
+        self.details = details(&v);
         self.pre.merge(&mut events);
         Ok(Snapshot { events, recv_ms })
     }
+    fn score_detail(&mut self) -> std::collections::HashMap<String, String> {
+        std::mem::take(&mut self.details)
+    }
+}
+
+/// The game's id: both teams' ids and the start hour (the same game keeps it across the live and
+/// pre-match feeds), else the feed's own id.
+fn event_id(g: &Value) -> String {
+    match (int(&g["O1I"]), int(&g["O2I"]), int(&g["S"])) {
+        (Some(a), Some(b), Some(s)) => format!("{a}-{b}-{}", s / 3600),
+        _ => id_text(&g["I"]),
+    }
+}
+
+/// A score part as text: numbers and texts as they are ("40", "A"), missing = 0.
+fn part(v: &Value) -> String {
+    match v {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) if !s.is_empty() => s.clone(),
+        _ => "0".into(),
+    }
+}
+
+/// Score detail of every game in a live feed, by event id: each period's score ("3-6 1-4": games of
+/// each set, rounds of each map, points of each quarter), the points of the tennis game being
+/// played ("pts 40-15"), who serves ("srv 2"), and in football red cards and penalties.
+/// Statistics that change all the time (attacks, possession, the clock) are left out.
+fn details(v: &Value) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for g in v["Value"].as_array().into_iter().flatten() {
+        let Some(sport) = sport_of(g) else { continue };
+        let sc = &g["SC"];
+        let mut bits = Vec::new();
+        let periods: Vec<String> =
+            sc["PS"].as_array().into_iter().flatten().map(|p| &p["Value"]).filter(|x| x.get("S1").is_some() || x.get("S2").is_some()).map(|x| format!("{}-{}", part(&x["S1"]), part(&x["S2"]))).collect();
+        if !periods.is_empty() {
+            bits.push(periods.join(" "));
+        }
+        if sc["SS"].is_object() {
+            bits.push(format!("pts {}-{}", part(&sc["SS"]["S1"]), part(&sc["SS"]["S2"])));
+        }
+        if sport == "tennis" {
+            if let Some(p) = int(&sc["P"]) {
+                bits.push(format!("srv {p}"));
+            }
+        }
+        if sport == "football" {
+            for st in sc["ST"].as_array().into_iter().flatten().flat_map(|k| k["Value"].as_array().into_iter().flatten()) {
+                let lab = match int(&st["ID"]) {
+                    Some(71) => "rc",
+                    Some(72) => "pen",
+                    _ => continue,
+                };
+                bits.push(format!("{lab} {}-{}", part(&st["S1"]), part(&st["S2"])));
+            }
+        }
+        if !bits.is_empty() {
+            out.insert(event_id(g), bits.join(" | "));
+        }
+    }
+    out
 }
 
 fn sport_of(g: &Value) -> Option<&'static str> {
@@ -101,10 +165,7 @@ fn parse(v: &Value, live: bool) -> Result<Vec<EventIn>> {
         let s1 = sc["FS"]["S1"].as_i64().unwrap_or(0);
         let s2 = sc["FS"]["S2"].as_i64().unwrap_or(0);
         let start = int(&g["S"]);
-        let id = match (int(&g["O1I"]), int(&g["O2I"]), start) {
-            (Some(a), Some(b), Some(s)) => format!("{a}-{b}-{}", s / 3600),
-            _ => id_text(&g["I"]),
-        };
+        let id = event_id(g);
         let mut ev = EventIn {
             id,
             sport: sport.into(),
@@ -167,4 +228,42 @@ fn parse(v: &Value, live: bool) -> Result<Vec<EventIn>> {
         events.push(ev);
     }
     Ok(events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn score_detail_of_a_tennis_game_a_map_and_a_football_game() {
+        let v = serde_json::json!({"Value": [
+            {"SI": 4, "O1I": 11, "O2I": 12, "S": 7200, "LE": "Challenger. Kobe",
+             "SC": {"FS": {"S2": 1}, "PS": [{"Key": 1, "Value": {"S1": 3, "S2": 6, "NF": "1st set"}}, {"Key": 2, "Value": {"S1": 1, "S2": 4}}],
+                    "CP": 2, "P": 2, "SS": {"S1": "40", "S2": "A"}, "ST": [{"Key": 0, "Value": [{"ID": 1, "S1": "1", "S2": "6", "N": "Aces"}]}]}},
+            {"SI": 40, "O1I": 21, "O2I": 22, "S": 7200, "LE": "CS 2. Winners series",
+             "SC": {"FS": {}, "PS": [{"Key": 1, "Value": {"S1": 3, "S2": 1, "NF": "1st map"}}, {"Key": 2, "Value": {"NF": "2nd map"}}]}},
+            {"SI": 1, "O1I": 31, "O2I": 32, "S": 7200, "LE": "K League 1",
+             "SC": {"FS": {"S1": 1}, "PS": [{"Key": 1, "Value": {"S1": 1, "NF": "1st half"}}],
+                    "ST": [{"Key": 0, "Value": [{"ID": 45, "S1": "42", "S2": "37", "N": "Attacks"}, {"ID": 71, "S1": "0", "S2": "1", "N": "Red card"}, {"ID": 72, "S1": "0", "S2": "0", "N": "Penalty"}]}]}},
+            {"SI": 3, "O1I": 41, "O2I": 42, "S": 7200, "LE": "NBA", "SC": {"FS": {}, "PS": []}}
+        ]});
+        let d = details(&v);
+        assert_eq!(d.get("11-12-2").map(String::as_str), Some("3-6 1-4 | pts 40-A | srv 2"));
+        assert_eq!(d.get("21-22-2").map(String::as_str), Some("3-1"));
+        assert_eq!(d.get("31-32-2").map(String::as_str), Some("1-0 | rc 0-1 | pen 0-0"));
+        assert!(!d.contains_key("41-42-2"), "a game with no score detail has no entry");
+    }
+
+    #[test]
+    fn a_score_row_only_when_the_score_or_detail_changes() {
+        let mut last = std::collections::HashMap::new();
+        let det = |s: &str| std::collections::HashMap::from([("g".to_string(), s.to_string())]);
+        let row = |sc: &str, clk: &str| vec![("g".to_string(), Some(sc.to_string()), Some(clk.to_string()))];
+        assert_eq!(score_writes("linebet", 1, row("0-0", "10'"), &det("0-0"), &mut last).len(), 1, "first sight");
+        assert_eq!(score_writes("linebet", 2, row("0-0", "11'"), &det("0-0"), &mut last).len(), 0, "only the clock moved");
+        assert_eq!(score_writes("linebet", 3, row("0-0", "12'"), &det("0-0 | rc 1-0"), &mut last).len(), 1, "a red card");
+        assert_eq!(score_writes("linebet", 4, row("1-0", "13'"), &det("1-0 | rc 1-0"), &mut last).len(), 1, "a goal");
+        assert_eq!(score_writes("linebet", 5, vec![], &det(""), &mut last).len(), 0);
+        assert!(last.is_empty(), "games gone from the live list are forgotten");
+    }
 }

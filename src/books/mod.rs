@@ -18,6 +18,7 @@ pub mod novibet;
 pub mod olimp;
 pub mod pinnacle;
 pub mod polymarket;
+pub mod sbobet;
 pub mod sportybet;
 pub mod thunderpick;
 
@@ -93,9 +94,72 @@ pub trait Book: Send + 'static {
     /// Human-readable description of where the data comes from.
     fn source(&self) -> String;
     fn fetch(&mut self, http: &reqwest::Client) -> impl Future<Output = Result<Snapshot>> + Send;
+    /// The HTTP client this book polls with. Most share the default.
+    fn client(&self) -> reqwest::Client {
+        http_client()
+    }
+    /// How long to wait after a failure, from the error text and how many failures in a row
+    /// (`streak`, 1 = the first). None = the usual wait, doubling from 2 s to 60 s.
+    fn cool_down(&self, _msg: &str, _streak: u32) -> Option<Duration> {
+        None
+    }
+    /// Prices for parts of the games of the last fetch that changed since the one before (maps,
+    /// sets, halves ...). Recorded only: they bypass the engine. Most books offer none here.
+    fn parts(&mut self) -> Vec<PartQuote> {
+        Vec::new()
+    }
+    /// Extra live-score detail of the last fetch's games, by the book's event id (games and points
+    /// of a tennis set, rounds of each map, quarters ...). Recorded only (`book_scores`). Most books
+    /// give none here; their main score and clock are recorded anyway.
+    fn score_detail(&mut self) -> std::collections::HashMap<String, String> {
+        Default::default()
+    }
+}
+
+/// Books that are RECORDED ONLY (owner, 22 Nov 2026: new sources are tried before any bot may use
+/// them): their price changes go to `changes_research` instead of `changes` (App::emit) and are never
+/// broadcast, so the bots, the consensus, the replay and every research tool reading `changes` stay
+/// exactly as before. Their games still get `book_events` rows (for joins). Take a book off this list
+/// only after its timing against Polymarket was tested.
+pub const RECORD_ONLY: &[&str] = &["sbobet"];
+
+pub fn record_only(book: &str) -> bool {
+    RECORD_ONLY.contains(&book)
+}
+
+/// Live score of one game in one poll: (the book's event id, score, clock).
+pub type LiveScore = (String, Option<String>, Option<String>);
+
+/// The `book_scores` rows of one poll: a game's score or detail that differs from what this book
+/// last showed for it (a game seen for the first time gets one row too). `last` keeps only the
+/// games of this poll, so it never grows past the book's live list. The clock alone changing
+/// writes nothing.
+pub fn score_writes(
+    book: &'static str,
+    ts_ms: Ms,
+    live: Vec<LiveScore>,
+    detail: &std::collections::HashMap<String, String>,
+    last: &mut std::collections::HashMap<String, (Option<String>, Option<String>)>,
+) -> Vec<crate::engine::Write> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashMap::with_capacity(live.len());
+    for (id, score, clock) in live {
+        let now = (score, detail.get(&id).cloned());
+        if last.get(&id) != Some(&now) {
+            out.push(crate::engine::Write::BookScore { ts_ms, book, book_event_id: id.clone(), score: now.0.clone(), detail: now.1.clone(), clock });
+        }
+        seen.insert(id, now);
+    }
+    *last = seen;
+    out
 }
 
 pub fn http_client() -> reqwest::Client {
+    http_builder().build().expect("http client")
+}
+
+/// The settings every feed's client shares, for a book that needs one small change (Leon: no redirects).
+pub fn http_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(UA)
         .gzip(true)
@@ -105,13 +169,15 @@ pub fn http_client() -> reqwest::Client {
         .connect_timeout(Duration::from_secs(8))
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_nodelay(true)
-        .build()
-        .expect("http client")
 }
 
 /// Send a request, read the whole body, and stamp the moment it finished arriving.
 pub async fn fetch_json(req: reqwest::RequestBuilder) -> Result<(Value, Ms)> {
-    let resp = req.send().await?;
+    read_json(req.send().await?).await
+}
+
+/// Read a reply already received: the whole body as JSON, stamped when it finished arriving.
+pub async fn read_json(resp: reqwest::Response) -> Result<(Value, Ms)> {
     let status = resp.status();
     let body = resp.bytes().await?;
     let recv = now_ms();
@@ -128,9 +194,12 @@ pub async fn fetch_json(req: reqwest::RequestBuilder) -> Result<(Value, Ms)> {
 /// Poll one book forever.
 pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
     let name = book.name();
-    let http = http_client();
+    let http = book.client();
     let mut backoff = Duration::ZERO;
+    let mut streak = 0u32;
     let mut next = tokio::time::Instant::now();
+    // The live score this book last showed per game (see `score_writes`).
+    let mut last_score = std::collections::HashMap::new();
     loop {
         // Interval and pause are read every cycle so the control panel takes effect live.
         let (paused, poll_ms) = app.engine.lock().schedule(name);
@@ -157,17 +226,33 @@ pub async fn run<B: Book>(mut book: B, app: Arc<App>, _poll_ms: u64) {
                     snap.events.retain(|e| e.sport != "football" || !is_esoccer(e));
                 }
                 snap.events.retain(|e| app.cfg.follows(&e.sport));
+                let live: Vec<LiveScore> = snap.events.iter().filter(|e| e.live && e.score.is_some()).map(|e| (e.id.clone(), e.score.clone(), e.clock.clone())).collect();
+                let recv_ms = snap.recv_ms;
                 let writes = app.engine.lock().apply(name, snap, req_ms);
                 app.emit(writes).await;
+                // Live scores: straight to their own table, past the engine (research only).
+                let scores = score_writes(name, recv_ms, live, &book.score_detail(), &mut last_score);
+                if !scores.is_empty() {
+                    app.emit(scores).await;
+                }
+                // Parts of games (maps, sets, halves): straight to their own table, past the engine.
+                let parts = book.parts();
+                if !parts.is_empty() {
+                    let now = crate::model::now_ms();
+                    let w = parts.into_iter().map(|p| crate::engine::Write::BookPart { ts_ms: now, book: name, book_event_id: p.event, kind: p.kind, line: p.line, outcome: p.outcome, price: p.price }).collect();
+                    app.emit(w).await;
+                }
                 if !backoff.is_zero() {
                     tracing::info!("{name}: recovered");
                 }
                 backoff = Duration::ZERO;
+                streak = 0;
             }
             Err(e) => {
                 let msg = format!("{e:#}");
                 app.engine.lock().poll_error(name, msg.clone());
-                backoff = (backoff * 2).clamp(Duration::from_secs(2), Duration::from_secs(60));
+                streak += 1;
+                backoff = book.cool_down(&msg, streak).unwrap_or_else(|| (backoff * 2).clamp(Duration::from_secs(2), Duration::from_secs(60)));
                 tracing::warn!("{name}: {msg} (retry in {}s)", backoff.as_secs());
             }
         }

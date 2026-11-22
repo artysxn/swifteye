@@ -92,10 +92,16 @@ const PAUSE_WINDOW_MS: Ms = 120_000;
 
 // ---- choosing
 /// Method version: stored with every run; a change recomputes the history.
-const VERSION: u32 = 17;
+const VERSION: u32 = 19;
 /// Version of the candidate measurements on disk (bump only when `Cand` or its measuring changes;
 /// rule or filter changes re-pick the rules but keep the measurements).
-const CAND_VERSION: u32 = 16;
+/// 17 (21 Nov 2026): a move measured where the Polymarket recording had a gap is marked `blind`.
+/// 18 (21 Nov 2026): basketball moves carry `us_bb` (a US game: NBA or college).
+/// 19 (22 Nov 2026): the earlier-jumps history ('followed' / 'lead') reads Polymarket by its own clock + 5 s
+/// (consensus::FOLLOW_SLACK_MS), not by arrival time.
+const CAND_VERSION: u32 = 19;
+/// A gap in the recording: no Polymarket quote from ANY game for this long around the buy.
+const HOLE_MS: Ms = 2_000;
 const MIN_N: usize = 30;
 /// Standard errors subtracted from the average return.
 const SE_K: f64 = 2.0;
@@ -149,6 +155,25 @@ pub const SAFE_MAX_FOLLOWED: f64 = 0.10;
 /// The smallest bookmaker move the replay measures and the live bot takes. Every bookmaker update
 /// is a trigger (hundreds a minute): smaller moves tested worse and measuring them all takes hours.
 pub const LIVE_MIN_MOVE: f64 = 0.07;
+/// A game's delay score: how much of earlier bookmaker jumps Polymarket made AFTER them, less how
+/// much it had already made before them (`consensus::Ctx::follow - lead`). Under this, or with no
+/// earlier jump to judge by, Polymarket has not been trailing the bookmakers in this game.
+pub const WEAK_SCORE: f64 = 0.2;
+/// The share of the usual stake put on a move in such a game. The move is still taken: skipping it
+/// frees the game for a later, worse move (tools/blend.py, 17-20 Nov: the same 70 trades at half
+/// stake in weak games lost $36 instead of $65 for $10 less profit; on 3,356 recorded moves
+/// Polymarket caught up 8% of the move at the lowest scores and 28% at the highest).
+pub const WEAK_STAKE: f64 = 0.5;
+
+/// The delay score of a move's game (None = no earlier jump in the game).
+pub fn delay_score(cx: &crate::consensus::Ctx) -> Option<f64> {
+    (cx.jumps > 0).then(|| cx.follow - cx.lead)
+}
+
+/// The stake factor of a safe-set move: full in a game where Polymarket trails, `WEAK_STAKE` elsewhere.
+pub fn stake_factor(cx: &crate::consensus::Ctx) -> f64 {
+    if delay_score(cx).is_some_and(|s| s >= WEAK_SCORE) { 1.0 } else { WEAK_STAKE }
+}
 /// Bookmakers moving the same way within this long of the first one are one move.
 pub const MOVE_MS: Ms = 90_000;
 /// A bookmaker update this far from that bookmaker's previous price is a trigger (snipebot).
@@ -239,11 +264,15 @@ pub fn rules_ready() -> bool {
 }
 
 /// The rules tested on the live path on 17-19 Nov 2026 (tools/live_eval.py and the replay agree
-/// on them trade for trade): 10+ point move, Polymarket followed at most 5%, 4c+ expected gain,
-/// spread at most 4c, sell at full catch-up, no buy after a pause. The give-up time comes from
-/// the settings.
+/// on them trade for trade): Polymarket followed at most 5%, 4c+ expected gain, spread at most
+/// 4c, sell at full catch-up, no buy after a pause. The give-up time comes from the settings.
+/// The move must be 8+ points (10 until 21 Nov 2026). On the replay of 17-20 Nov with the moves
+/// inside gaps of the recording left out, and no Dota 2: 10 points 29 trades +$32, 8 points 41
+/// trades +$56, more on each of the four days; with `Flt::picked`'s 50% as well 34 trades, 76%
+/// won, +$61, worst trade -$3.37 (tools/sweep.py on the flagged set; TRADING-TRIED.md).
 pub fn pinned_rules() -> Policy {
-    Policy { min_books: 1, max_followed: 0.05, min_edge: 0.04, max_spread: 0.04, min_move: 0.10, catch: 1.0, give_up_s: 300, skip_after_pause: true, walk_book: true }
+    // give_up_s 900 since 22 Nov 2026 (owner: "15 min give up"; the live bot takes it from the settings, snipe.give_up_s).
+    Policy { min_books: 1, max_followed: 0.05, min_edge: 0.04, max_spread: 0.04, min_move: 0.08, catch: 1.0, give_up_s: 900, skip_after_pause: true, walk_book: true }
 }
 
 /// The Polymarket rules the bot trades now: the last pick, else the defaults.
@@ -328,7 +357,8 @@ pub struct Flt {
     pub lead: Option<f64>,
     pub z: Option<f64>,
     pub fams: Option<usize>,
-    /// Skip live basketball (swings every possession; the replay's big losers).
+    /// Skip the paper-only sports (see `paper_only`): live basketball (swings every possession;
+    /// the replay's big losers) and the sports with no record yet.
     pub no_basketball: bool,
     /// Nothing bought above this price (the wider set: 40c).
     pub max_px: Option<f64>,
@@ -343,6 +373,58 @@ pub struct Flt {
     /// slow side (19 Nov 02:49 UTC, Azuma Visaya: 25 points apart, then -63%).
     #[serde(default)]
     pub gap: Option<f64>,
+    /// Skip a WEAK game (delay score under `WEAK_SCORE`, or no earlier jump) when the price offered
+    /// is above this. Owner, 21 Nov 2026, "apply the losing signal filter": the one group of
+    /// trades under today's rules that lost money both in the clean replay (8 trades, 4 won,
+    /// -$1.58; leaving them out +$5.56) and with real money (3 trades, 0 won, -$3.15). A dear
+    /// price leaves little to gain, and in a weak game the catch-up is the less likely outcome.
+    #[serde(default)]
+    pub weak_cap: Option<f64>,
+}
+
+/// A Dota 2 game trades real money only with a spread up to this (owner, 21 Nov 2026, "apply the
+/// two winning signals": 4 clean replay trades, 4 won, +$14.22; with a wider spread it stays on
+/// paper). Thin evidence, and no more than a random group of 4 would give 1 time in 11.
+pub const DOTA_MAX_SPREAD: f64 = 0.02;
+
+/// A US basketball game (NBA or college), from the leagues the bookmakers list it under and the
+/// teams' names. Those lost in the replay; basketball elsewhere made +$7.62 on 5 clean trades
+/// (4 won) and +$0.36 on 3 paper trades against -$3.63 on 2 US ones.
+pub fn us_basketball_text(leagues_and_teams: &str) -> bool {
+    let s = leagues_and_teams.to_lowercase();
+    (s.replace("nbb", "").contains("nba") && !s.contains("wnba")) || s.contains("ncaa") || s.contains("college") || s.contains("(stud)") || s.contains("cbb")
+}
+
+pub fn us_basketball(c: &Connection, match_id: i64, home: &str, away: &str) -> bool {
+    let leagues: Vec<String> = c
+        .prepare_cached("SELECT DISTINCT league FROM book_events WHERE match_id = ?1 AND league IS NOT NULL")
+        .and_then(|mut st| st.query_map([match_id], |r| r.get::<_, String>(0)).map(|it| it.flatten().collect()))
+        .unwrap_or_default();
+    us_basketball_text(&format!("{} {home} {away}", leagues.join(" | ")))
+}
+
+/// Is THIS game paper-only? A paper-only sport, except basketball outside the US and Dota 2 with
+/// a tight spread (owner, 21 Nov 2026).
+pub fn paper_only_game(sport: &str, us_bb: bool, spread: f64) -> bool {
+    match sport {
+        "basketball" => us_bb,
+        "dota2" => spread > DOTA_MAX_SPREAD + 1e-9,
+        s => paper_only(s),
+    }
+}
+
+/// Sports real money does not trade. Basketball lost in the replay (US college games above
+/// all); American football and MMA were not recorded before 20 Nov 2026, so nothing is known
+/// about them. Dota 2 (21 Nov 2026): of the replay trades of 17-20 Nov bought while quotes were
+/// really being recorded, the 8 in Dota 2 won 2 and lost $20 (one lost the whole stake), and
+/// every other sport together won 16 of 25 for +$26 (tools/tells_final.py). Eight trades is thin
+/// evidence, so it is on paper, not dropped. The safe and wider sets skip these sports, live and
+/// in the replay alike; the bot trades them on their own paper wallet (`bots::SNIPE_TRIAL`, rules
+/// `Flt::trial`) until that record says otherwise.
+pub const PAPER_ONLY_SPORTS: &[&str] = &["basketball", "amfootball", "mma", "dota2"];
+
+pub fn paper_only(sport: &str) -> bool {
+    PAPER_ONLY_SPORTS.contains(&sport)
 }
 
 /// How far the bookmakers' consensus stood above Polymarket's price BEFORE the move, in the
@@ -357,7 +439,10 @@ impl Flt {
     /// gap moved 3+ pts, Polymarket followed 30%+ of earlier jumps in the game, <= 90c): 53
     /// trades in 1.8 days, all won, +29%/$, median hold 58 s.
     pub fn picked() -> Flt {
-        Flt { cap: true, fams: Some(2), cons: Some(0.03), follow: Some(0.3), no_basketball: true, gap: Some(0.10), ..Default::default() }
+        // follow 0.5 (0.3 until 21 Nov 2026): Polymarket must have made half of the earlier jumps in
+        // this game after the bookmakers. Same profit on the clean replay with half the largest
+        // drop ($4.59 against $8.81); see `pinned_rules`.
+        Flt { cap: true, fams: Some(2), cons: Some(0.03), follow: Some(0.5), no_basketball: true, gap: Some(0.10), weak_cap: Some(0.60), ..Default::default() }
     }
     /// The safe set as the live bot runs it: `picked` inside the trading hours of the settings.
     pub fn live() -> Flt {
@@ -369,9 +454,23 @@ impl Flt {
     pub fn wider() -> Flt {
         Flt { cap: true, fams: Some(2), follow: Some(0.2), no_basketball: true, max_px: Some(0.40), skip_feeds: true, hours: crate::bots::settings().snipe.hours(), gap: Some(0.10), ..Default::default() }
     }
+    /// The paper trial of the sports real money does not trade: the safe set's rules with those
+    /// sports let in, at every hour (most of their games are played at night in Europe).
+    pub fn trial() -> Flt {
+        Flt { no_basketball: false, ..Flt::picked() }
+    }
+    /// These filters for one game: a paper-only sport's game that real money may trade (see
+    /// `paper_only_game`) is not refused for its sport.
+    pub fn for_game(&self, sport: &str, us_bb: bool, spread: f64) -> Flt {
+        if self.no_basketball && paper_only(sport) && !paper_only_game(sport, us_bb, spread) {
+            Flt { no_basketball: false, ..*self }
+        } else {
+            *self
+        }
+    }
     fn keep(&self, c: &Cand) -> bool {
         // The price the live bot tests: the offer plus its 1c margin.
-        self.check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)).is_none()
+        self.for_game(&c.sport, c.us_bb, c.sp[0].max(c.sp[1])).check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)).is_none()
     }
     /// Why a move fails the filters (None = passes). `tr` = [pm_tr, b_tr5, b_tr10, b_rng].
     pub fn check(&self, sport: &str, trigger: &str, t: Ms, px: f64, bm: [f64; 2], tr: [f64; 4], cx: &crate::consensus::Ctx, gap: Option<f64>) -> Option<&'static str> {
@@ -388,8 +487,8 @@ impl Flt {
         if self.skip_feeds && matches!(snipe::platform(trigger), "duel" | "1xbet" | "olimp" | "betcity") {
             return Some("weak_feed");
         }
-        if self.no_basketball && sport == "basketball" {
-            return Some("basketball");
+        if self.no_basketball && paper_only(sport) {
+            return Some(if sport == "basketball" { "basketball" } else { "paper_only_sport" });
         }
         if self.fams.is_some_and(|k| cx.fam_moved < k) {
             return Some("too_few_feeds");
@@ -414,6 +513,10 @@ impl Flt {
         }
         if self.cap && px > 0.90 {
             return Some("price_too_high");
+        }
+        // `px` is the offer plus the 1c the bot adds when it tests a price.
+        if self.weak_cap.is_some_and(|cap| px - SLIP > cap + 1e-9 && stake_factor(cx) < 1.0) {
+            return Some("weak_game_dear_price");
         }
         if self.pm_trend.is_some_and(|t| pm_tr < -t) {
             return Some("polymarket_trend_against");
@@ -525,6 +628,13 @@ struct Cand {
     /// locked the game, so the replay must see it too.
     #[serde(default)]
     nofill: bool,
+    /// The buy falls where the Polymarket recording had a gap (`Seen`): the prices around it are
+    /// not what the market showed, so no replay takes this move or lets it lock its game.
+    #[serde(default)]
+    blind: bool,
+    /// A US basketball game (`us_basketball`): those stay on paper.
+    #[serde(default)]
+    us_bb: bool,
     /// The price tested at each of the two tests (best offer + 1c), as the live gate sees it.
     #[serde(default)]
     dec: [f64; 2],
@@ -697,6 +807,8 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &Mv, tb: &str, t0: Ms, base:
             fol_start: f2,
             late_ms: 0,
             nofill: true,
+            blind: false,
+            us_bb: false,
             dec: [d1, d2],
             pre_mid,
         });
@@ -794,6 +906,8 @@ fn make_cand(c: &Connection, q: &mut dyn Quotes, e: &Mv, tb: &str, t0: Ms, base:
         fol_start: f2,
         late_ms: 0,
         nofill: false,
+        blind: false,
+        us_bb: false,
         dec: [d1, d2],
         pre_mid,
     })
@@ -833,20 +947,60 @@ fn after_book(q: &mut dyn Quotes, mid: i64, o: &str, dir: f64, t: Ms, now: Ms) -
 /// trends in our direction.
 pub(crate) fn trends(c: &Connection, q: &mut dyn Quotes, tb: &str, mid: i64, o: &str, dir: f64, t0: Ms, pre_mid: f64, b_pre: f64, b_now: f64) -> (f64, f64, f64, f64) {
     let pm_tr = q.at(mid, o, t0 - 600_000).map(|x| (pre_mid - (x.0 + x.1) / 2.0) * dir).unwrap_or(0.0);
-    let b_tr5 = snipe::book_prob(c, tb, mid, o, t0 - 300_000).map(|b| (b_now - b) * dir).unwrap_or(b_now - b_pre);
-    let b_tr10 = snipe::book_prob(c, tb, mid, o, t0 - 600_000).map(|b| (b_pre - b) * dir).unwrap_or(0.0);
+    // A bookmaker with no price at some moment has none at any earlier moment either, so the
+    // first "no price" ends the looking back. The numbers are the same; a bookmaker that listed
+    // the game minutes ago no longer costs twenty more searches through the game's history.
+    let b5 = snipe::book_prob(c, tb, mid, o, t0 - 300_000);
+    let b10 = if b5.is_some() { snipe::book_prob(c, tb, mid, o, t0 - 600_000) } else { None };
+    let b_tr5 = b5.map(|b| (b_now - b) * dir).unwrap_or(b_now - b_pre);
+    let b_tr10 = b10.map(|b| (b_pre - b) * dir).unwrap_or(0.0);
     // Range: the book's price every 30 s over the 10 min before the move window.
     let (mut lo, mut hi) = (b_pre, b_pre);
     for k in 1..=20 {
-        if let Some(b) = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS - k * 30_000) {
-            lo = lo.min(b);
-            hi = hi.max(b);
-        }
+        let Some(b) = snipe::book_prob(c, tb, mid, o, t0 - snipe::PRE_MS - k * 30_000) else { break };
+        lo = lo.min(b);
+        hi = hi.max(b);
     }
     (pm_tr, b_tr5, b_tr10, hi - lo)
 }
 
 /// Every move in [start, end) for both markets.
+/// When the Polymarket recording was receiving nothing. On 17-18 Nov 2026 the bot's own feed ran
+/// 5-30 s late and whole stretches of quotes never arrived: by Polymarket's clock NO game has a
+/// quote for 30-60 s. A move measured inside such a stretch "buys" the last price before it and
+/// "sells" the first one after it. Of the 70 trades the bot's rules took in the replay of
+/// 17-20 Nov, the 37 inside a stretch made +$103 and the 33 outside made +$5
+/// (tools/hole_check2.py, tools/tells_final.py). Reading quotes by Polymarket's own clock does
+/// not help: the quotes are not late, they are missing.
+struct Seen {
+    /// Polymarket's own time of every recorded quote of every game, sorted.
+    own: Vec<Ms>,
+}
+
+impl Seen {
+    fn load(c: &Connection) -> Seen {
+        let mut own: Vec<Ms> = Vec::new();
+        if let Ok(mut st) = c.prepare("SELECT CASE WHEN server_ts_ms > 0 THEN server_ts_ms ELSE ts_ms END FROM pm_quotes") {
+            if let Ok(rows) = st.query_map([], |r| r.get::<_, Ms>(0)) {
+                own.extend(rows.flatten());
+            }
+        }
+        own.sort_unstable();
+        Seen { own }
+    }
+    /// How long the whole feed was silent around `t`: from the last quote at or before it to the
+    /// first one after it (to `t` itself when nothing came after yet). Nothing recorded before
+    /// `t` at all = unknown, counted as silent.
+    fn silent(&self, t: Ms) -> Ms {
+        let i = self.own.partition_point(|x| *x <= t);
+        match (i, self.own.get(i)) {
+            (0, _) => Ms::MAX,
+            (_, Some(next)) => next - self.own[i - 1],
+            (_, None) => t - self.own[i - 1],
+        }
+    }
+}
+
 fn build_chunk(db: &std::path::Path, start: Ms, end: Ms, now: Ms) -> anyhow::Result<[Vec<Cand>; 2]> {
     build_chunk_with(db, start, end, now, (REACTION, CONFIRM))
 }
@@ -867,6 +1021,10 @@ fn build_chunk_with(db: &std::path::Path, start: Ms, end: Ms, now: Ms, tm: (Ms, 
     // Everything this block reads, copied into memory in one sequential pass: the database is
     // bigger than this machine's free memory, so random reads on disk made the build crawl.
     let c = mem_copy(db, start - MEM_BEFORE_MS, end + MEM_AFTER_MS)?;
+    let seen = Seen::load(&c);
+    // The leagues a game is listed under live in the full database (the copy has Kalshi's only).
+    let real = crate::store::open_ro(db).ok();
+    let mut us_bb: HashMap<i64, bool> = HashMap::new();
     let mut out: [Vec<Cand>; 2] = [Vec::new(), Vec::new()];
     // Polymarket: the moves the LIVE bot triggers on (every bookmaker update that jumps), measured
     // by the same steps, so the replay and the bot look at the same things.
@@ -881,6 +1039,10 @@ fn build_chunk_with(db: &std::path::Path, start: Ms, end: Ms, now: Ms, tm: (Ms, 
             let e = Mv { match_id: mv.match_id, sport: &sport, home: &home, away: &away, outcome: mv.outcome, direction: mv.dir };
             let Some(mut cd) = make_cand(&c, &mut *q, &e, &mv.book, mv.t0, PM, now, tm) else { continue };
             cd.late_ms = mv.t0 - mv.start;
+            cd.blind = seen.silent(cd.tf) > HOLE_MS;
+            if sport == "basketball" {
+                cd.us_bb = *us_bb.entry(mv.match_id).or_insert_with(|| real.as_ref().is_some_and(|r| us_basketball(r, mv.match_id, &home, &away)));
+            }
             if mv.start < mv.t0 {
                 // As snipebot::measure: Polymarket's move since 10 s before the first bookmaker.
                 if let (Some(qs), Some(q2)) = (q.at(mv.match_id, mv.outcome, mv.start - snipe::PRE_MS), q.at(mv.match_id, mv.outcome, mv.t0 + tm.0 + tm.1)) {
@@ -1077,6 +1239,10 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
         if c.tf >= to {
             break;
         }
+        // Measured inside a gap in the recording: nothing about it is known.
+        if c.blind {
+            continue;
+        }
         if c.books[0] < p.min_books
             || c.books[1] < p.min_books
             || c.bm[0] < p.min_move
@@ -1255,7 +1421,7 @@ fn simulate<'a>(cands: &[&'a Cand], segs: &[(Policy, Ms, Ms)], known_by: Ms, ban
                     true
                 }
             });
-            let stake = (bank.pct * (bank.start + closed)).min(cash);
+            let stake = (bank.pct * (bank.start + closed) * stake_factor(&c.cx)).min(cash);
             if stake < snipe::MIN_FILL {
                 return false; // broke, or all cash in open trades
             }
@@ -1529,7 +1695,7 @@ fn step(app: &App) -> anyhow::Result<()> {
     // late and are dropped (19 Nov: 10% of them). The traded rules are pinned, so the replay can
     // wait; it catches up as soon as real money is off.
     if crate::bots::mode(crate::bots::SNIPE) == Some(true) {
-        ST.lock().status = "paused while real money is on".into();
+        ST.lock().status = if todo.is_empty() { "paused while real money is on".to_string() } else { format!("paused while real money is on: {} blocks wait to be measured (moves inside gaps in the recording are now left out)", todo.len()) };
         return Ok(());
     }
     for batch in todo.chunks(BUILD_THREADS) {
@@ -1830,7 +1996,7 @@ pub fn bot_sim(cfg: &crate::bots::SnipeCfg, walk_forward: bool, one_book: bool, 
             (cfg.b_pct * (start + closed)).min(cfg.b_max_trade)
         } else {
             let k = if cfg.edge_sizing { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
-            (cfg.pct * (start + closed) * k).min(cfg.c.max_trade)
+            (cfg.pct * (start + closed) * k).min(cfg.c.max_trade) * stake_factor(&c.cx)
         }
         .min(cash)
         .min(cfg.c.max_open - open_cost);
@@ -1870,7 +2036,7 @@ fn why_not(c: &Cand, p: &Policy, f: &Flt) -> Option<&'static str> {
     if c.sp[0] > p.max_spread + 1e-9 || c.sp[1] > p.max_spread + 1e-9 {
         return Some("spread_too_wide");
     }
-    if let Some(why) = f.check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)) {
+    if let Some(why) = f.for_game(&c.sport, c.us_bb, c.sp[0].max(c.sp[1])).check(&c.sport, &c.trigger, c.tf, c.gate_px(), c.bm, [c.pm_tr, c.b_tr5, c.b_tr10, c.b_rng], &c.cx, gap_before(&c.cx, c.dir as f64, c.pre_mid)) {
         return Some(why);
     }
     if c.edge[0][ci] < p.min_edge || c.edge[1][ci] < p.min_edge {
@@ -2068,6 +2234,22 @@ pub fn closed_since(since: Ms) -> Vec<Value> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn stake_is_halved_where_polymarket_does_not_trail() {
+        let cx = |jumps, follow, lead| crate::consensus::Ctx { jumps, follow, lead, ..Default::default() };
+        // Polymarket moves after the bookmakers in this game: the full stake.
+        assert_eq!(stake_factor(&cx(5, 0.9, 0.2)), 1.0);
+        assert_eq!(delay_score(&cx(5, 0.9, 0.2)).map(|s| (s * 100.0).round()), Some(70.0));
+        // It moves first as much as after, or first: half.
+        assert_eq!(stake_factor(&cx(5, 0.6, 0.5)), WEAK_STAKE);
+        assert_eq!(stake_factor(&cx(5, 0.3, 1.2)), WEAK_STAKE);
+        // No earlier jump to judge by: half.
+        assert_eq!(stake_factor(&cx(0, 0.0, 0.0)), WEAK_STAKE);
+        assert_eq!(delay_score(&cx(0, 0.0, 0.0)), None);
+        // Half of the usual $12 is still above the smallest real order.
+        assert!(12.0 * WEAK_STAKE >= crate::snipe::MIN_REAL_STAKE);
+    }
+
     fn cand(px: f64, buy: Option<(f64, f64)>) -> Cand {
         Cand {
             match_id: 1,
@@ -2098,6 +2280,8 @@ mod tests {
             fol_start: 0.0,
             late_ms: 0,
             nofill: false,
+            blind: false,
+            us_bb: false,
             dec: [0.0, 0.0],
             pre_mid: 0.0,
         }
@@ -2106,6 +2290,71 @@ mod tests {
     /// Not a unit test: builds the replay's candidates for a time span from the real database
     /// and writes them, with the trades the live rules take, as JSON, to compare with
     /// tools/live_emu.py (the checked copy of the live bot). SWIFTEYE_DB, FROM_MS, TO_MS, OUT.
+
+    #[test]
+    fn paper_only_sports_never_pass_the_sets_real_money_trades() {
+        // A move that passes every other rule of the safe set.
+        let cx = crate::consensus::Ctx { fams: 5, fam_moved: 3, cons_move: 0.05, cons_now: 0.6, gap_shock: 0.05, jumps: 3, follow: 0.6, ..Default::default() };
+        let why = |f: &Flt, sport: &str, px: f64| f.check(sport, "pinnacle", 0, px, [0.12, 0.12], [0.0; 4], &cx, Some(0.0));
+        let safe = Flt::picked();
+        assert_eq!(why(&safe, "tennis", 0.60), None);
+        assert_eq!(why(&safe, "basketball", 0.60), Some("basketball"));
+        assert_eq!(why(&safe, "amfootball", 0.60), Some("paper_only_sport"));
+        assert_eq!(why(&safe, "mma", 0.60), Some("paper_only_sport"));
+        // The trial lets exactly those in, and is the safe set in everything else.
+        let trial = Flt::trial();
+        for s in PAPER_ONLY_SPORTS {
+            assert!(paper_only(s));
+            assert_eq!(why(&trial, s, 0.60), None, "{s}");
+            assert_eq!(why(&trial, s, 0.95), Some("price_too_high"), "{s}");
+        }
+        assert!(!paper_only("tennis") && !paper_only("cs2") && !paper_only("football"));
+        assert!(paper_only("dota2"));
+    }
+    #[test]
+    fn basketball_outside_the_us_and_tight_dota_games_may_trade_real_money() {
+        assert!(us_basketball_text("NCAA | Citadel Bulldogs South Carolina State"));
+        assert!(us_basketball_text("USA. NBA | Boston Celtics Miami Heat"));
+        assert!(us_basketball_text("Stephen F. Austin (stud) Indiana State"));
+        assert!(!us_basketball_text("Euroleague | Barcelona Crvena Zvezda"));
+        assert!(!us_basketball_text("Brazil. NBB | Flamengo Franca")); // NBB is not the NBA
+        assert!(!us_basketball_text("USA. WNBA | Aces Liberty"));
+        assert!(paper_only_game("basketball", true, 0.01));
+        assert!(!paper_only_game("basketball", false, 0.04));
+        assert!(!paper_only_game("dota2", false, 0.02));
+        assert!(paper_only_game("dota2", false, 0.03));
+        assert!(paper_only_game("mma", false, 0.01) && paper_only_game("amfootball", false, 0.01));
+        assert!(!paper_only_game("cs2", false, 0.04) && !paper_only_game("tennis", false, 0.04));
+        // The live filters refuse the sport, the game's own filters do not.
+        let f = Flt::picked();
+        assert!(f.no_basketball && !f.for_game("basketball", false, 0.03).no_basketball);
+        assert!(f.for_game("basketball", true, 0.03).no_basketball && f.for_game("dota2", false, 0.03).no_basketball);
+        assert!(!f.for_game("dota2", false, 0.02).no_basketball);
+    }
+    #[test]
+    fn a_weak_game_is_not_bought_above_60c() {
+        let f = Flt { weak_cap: Some(0.60), ..Default::default() };
+        let cx = |follow: f64, lead: f64, jumps: usize| crate::consensus::Ctx { fams: 5, fam_moved: 3, cons_move: 0.05, cons_now: 0.5, gap_shock: 0.05, jumps, follow, lead, z: 3.0 };
+        let why = |c: &crate::consensus::Ctx, px: f64| f.check("cs2", "pinnacle", 0, px, [0.12, 0.12], [0.0; 4], c, Some(0.0));
+        let (weak, strong, fresh) = (cx(0.6, 0.6, 5), cx(0.9, 0.3, 5), cx(0.0, 0.0, 0));
+        assert_eq!(why(&weak, 0.66), Some("weak_game_dear_price")); // offer 65c
+        assert_eq!(why(&fresh, 0.66), Some("weak_game_dear_price")); // no earlier jump = weak
+        assert_eq!(why(&weak, 0.61), None); // offer 60c: allowed
+        assert_eq!(why(&strong, 0.85), None); // a strong game at any price
+    }
+    #[test]
+    fn a_gap_in_the_recording_is_measured_around_the_buy() {
+        // Quotes every 250 ms, then nothing for 40 s (the feed fell behind), then quotes again.
+        let mut own: Vec<Ms> = (0..40).map(|i| 1_000_000 + i * 250).collect();
+        own.extend((0..40).map(|i| 1_050_000 + i * 250));
+        let s = Seen { own };
+        assert_eq!(s.silent(1_005_100), 250); // quotes flowing
+        assert!(s.silent(1_020_000) > HOLE_MS); // inside the gap
+        assert_eq!(s.silent(1_020_000), 1_050_000 - 1_009_750);
+        assert_eq!(s.silent(1_055_000), 250);
+        assert_eq!(s.silent(999_000), Ms::MAX); // before anything was recorded: unknown
+        assert_eq!(s.silent(1_060_000), 1_060_000 - 1_059_750); // after the last quote: silent so far
+    }
     #[test]
     #[ignore]
     fn dump_live_path() {
@@ -2128,7 +2377,7 @@ mod tests {
             .iter()
             .map(|c| {
                 json!({"t0": c.t0, "tf": c.tf, "m": c.match_id, "o": c.outcome, "d": c.dir, "book": c.trigger, "bm": c.bm, "fol": c.fol, "fol_start": c.fol_start,
-                    "late_ms": c.late_ms, "sp": c.sp, "edge": [c.edge[0][2], c.edge[1][2]], "px": c.px, "pause": c.pause, "sport": c.sport, "cx": c.cx, "nofill": c.nofill, "pre_mid": c.pre_mid, "gap_before": gap_before(&c.cx, c.dir as f64, c.pre_mid),
+                    "late_ms": c.late_ms, "sp": c.sp, "edge": [c.edge[0][2], c.edge[1][2]], "px": c.px, "pause": c.pause, "sport": c.sport, "cx": c.cx, "nofill": c.nofill, "blind": c.blind, "us_bb": c.us_bb, "pre_mid": c.pre_mid, "gap_before": gap_before(&c.cx, c.dir as f64, c.pre_mid),
                     "x900": c.exits[2][3].map(|x| json!([x.ts, x.px, x.caught])), "x300": c.exits[2][2].map(|x| json!([x.ts, x.px, x.caught]))})
             })
             .collect();

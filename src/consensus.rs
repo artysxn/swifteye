@@ -21,12 +21,21 @@ const STEP_MS: Ms = 5_000;
 const JUMP: f64 = 0.03;
 /// Sentinel for "not measured" (kept finite so the replay cache stays valid JSON).
 pub const UNKNOWN: f64 = -9.0;
+/// The earlier-jumps history ('followed' / 'lead') reads Polymarket by its OWN clock, as if every price
+/// reached us this much late (22 Nov 2026, owner: "Update the bot to have the 5s slack"). Read by arrival
+/// time, 'followed' swung with our feed's delay: the late feed of 17-18 Nov let more moves through and
+/// they paid; on time (from 21 Nov) it let few through. On Polymarket's clock + 5 s, the replay of 17-21
+/// Nov: 41 trades, 76% won; today's rules with an on-time feed: 31, 61% (tools/lag_shift.py, wallet_best.py).
+pub const FOLLOW_SLACK_MS: Ms = 5_000;
 
 /// Every bookmaker's and Polymarket's price for one (match, outcome) over a time span.
 pub struct Series {
     /// Per book: (family, [(ts, implied probability)] sorted by time).
     books: Vec<(String, Vec<(Ms, f64)>)>,
     pm: Vec<(Ms, f64)>,
+    /// Polymarket's middle by its own clock (pm_quotes; empty for Kalshi or a market with no quotes):
+    /// the earlier-jumps history reads this, shifted by FOLLOW_SLACK_MS.
+    pm_own: Vec<(Ms, f64)>,
 }
 
 /// What the move looks like against the whole market and this game's history.
@@ -99,6 +108,18 @@ impl Series {
             }
         }
         pm.sort_by_key(|x| x.0);
+        // Polymarket by its own clock, for the earlier-jumps history (Polymarket only).
+        let mut pm_own: Vec<(Ms, f64)> = Vec::new();
+        if base == "polymarket" {
+            if let Ok(mut st) = c.prepare_cached(
+                "SELECT CASE WHEN server_ts_ms > 0 THEN server_ts_ms ELSE ts_ms END, (bid + ask) / 2.0 FROM pm_quotes WHERE match_id = ?1 AND outcome = ?2 AND bid > 0 AND ask > 0 AND ts_ms >= ?3 AND ts_ms <= ?4",
+            ) {
+                if let Ok(it) = st.query_map(params![match_id, outcome, from - MAX_AGE_MS, to], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, f64>(1)?))) {
+                    pm_own.extend(it.flatten());
+                }
+            }
+            pm_own.sort_by_key(|x| x.0);
+        }
         Series {
             books: books
                 .into_iter()
@@ -108,6 +129,7 @@ impl Series {
                 })
                 .collect(),
             pm,
+            pm_own,
         }
     }
 
@@ -133,6 +155,16 @@ impl Series {
 
     pub fn pm_at(&self, t: Ms) -> Option<f64> {
         at(&self.pm, t).filter(|x| t - x.0 <= MAX_AGE_MS).map(|x| x.1)
+    }
+
+    /// Polymarket for the earlier-jumps history: its own clock, seen FOLLOW_SLACK_MS late (arrival time
+    /// when there is no own-clock series, e.g. Kalshi).
+    fn pm_hist(&self, t: Ms) -> Option<f64> {
+        if self.pm_own.is_empty() {
+            return self.pm_at(t);
+        }
+        let ts = t - FOLLOW_SLACK_MS;
+        at(&self.pm_own, ts).filter(|x| ts - x.0 <= MAX_AGE_MS).map(|x| x.1)
     }
 
     /// The move from `pre` to `now` measured against the whole market and this game's history.
@@ -166,7 +198,7 @@ impl Series {
                 if let (Some(a), Some(b)) = (self.cons_at(t - 10_000), self.cons_at(t)) {
                     let j = b - a;
                     if j.abs() >= JUMP {
-                        if let (Some(p40), Some(p0), Some(p60)) = (self.pm_at(t - 40_000), self.pm_at(t), self.pm_at(t + 60_000)) {
+                        if let (Some(p40), Some(p0), Some(p60)) = (self.pm_hist(t - 40_000), self.pm_hist(t), self.pm_hist(t + 60_000)) {
                             led.push((p0 - p40) / j);
                             fol.push((p60 - p0) / j);
                             last = t;

@@ -141,6 +141,15 @@ fn rank_job(app: &Arc<App>, q: &LagQ) -> Job {
     })
 }
 
+/// Whether to keep the Rankings and Snipe-window pages warm right now. Warming re-reads a whole
+/// day of price changes every time: on a busy day that is one thread reading the database
+/// without a break, beside the live bot's own reads (Saturday 21 Nov 2026: the Polymarket feed
+/// ran seconds late for hours). With real money on, the pages are worked out when someone opens
+/// them instead.
+fn warm_pages(real_money_on: bool) -> bool {
+    !real_money_on
+}
+
 /// Keep the default Rankings view (last 24 h, default thresholds) warm, so pages open instantly.
 pub fn spawn_warmer(app: Arc<App>) {
     // Real Kalshi spreads for the hours before real quotes were recorded (once per start).
@@ -154,6 +163,10 @@ pub fn spawn_warmer(app: Arc<App>) {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         loop {
+            if !warm_pages(crate::bots::mode(crate::bots::SNIPE) == Some(true)) {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
             let mut q = LagQ::default();
             q.since = Some(now() - 24 * 3_600_000);
             if let Err(e) = rankings_cached(&app, &q).await {
@@ -404,7 +417,7 @@ impl KalshiQuotes<'_> {
     fn mid(&self, match_id: i64, outcome: &str, t: Ms) -> Option<(f64, Ms)> {
         let mut st = self
             .c
-            .prepare_cached("SELECT new_price, ts_ms FROM changes WHERE match_id = ?1 AND book = 'kalshi' AND market = '1x2' AND outcome = ?2 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1")
+            .prepare_cached("SELECT new_price, ts_ms FROM changes WHERE match_id = ?1 AND +book = 'kalshi' AND market = '1x2' AND outcome = ?2 AND ts_ms <= ?3 ORDER BY ts_ms DESC LIMIT 1")
             .ok()?;
         let (p, ts): (Option<f64>, Ms) = st.query_row(params![match_id, outcome, t], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok()??;
         if t - ts > STALE_MS {
@@ -500,7 +513,7 @@ pub(crate) fn reopened(c: &Connection, book: &str, match_id: i64, outcome: &str,
     let Ok(mut st) = c.prepare_cached(
         "SELECT 1 FROM changes o WHERE o.match_id = ?1 AND o.book = ?2 AND o.market = '1x2' AND o.outcome = ?3
            AND o.kind = 'open' AND o.ts_ms > ?4 AND o.ts_ms <= ?5
-           AND EXISTS (SELECT 1 FROM changes p WHERE p.match_id = ?1 AND p.book = ?2 AND p.market = '1x2'
+           AND EXISTS (SELECT 1 FROM changes p WHERE p.match_id = ?1 AND +p.book = ?2 AND p.market = '1x2'
                          AND p.outcome = ?3 AND p.ts_ms < o.ts_ms)
          LIMIT 1",
     ) else {
@@ -543,9 +556,14 @@ pub(crate) fn confirmations(e: &RankEvent, t: Ms) -> usize {
 /// not count: across a goal the book suspends, then reopens at the new price, and the move is
 /// measured from the price before the suspension (as the move detector in rank.rs does).
 /// Gaps in recording are handled separately (`reopened`).
+/// `+book` keeps SQLite on the (match_id, ts_ms) index: it walks back through this GAME's rows.
+/// Without it SQLite 3.46 picks (book, ts_ms) and walks back through every row the BOOKMAKER
+/// ever sent, for all games, until one matches. When the bookmaker listed the game only minutes
+/// ago and there is no earlier row, that was its whole history: one lookup took minutes. The `+`
+/// changes which index is used, never the answer. The same hint is on the two queries above.
 pub(crate) fn book_prob(c: &Connection, book: &str, match_id: i64, outcome: &str, t: Ms) -> Option<f64> {
     let mut st = c
-        .prepare_cached("SELECT new_price FROM changes WHERE match_id = ?1 AND book = ?2 AND market = '1x2' AND outcome = ?3 AND ts_ms <= ?4 AND new_price IS NOT NULL ORDER BY ts_ms DESC LIMIT 1")
+        .prepare_cached("SELECT new_price FROM changes WHERE match_id = ?1 AND +book = ?2 AND market = '1x2' AND outcome = ?3 AND ts_ms <= ?4 AND new_price IS NOT NULL ORDER BY ts_ms DESC LIMIT 1")
         .ok()?;
     let p: Option<Option<f64>> = st.query_row(params![match_id, book, outcome, t], |r| r.get(0)).optional().ok()?;
     Some(1.0 / p??.max(1.0001))
@@ -606,6 +624,10 @@ struct Buy<'a> {
 pub(crate) const SAME_MOVE_MS: Ms = 120_000;
 /// With a known book, a fill under this many dollars is not a trade.
 pub(crate) const MIN_FILL: f64 = 10.0;
+/// The smallest REAL stake the bot places. Polymarket's own floor is 5 shares, which is about $4.60
+/// at the highest price the bot pays (90c plus 2c of slip), so $5 always clears it. `MIN_FILL` stays
+/// what the replay and the paper wallet call "too small to be a trade".
+pub(crate) const MIN_REAL_STAKE: f64 = 5.0;
 
 /// Buy for `stake` at `price` with `best` contracts resting there and `near` within 2c
 /// (including `best`); the rest of `near` fills 2c worse, anything beyond is not filled.
@@ -1031,7 +1053,7 @@ pub async fn kalshi_backfill(app: &Arc<App>, days: i64) -> Result<Value, String>
             for k in cv["candlesticks"].as_array().into_iter().flatten() {
                 let px = |side: &str| crate::books::num(&k[side]["close_dollars"]).or_else(|| crate::books::num(&k[side]["close"]).map(|c| c / 100.0)).filter(|x| *x > 0.0 && *x < 1.0);
                 let Some(ts) = k["end_period_ts"].as_i64() else { continue };
-                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true, depth: Default::default() };
+                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true, depth: Default::default(), book: (None, None) };
                 if app.tx.send(w).await.is_ok() {
                     rows += 1;
                 }
@@ -1046,6 +1068,19 @@ pub async fn kalshi_backfill(app: &Arc<App>, days: i64) -> Result<Value, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pages_are_kept_warm_only_while_real_money_is_off() {
+        assert!(warm_pages(false));
+        assert!(!warm_pages(true));
+    }
+
+    #[test]
+    fn smallest_real_stake_clears_polymarkets_five_shares() {
+        // The bot pays at most 90c plus 2c of slip: the smallest stake must still buy 5 shares there.
+        assert!(MIN_REAL_STAKE / 0.92 >= 5.0);
+        assert!(MIN_REAL_STAKE <= MIN_FILL);
+    }
 
     #[test]
     fn fills_stop_at_the_book() {

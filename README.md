@@ -139,6 +139,9 @@ Link a bot on the **Telegram** page. It sends buys and sales with charts, and an
 | `/safety` | Where a real run stands against each stop |
 | `/rules`, `/settings`, `/signals` | What the bot trades and why it skipped moves |
 | `/realon` | Starts a real run. It shows what would start and waits for `/realon yes` |
+| `/runstatus`, `/runs` | The real run: time left, result so far; earlier runs |
+| `/trial` | Paper trial of the sports real money does not trade (basketball, American football, UFC) |
+| `/extend 4`, `/until 22:00` | Keep the run going longer, or set when it ends |
 | `/realoff`, `/stoprun` | Real money off |
 | `/kill`, `/unkill` | Stop or resume all new trades |
 | `/help` | Every command |

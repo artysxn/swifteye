@@ -21,7 +21,7 @@
 //! The shadow bot (`snipe-1book`) takes the same moves with 1 bookmaker instead of the picked
 //! count, on paper, as the live A/B test of that rule.
 
-use crate::bots::{self, SNIPE, SNIPE_SHADOW};
+use crate::bots::{self, SNIPE, SNIPE_SHADOW, SNIPE_TRIAL};
 use crate::model::*;
 use crate::snipe;
 use crate::venue::{self, Fee};
@@ -32,6 +32,10 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+
+/// CS2 moves from this size up to the rules' minimum go to the paper trial: an 8-point minimum
+/// gained in CS2 alone on the 17-20 Nov backtest (tools/blend.py), so it earns a paper record first.
+const TRIAL_MIN_MOVE_CS2: f64 = 0.08;
 
 const REACTION: Ms = 1_000;
 const CONFIRM: Ms = 500;
@@ -76,7 +80,7 @@ static ST: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
 pub fn status() -> Value {
     let s = ST.lock();
-    json!({"candidates": s.candidates, "skipped": s.skipped, "entered": s.entered, "recent": s.recent})
+    json!({"candidates": s.candidates, "skipped": s.skipped, "entered": s.entered, "recent": s.recent, "pm_lag_ms": venue::pm_lag_ms()})
 }
 
 /// Where the app's database is (signals log).
@@ -138,8 +142,8 @@ pub fn spawn(app: Arc<App>) {
     }
     // Open trades from before a restart keep being watched.
     if let Ok(c) = crate::store::open_ro(&app.db_path) {
-        if let Ok(mut st) = c.prepare("SELECT id, data FROM bot_trades WHERE closed_ms IS NULL AND bot IN (?1, ?2)") {
-            let rows: Vec<(i64, String)> = st.query_map(params![SNIPE, SNIPE_SHADOW], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.filter_map(|x| x.ok()).collect()).unwrap_or_default();
+        if let Ok(mut st) = c.prepare("SELECT id, data FROM bot_trades WHERE closed_ms IS NULL AND bot IN (?1, ?2, ?3)") {
+            let rows: Vec<(i64, String)> = st.query_map(params![SNIPE, SNIPE_SHADOW, SNIPE_TRIAL], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.filter_map(|x| x.ok()).collect()).unwrap_or_default();
             for (id, d) in rows {
                 if let Ok(v) = serde_json::from_str::<Value>(&d) {
                     tokio::spawn(monitor(app.clone(), id, v));
@@ -231,13 +235,32 @@ fn on_change(app: &Arc<App>, ch: &Change) {
             note(SNIPE, "measured_too_late", j);
             return;
         }
-        if let Some(real) = main {
+        // A sport real money does not trade (no record yet, or a losing one): the safe set's
+        // rules on the trial's own paper wallet. The main bot's branch below is skipped for such
+        // a game, so no real order and no trade in the main paper wallet can come from it.
+        let paper_sport = feat.paper_game();
+        if paper_sport && main.is_some() {
+            if !crate::adaptive::rules_ready() {
+                note(SNIPE, "rules_loading", feat.json());
+                return;
+            }
+            match gate(&feat, &rules, &crate::adaptive::Flt::trial()) {
+                Ok(()) if !claim(m, t0) => note(SNIPE, "same_move", feat.json()),
+                Ok(()) => {
+                    if enter(&app, SNIPE_TRIAL, false, &feat, &rules, false, None).await.is_some() {
+                        note(SNIPE, "paper_trial", feat.json());
+                    }
+                }
+                Err(why) => note(SNIPE, why, feat.json()),
+            }
+        }
+        if let Some(real) = main.filter(|_| !paper_sport) {
             // Right after a restart the chosen rules are not loaded yet (the defaults are looser).
             if !crate::adaptive::rules_ready() {
                 note(SNIPE, "rules_loading", feat.json());
                 return;
             }
-            let safe = crate::adaptive::Flt::live();
+            let safe = crate::adaptive::Flt::live().for_game(&feat.sport, feat.us_bb, feat.sp[0].max(feat.sp[1]));
             match gate(&feat, &rules, &safe) {
                 // Passed, but another move in this game was just taken: the same event twice.
                 Ok(()) if !claim(m, t0) => note(SNIPE, "same_move", feat.json()),
@@ -254,10 +277,28 @@ fn on_change(app: &Arc<App>, ch: &Change) {
                     }
                 }
                 Err(why) => {
+                    // A CS2 move just under the rules' minimum: the same rules at 8 points on the
+                    // trial's paper wallet. No real order and nothing in the main paper wallet.
+                    let cs2_trial = why == "move_too_small" && feat.sport == "cs2" && feat.bm[0] >= TRIAL_MIN_MOVE_CS2;
+                    if cs2_trial {
+                        let mut r8 = rules;
+                        r8.min_move = TRIAL_MIN_MOVE_CS2;
+                        match gate(&feat, &r8, &safe) {
+                            Ok(()) if !claim(m, t0) => note(SNIPE, "same_move", feat.json()),
+                            Ok(()) => {
+                                if enter(&app, SNIPE_TRIAL, false, &feat, &r8, false, None).await.is_some() {
+                                    note(SNIPE, "paper_trial", feat.json());
+                                }
+                            }
+                            Err(why8) => note(SNIPE, why8, feat.json()),
+                        }
+                    }
                     // Not a safe-set trade: the wider set (smaller stake, its own daily stop)?
                     let pb = crate::adaptive::policy_b();
                     let set = bots::settings().snipe;
-                    if !set.b_enabled {
+                    if cs2_trial {
+                        // decided above
+                    } else if !set.b_enabled {
                         note(SNIPE, why, feat.json());
                     } else if let Err(why_b) = gate(&feat, &pb, &crate::adaptive::Flt::wider()) {
                         note(SNIPE, why, json!({"f": feat.json(), "wider": why_b}));
@@ -315,9 +356,15 @@ struct Feat {
     sport: String,
     home: String,
     away: String,
+    /// A US basketball game (paper only; basketball elsewhere trades real money).
+    us_bb: bool,
 }
 
 impl Feat {
+    /// This game is paper-only (see `adaptive::paper_only_game`).
+    fn paper_game(&self) -> bool {
+        crate::adaptive::paper_only_game(&self.sport, self.us_bb, self.sp[0].max(self.sp[1]))
+    }
     fn json(&self) -> Value {
         json!({"match_id": self.m, "outcome": self.o.as_str(), "dir": self.dir, "trigger": self.trigger, "books": self.books, "move": self.bm, "followed": self.fol, "followed_since_start": self.fol_start, "gap_before": crate::adaptive::gap_before(&self.cx, self.dir, self.pre_mid), "spread": self.sp, "tr": self.tr, "dec": self.dec, "cx": self.cx, "sport": self.sport, "measure_ms": self.measure_ms})
     }
@@ -387,7 +434,9 @@ fn measure(app: &App, m: i64, o: Outcome, dir: f64, trigger: &'static str, t0: M
         return skip("no_consensus");
     };
     let (sport, home, away): (String, String, String) = c.query_row("SELECT sport, home, away FROM matches WHERE id = ?1", [m], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap_or_default();
+    let us_bb = sport == "basketball" && crate::adaptive::us_basketball(&c, m, &home, &away);
     Some(Feat {
+        us_bb,
         m,
         o,
         dir,
@@ -526,18 +575,71 @@ fn take(levels: &[(f64, f64)], max_px: f64, dollars: f64) -> (f64, f64) {
     (n, if n > 0.0 { cost / n.max(1e-9) } else { 0.0 })
 }
 
+/// What the $10 smallest fill is to the $12 stake it was set for: five sixths of the order.
+const FILL_SHARE: f64 = snipe::MIN_FILL / 12.0;
+/// Polymarket's smallest order, in shares.
+const MIN_SHARES: f64 = 5.0;
+
+/// Is a fill of `n` shares at `avg` too small to be a trade? Paper: under `MIN_FILL`, as ever.
+/// Real money and the trial (which stakes what real money would): under five sixths of the stake
+/// when that is less than `MIN_FILL`, or under Polymarket's 5 shares. A flat $10 floor refused
+/// every half stake in a weak game (about $5.50, never $10: found 21 Nov 2026) and left a $10.00
+/// stake to a rounding error.
+fn fill_too_small(real_like: bool, stake: f64, n: f64, avg: f64) -> bool {
+    if n < 1.0 {
+        return true;
+    }
+    if !real_like {
+        return n * avg < snipe::MIN_FILL;
+    }
+    n < MIN_SHARES || n * avg < snipe::MIN_FILL.min(stake * FILL_SHARE)
+}
+
+/// A paper or trial buy with the feed late would fill at a price that is already old. Real orders
+/// are left alone (their limit refuses a gone price), and so is the paper twin of a real fill
+/// (it copies what the real order got).
+fn paper_blind(real: bool, twin: bool, late_ms: Ms) -> bool {
+    !real && !twin && late_ms > bots::LATE_FEED_MS
+}
+
 /// Buy one move for one wallet: Some((trade id, price paid)) when a trade was made.
 /// `twin` = (the real trade, its price): a paper trade that copies a real fill instead of
 /// simulating its own, so paper never shows a buy or a price real money did not get.
 async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crate::adaptive::Policy, wider: bool, twin: Option<(i64, f64)>) -> Option<(i64, f64)> {
     let s = bots::settings();
+    // Whatever led here, real money never buys in a paper-only sport.
+    if real && f.paper_game() {
+        note(bot, "paper_only_sport", f.json());
+        return None;
+    }
+    // The trial answers "what would real money have made": it reads the live settings (give-up
+    // time) and stakes the real wallet's most per trade.
+    let trial = bot == SNIPE_TRIAL;
     // Two wallets, nothing shared: real money uses the real wallet's fields (bankroll, r_pct,
     // r_max_trade), paper the paper wallet's. During a test run the paper side reads the copy
     // kept for after the run (the same numbers but for the Real switch).
-    let sn = if real { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
+    let sn = if real || trial { s.snipe.clone() } else { s.run.as_ref().map(|r| r.prev.clone()).unwrap_or_else(|| s.snipe.clone()) };
     let quiet = now_ms() - venue::alive_ms(venue::V::Pm);
     if twin.is_none() && quiet > FEED_QUIET_MS {
         note(bot, "feed_quiet", json!({"match_id": f.m, "outcome": f.o.as_str(), "quiet_ms": quiet}));
+        return None;
+    }
+    // A LATE feed (the socket alive but its prices arriving seconds after Polymarket stamped them).
+    // REAL orders are not stopped: their limit refuses a price that has gone. Of the 5 real buys
+    // sent with the feed over 1 s late on 20 Nov 2026, the 3 at 7-22 s late found nothing to fill
+    // and the 2 at about 2 s late filled at the true price (tools/guard_live.py). The delay is
+    // written beside every real buy, and the run's safety stop does not count a buy that found
+    // nothing while the feed was late (bots::LATE_FEED_MS).
+    // PAPER and TRIAL buys are stopped: they fill at the price the bot SEES, which is then an old
+    // one, and the wallet books trades no order could have made (17-18 Nov: 14 of 14 paper tennis
+    // trades "won"). The earlier reason for having no check at all, "43 of 54 backtest trades
+    // were bought under a late feed and made $74 of $89", counted buys inside gaps in the
+    // recording (adaptive::Seen).
+    let late_ms = venue::pm_lag_ms();
+    if paper_blind(real, twin.is_some(), late_ms) {
+        let mut j = f.json();
+        j["lag_ms"] = json!(late_ms);
+        note(bot, "feed_late", j);
         return None;
     }
     let Some((token, asks, _, fee)) = our_book(f.m, f.o, f.dir) else {
@@ -553,7 +655,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         return None;
     }
     // Stake: share of this bot's own balance (x edge), within its caps, cash and the game cap.
-    let (cash, balance, open, room) = {
+    let (cash, balance, open, room, real_wallet) = {
         let Ok(c) = crate::store::open_ro(&app.db_path) else { return None };
         // One open position a game, per wallet. A second move in the same game is the same bet
         // again (or its opposite), and three of them would be most of a small wallet riding on one
@@ -565,18 +667,38 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         let (closed, open, _, _, _) = bots::snipe_ledger(&c, bot, real);
         let bal = sn.c.start + closed;
         // Real: this bot's own bankroll (not the whole account); paper: its paper cash.
-        (if real { bots::real_free(&c, SNIPE) } else { bal - open }, if real { sn.c.bankroll + closed } else { bal }, open, if bot == SNIPE { bots::snipe_game_room(&c, f.m, real) } else { f64::INFINITY })
+        // What the real wallet holds now (its amount plus its closed results): the trial stakes
+        // what real money would.
+        let real_wallet = if real { sn.c.bankroll + closed } else { sn.c.bankroll + bots::snipe_ledger(&c, SNIPE, true).0 };
+        (if real { bots::real_free(&c, SNIPE) } else { bal - open }, if real { sn.c.bankroll + closed } else { bal }, open, if bot == SNIPE { bots::snipe_game_room(&c, f.m, real) } else { f64::INFINITY }, real_wallet)
     };
     let edge = f.edge(1, r.catch);
-    let k = if sn.edge_sizing && !wider { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
+    // Size-by-edge is the paper wallet's. Real money (and the trial that mirrors it) stakes a flat
+    // share of its wallet: the multiplier goes up to 3x, which at a 30% share is 90% of a real
+    // wallet on one trade once the per-trade ceiling is raised.
+    let k = if sn.edge_sizing && !wider && !real && !trial { (edge / 0.04).clamp(0.5, 3.0) } else { 1.0 };
+    // Half the stake in a game where Polymarket has not been trailing the bookmakers (the wider
+    // set has its own small stake). It only ever makes a stake smaller.
+    let score = crate::adaptive::delay_score(&f.cx);
+    let q = if wider { 1.0 } else { crate::adaptive::stake_factor(&f.cx) };
     // The safe set: share of the balance x edge, up to the trade cap. The wider set: its own
     // small flat stake.
     // Real money has its own wallet and its own stakes: share of the real balance, its own most
     // per trade, and never more open than the wallet. Paper uses the paper wallet's.
-    let (pct, max_trade, max_open) = if real { (sn.r_pct, sn.r_max_trade, sn.c.bankroll) } else { (sn.pct, sn.c.max_trade, sn.c.max_open) };
-    let stake = if wider { (sn.b_pct * balance).min(if real { sn.r_max_trade } else { sn.b_max_trade }) } else { (pct * balance * k).min(max_trade) }.min(cash).min(max_open - open).min(room);
+    // Real money: `r_pct` of what the real wallet holds now ($12 of $40, $120 of $400), never over
+    // `r_max_trade` (the owner's ceiling), and never more open than the wallet holds. The trial
+    // stakes exactly what real money would. Paper: its own share x edge, up to its own cap.
+    let (base, max_open) = if real {
+        (sn.real_stake(balance), balance)
+    } else if trial {
+        (sn.real_stake(real_wallet), sn.c.max_open)
+    } else {
+        ((sn.pct * balance * k).min(sn.c.max_trade), sn.c.max_open)
+    };
+    let stake = if wider { (sn.b_pct * balance).min(if real { sn.r_max_trade } else { sn.b_max_trade }) } else { base * q }.min(cash).min(max_open - open).min(room);
     let give_up_s = if !wider && sn.give_up_s > 0 { sn.give_up_s } else { r.give_up_s };
-    if stake < snipe::MIN_FILL {
+    // The trial stakes what real money would, so it has real money's floor.
+    if stake < (if real || trial { snipe::MIN_REAL_STAKE } else { snipe::MIN_FILL }) {
         note(bot, "no_cash", f.json());
         return None;
     }
@@ -588,7 +710,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         Some((_, px)) => ((stake / px).floor(), px),
         None => take(&asks, max_px, stake),
     };
-    if n < 1.0 || n * avg < snipe::MIN_FILL {
+    if fill_too_small(real || trial, stake, n, avg) {
         note(bot, "too_thin", f.json());
         return None;
     }
@@ -613,7 +735,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         // bot dies before the result is recorded, the next start finds this and says so.
         {
             let a = app.clone();
-            let j = json!({"intent": true, "side": "buy-intent", "token": token, "limit": max_px, "shares": n, "match_id": f.m, "outcome": f.o.as_str(), "home": f.home, "away": f.away});
+            let j = json!({"intent": true, "side": "buy-intent", "token": token, "limit": max_px, "shares": n, "match_id": f.m, "outcome": f.o.as_str(), "home": f.home, "away": f.away, "late_ms": late_ms});
             tokio::task::spawn_blocking(move || bots::log_intent(&a, bot, &j));
         }
         let placed = crate::exec::pm_order(&http, &pm, &token, true, max_px, n, false).await;
@@ -623,7 +745,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         drop(wallet);
         match placed {
             Ok(x) if x.filled >= 1.0 => {
-                bots::log_order(app, bot, "polymarket", true, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x}));
+                bots::log_order(app, bot, "polymarket", true, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x, "late_ms": late_ms}));
                 // Everything received, to the hundredth of a share (a fill under the limit returns
                 // a little more than ordered; the whole of it is sold later).
                 n = (x.filled * 100.0 + 1e-6).floor() / 100.0;
@@ -632,11 +754,11 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
             other => {
                 let (why, err) = match &other {
                     Ok(x) => {
-                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x, "error": "nothing filled"}));
+                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "fill": x, "error": "nothing filled", "late_ms": late_ms}));
                         ("real_not_filled", String::new())
                     }
                     Err(e) => {
-                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "error": format!("{e:#}")}));
+                        bots::log_order(app, bot, "polymarket", false, &json!({"side": "buy", "token": token, "limit": max_px, "shares": n, "error": format!("{e:#}"), "late_ms": late_ms}));
                         ("real_order_failed", format!("{e:#}"))
                     }
                 };
@@ -674,7 +796,7 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         };
         let (n2, avg2) = take(&asks2, max_px, n * max_px + 1.0);
         let n2 = n2.min(n);
-        if n2 < 1.0 || n2 * avg2 < snipe::MIN_FILL {
+        if fill_too_small(trial, stake, n2, avg2) {
             note(bot, "gone_at_match", json!({"match_id": f.m, "outcome": f.o.as_str(), "waited_ms": wait, "limit": max_px}));
             return None;
         }
@@ -687,10 +809,11 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
         "bot": bot, "real": real, "ts": now_ms(), "match_id": f.m, "sport": f.sport, "home": f.home, "away": f.away,
         "outcome": f.o.as_str(), "dir": f.dir, "trigger": f.trigger, "move_ms": f.t0, "token": token,
         "pre_mid": f.pre_mid, "move": f.bm[0], "spread": f.sp[0], "books": f.books, "followed": f.fol, "edge": edge, "edge_x": k,
-        "catch": r.catch, "give_up_s": give_up_s, "fee_rate": fee.rate, "set": if wider { "wider" } else { "safe" },
+        "catch": r.catch, "give_up_s": give_up_s, "fee_rate": fee.rate, "set": if wider { "wider" } else if trial { "trial" } else { "safe" },
         "contracts": n, "entry": avg, "fee_in": fee_in, "cost": n * avg + fee_in, "stake": stake, "limit": max_px, "best": best,
         "tr": f.tr, "stop_px": crate::adaptive::Flt::live().stop_px(avg, f.bm[0]), "cx": f.cx, "revert": crate::adaptive::Flt::live().revert,
         "followed_since_start": f.fol_start, "twin_of": twin.map(|t| t.0),
+        "score": score, "stake_x": q,
     });
     let id = {
         let Ok(w) = Connection::open(&app.db_path) else { return None };
@@ -882,6 +1005,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_late_feed_stops_paper_and_trial_buys_but_not_real_orders_or_their_twins() {
+        let late = bots::LATE_FEED_MS + 1;
+        assert!(paper_blind(false, false, late)); // paper or trial on its own: would fill at an old price
+        assert!(!paper_blind(false, true, late)); // the paper twin copies the real fill
+        assert!(!paper_blind(true, false, late)); // a real order: its limit refuses a gone price
+        assert!(!paper_blind(false, false, bots::LATE_FEED_MS)); // feed on time
+    }
+
+    #[test]
     fn takes_levels_up_to_the_cap_in_whole_contracts() {
         let lv = [(0.50, 30.0), (0.51, 30.0), (0.55, 100.0)];
         let (n, avg) = take(&lv, 0.52, 1_000.0);
@@ -889,5 +1021,34 @@ mod tests {
         assert!((avg - 0.505).abs() < 1e-9);
         let (n2, _) = take(&lv, 0.52, 20.0);
         assert_eq!(n2, 39.0); // $15 buys 30 at 50c, $5 buys 9.8 at 51c
+    }
+
+    #[test]
+    fn a_half_stake_of_real_money_is_a_trade_and_a_thin_book_still_is_not() {
+        // Real money, $44.50 wallet at 25%: $11.12 a trade, $5.56 in a weak game. The half stake
+        // at 61c buys 9 shares: refused by the flat $10 floor before, a trade now.
+        let lv = [(0.61, 500.0)];
+        let (n, avg) = take(&lv, 0.61, 5.56);
+        assert_eq!(n, 9.0);
+        assert!(!fill_too_small(true, 5.56, n, avg));
+        // A $10.00 stake (25% of $40) spends $10.00 give or take a rounding error: never refused.
+        let (n, avg) = take(&[(0.37, 500.0)], 0.37, 10.0);
+        assert_eq!(n, 27.0);
+        assert!(!fill_too_small(true, 10.0, n, avg));
+        // The smallest real stake ($5) at the dearest price (92c) is 5 shares: still a trade.
+        let (n, avg) = take(&[(0.92, 500.0)], 0.92, snipe::MIN_REAL_STAKE);
+        assert!(!fill_too_small(true, snipe::MIN_REAL_STAKE, n, avg));
+        // A book that holds much less than the order is still refused: $6 of an $11.12 order, $3
+        // of a $5.56 one, and anything under Polymarket's 5 shares.
+        assert!(fill_too_small(true, 11.12, 10.0, 0.60));
+        assert!(fill_too_small(true, 5.56, 5.0, 0.60));
+        assert!(fill_too_small(true, 5.56, 4.0, 0.92));
+        assert!(fill_too_small(true, 11.12, 0.0, 0.0));
+        // A $12 stake keeps exactly the old $10 floor, and paper keeps it at any stake.
+        assert!(fill_too_small(true, 12.0, 19.0, 0.52));
+        assert!(!fill_too_small(true, 12.0, 20.0, 0.50));
+        assert!(fill_too_small(false, 5.56, 9.0, 0.61));
+        assert!(fill_too_small(false, 100.0, 19.0, 0.52));
+        assert!(!fill_too_small(false, 100.0, 20.0, 0.50));
     }
 }

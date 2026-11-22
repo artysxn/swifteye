@@ -28,6 +28,9 @@ use std::sync::{Arc, LazyLock};
 pub const SNIPE: &str = "snipe";
 /// Paper-only shadow of the snipe bot with 1 bookmaker instead of the picked rules' count.
 pub const SNIPE_SHADOW: &str = "snipe-1book";
+/// Paper-only trial of the sports real money does not trade (`adaptive::paper_only`): the safe
+/// set's rules at the real wallet's stake, on a wallet of its own.
+pub const SNIPE_TRIAL: &str = "snipe-trial";
 pub const ARB: &str = "arb";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,7 +96,8 @@ pub struct SnipeCfg {
 }
 
 impl SnipeCfg {
-    /// The stake of a real safe-set trade on a real balance of `balance` at edge factor 1.
+    /// The stake of a real safe-set trade on a real balance of `balance`: a flat share of the
+    /// wallet (it grows and shrinks with it), never over the per-trade ceiling.
     pub fn real_stake(&self, balance: f64) -> f64 {
         (self.r_pct * balance).min(self.r_max_trade)
     }
@@ -446,7 +450,7 @@ pub fn mode(bot: &str) -> Option<bool> {
     if !c.enabled {
         return None;
     }
-    Some(c.real && bot != SNIPE_SHADOW)
+    Some(c.real && bot != SNIPE_SHADOW && bot != SNIPE_TRIAL)
 }
 
 /// Real money switches itself off after a bad day. Call after each real close.
@@ -906,7 +910,7 @@ pub fn start_run(app: &App, hours: i64, bankroll: f64, cash: Option<f64>, confir
     check_bankroll(bankroll, cash)?;
     // The real wallet's own stakes (never the paper wallet's) must reach the smallest order.
     let stake = s.snipe.real_stake(bankroll);
-    anyhow::ensure!(stake >= crate::snipe::MIN_FILL, "a real trade would be ${stake:.2}, under the $10 smallest order: raise the real stake or the amount");
+    anyhow::ensure!(stake >= crate::snipe::MIN_REAL_STAKE, "a real trade would be ${stake:.2}, under the ${:.0} smallest real order: raise the real stake or the amount", crate::snipe::MIN_REAL_STAKE);
     // Started outside the trading hours, the run's hours count from when the window opens (the
     // bot takes no trade before that anyway).
     let begin = match s.snipe.hours() {
@@ -967,6 +971,23 @@ pub fn extend_run(app: &App, hours: i64) -> anyhow::Result<Value> {
     Ok(json!({"end_ms": end}))
 }
 
+/// Move the running test run's end to `end_ms`, later or sooner: at least 5 minutes and at most
+/// 48 hours from now, and at most 7 days after its start.
+pub fn set_run_end(app: &App, end_ms: Ms) -> anyhow::Result<Value> {
+    let now = now_ms();
+    anyhow::ensure!(end_ms >= now + 5 * 60_000, "that is under 5 minutes from now (to end it at once: stop the run)");
+    anyhow::ensure!(end_ms <= now + 48 * 3_600_000, "at most 48 hours from now");
+    let mut s = settings();
+    let Some(r) = s.run.as_mut() else { anyhow::bail!("no test run going") };
+    anyhow::ensure!(end_ms - r.start_ms <= 7 * 86_400_000, "a run can last at most 7 days");
+    let was = r.end_ms;
+    r.end_ms = end_ms;
+    save(app, &s)?;
+    *SET.write() = s;
+    event(format!("snipe: test run end moved by {:+} min", (end_ms - was) / 60_000));
+    Ok(json!({"end_ms": end_ms, "was_ms": was}))
+}
+
 /// Called every 30 s: ends a run at its end time, or early when a safety trigger fires (the
 /// returned text goes to Telegram). Open real positions are still sold by their own watchers.
 pub fn tick_run(app: &App) -> Option<String> {
@@ -998,6 +1019,18 @@ const GUARD_LOSERS_IN_ROW: usize = 3;
 const GUARD_REFUSED_ORDERS: usize = 3;
 /// Buys that found nothing to fill: a problem only when they are most of the attempts.
 const GUARD_UNFILLED_BUYS: usize = 4;
+/// ... and only when Polymarket's prices were reaching us on time. A buy sent while the feed ran
+/// later than this aimed at an old price: finding nothing is what the limit is for, not a sign
+/// that real orders are too slow. On 20 Nov 2026 four such buys in 14 minutes ended a run.
+pub const LATE_FEED_MS: i64 = 1_000;
+/// The buys of a run (from ?1 on) that found nothing to fill with the feed on time. A buy logged
+/// before the delay was written beside it counts as on time.
+fn unfilled_buys_sql() -> String {
+    format!(
+        "SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND json_extract(data, '$.side') = 'buy' \
+         AND json_extract(data, '$.error') = 'nothing filled' AND COALESCE(json_extract(data, '$.late_ms'), 0) <= {LATE_FEED_MS}"
+    )
+}
 const GUARD_TWIN_GAP: f64 = 0.10;
 
 /// What the safety triggers look at for a run: its closed real trades (oldest first), the paper
@@ -1012,7 +1045,7 @@ fn guard_inputs(app: &App, r: &Run) -> Option<(Vec<Value>, Vec<Value>, (usize, u
     };
     let count = |sql: &str| -> usize { c.query_row(sql, params![r.start_ms], |x| x.get::<_, i64>(0)).unwrap_or(0) as usize };
     let refused = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND COALESCE(json_extract(data, '$.error'), '') NOT IN ('', 'nothing filled')");
-    let unfilled_buys = count("SELECT COUNT(*) FROM bot_orders WHERE bot = 'snipe' AND ok = 0 AND ts_ms >= ?1 AND json_extract(data, '$.side') = 'buy' AND json_extract(data, '$.error') = 'nothing filled'");
+    let unfilled_buys = count(&unfilled_buys_sql());
     let filled_buys = count("SELECT COUNT(*) FROM bot_trades WHERE bot = 'snipe' AND real = 1 AND ts_ms >= ?1");
     Some((rows(true), rows(false), (refused, unfilled_buys, filled_buys), settings().snipe.c.daily_loss))
 }
@@ -1229,7 +1262,13 @@ pub fn sim_cached(kind: &str) -> Option<(Value, Ms)> {
 /// other rules and are no evidence for these.
 pub const RULES_SINCE_MS: Ms = 1_795_065_960_000;
 
-/// The control panel of the snipe bot, paper or real: its money over time (every closed trade),
+/// Real-money results count from here (20 Nov 2026 00:00 Norway time). The nine real trades of 19 Nov
+/// ran on the old rules and the old sale code, and three were sold by hand and booked at estimated
+/// prices: at the user's request they are left out of the charts' history and the all-time figures.
+pub const REAL_COUNTS_SINCE_MS: Ms = 1_795_129_200_000;
+
+/// The control panel of the snipe bot, paper or real: its money over time (every closed trade, and
+/// in `history` the closed trades of the same money from before the wallet's start),
 /// the open trades with the price they could be sold at now, today's signals, and its state.
 pub fn panel(app: &App, real: bool) -> Value {
     let s = settings();
@@ -1241,13 +1280,29 @@ pub fn panel(app: &App, real: bool) -> Value {
         (_, true) => (s.snipe.c.bankroll, s.snipe.c.real_since, "real"),
         (_, false) => (s.snipe.c.start, s.snipe.c.paper_since, "paper"),
     };
-    let rows: Vec<(Ms, Option<Ms>, Value)> = c
-        .prepare("SELECT ts_ms, closed_ms, data FROM bot_trades WHERE bot = ?1 AND real = ?2 AND ts_ms >= ?3 ORDER BY ts_ms")
+    let all: Vec<(Ms, Option<Ms>, Value)> = c
+        .prepare("SELECT ts_ms, closed_ms, data FROM bot_trades WHERE bot = ?1 AND real = ?2 ORDER BY ts_ms")
         .and_then(|mut st| {
-            st.query_map(params![SNIPE, real as i64, since], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, Option<Ms>>(1)?, r.get::<_, String>(2)?)))
+            st.query_map(params![SNIPE, real as i64], |r| Ok((r.get::<_, Ms>(0)?, r.get::<_, Option<Ms>>(1)?, r.get::<_, String>(2)?)))
                 .map(|it| it.filter_map(|x| x.ok()).filter_map(|(t, cl, d)| serde_json::from_str(&d).ok().map(|v| (t, cl, v))).collect())
         })
         .unwrap_or_default();
+    // Trades from before this wallet's start (earlier test runs, the paper wallet before a restart)
+    // count in none of its numbers. The closed ones go to the chart as `history`, so that a restart
+    // does not hide the overall trend.
+    let (rows, earlier): (Vec<_>, Vec<_>) = all.into_iter().partition(|(ts, _, _)| *ts >= since);
+    let history: Vec<Value> = earlier
+        .iter()
+        .filter(|(ts, _, _)| !real || *ts >= REAL_COUNTS_SINCE_MS)
+        .filter_map(|(ts, cl, v)| {
+            cl.map(|cl| {
+                json!({
+                    "ts": ts, "closed_ms": cl, "home": v["home"], "away": v["away"], "sport": v["sport"], "outcome": v["outcome"], "dir": v["dir"].as_f64().unwrap_or(1.0),
+                    "entry": v["entry"], "exit": v["exit"], "cost": v["cost"], "pnl": v["pnl"].as_f64().unwrap_or(0.0), "reason": v["reason"],
+                })
+            })
+        })
+        .collect();
     let day0 = today();
     let (mut closed, mut today_pnl, mut open_cost, mut open_now) = (0.0, 0.0, 0.0, 0.0);
     let mut trades = Vec::new();
@@ -1303,7 +1358,7 @@ pub fn panel(app: &App, real: bool) -> Value {
         "real": real, "scope": scope, "start": start, "since": since, "now": now, "rules_since": RULES_SINCE_MS,
         // Balance and today's result count open positions at what they would sell for now.
         "balance": start + closed + open_now, "closed_pnl": closed, "today": today_pnl + open_now, "open_cost": open_cost, "open_pnl": open_now, "wider_today": wider_today,
-        "trades": trades, "signals": signals, "window": window,
+        "trades": trades, "history": history, "signals": signals, "window": window,
         "run": s.run.as_ref().map(|r| json!({"start_ms": r.start_ms, "end_ms": r.end_ms, "bankroll": r.bankroll, "stake": r.stake})),
         "mode": {"kill": s.kill, "enabled": s.snipe.c.enabled, "real": s.snipe.c.real},
         "rules": crate::adaptive::active_rules(),
@@ -1370,9 +1425,10 @@ pub fn view(app: &App) -> Value {
             "missing_snipe": real_ready(app, SNIPE),
             "missing_arb": real_ready(app, ARB),
         },
+        "favs": crate::valuebot::panel(app),
         "snipe": {
-            "paper": snipe_side(SNIPE, false), "real": snipe_side(SNIPE, true), "shadow": snipe_side(SNIPE_SHADOW, false),
-            "rules": rules, "trades": trades(SNIPE), "shadow_trades": trades(SNIPE_SHADOW), "status": crate::snipebot::status(),
+            "paper": snipe_side(SNIPE, false), "real": snipe_side(SNIPE, true), "shadow": snipe_side(SNIPE_SHADOW, false), "trial": snipe_side(SNIPE_TRIAL, false),
+            "rules": rules, "trades": trades(SNIPE), "shadow_trades": trades(SNIPE_SHADOW), "trial_trades": trades(SNIPE_TRIAL), "status": crate::snipebot::status(),
         },
         "arb": {
             "paper": arb_side(false), "real": arb_side(true), "scan": crate::predarb::view(app),
@@ -1384,6 +1440,19 @@ pub fn view(app: &App) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_stake_is_a_share_of_the_wallet_under_the_ceiling() {
+        let mut c = SnipeCfg::default();
+        (c.r_pct, c.r_max_trade) = (0.30, 12.0);
+        // As it was set: $12 of $40, and the ceiling holds it there as the wallet grows.
+        assert!((c.real_stake(40.0) - 12.0).abs() < 1e-9);
+        assert!((c.real_stake(400.0) - 12.0).abs() < 1e-9);
+        // With the ceiling lifted it is 30% of whatever the wallet holds: $120 of $400, $9 of $30.
+        c.r_max_trade = 10_000.0;
+        assert!((c.real_stake(400.0) - 120.0).abs() < 1e-9);
+        assert!((c.real_stake(30.0) - 9.0).abs() < 1e-9);
+    }
 
     fn t(m: i64, ts: i64, cost: f64, pnl: f64) -> Value {
         json!({"match_id": m, "ts": ts, "cost": cost, "pnl": pnl, "set": "safe", "home": "A"})
@@ -1411,6 +1480,21 @@ mod tests {
         assert_eq!(run_guard_on(&[win(1)], &[], (0, 4, 6), 15.0), None);
         assert_eq!(run_guard_on(&[win(1)], &[], (2, 3, 1), 15.0), None);
         assert!(run_guard_on(&[win(1)], &[], (0, 5, 2), 15.0).unwrap().contains("nothing to fill"));
+        // ... and a buy that found nothing while the feed ran late is not one of them: it aimed at
+        // an old price (four of those ended the run of 20 Nov 2026, 20:50).
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE bot_orders(id INTEGER PRIMARY KEY, ts_ms INTEGER NOT NULL, bot TEXT NOT NULL, venue TEXT NOT NULL, ok INTEGER NOT NULL, data TEXT NOT NULL);").unwrap();
+        let mut add = |ts: i64, ok: i64, data: Value| {
+            c.execute("INSERT INTO bot_orders(ts_ms, bot, venue, ok, data) VALUES(?1, 'snipe', 'polymarket', ?2, ?3)", params![ts, ok, data.to_string()]).unwrap();
+        };
+        add(2_000, 0, json!({"side": "buy", "error": "nothing filled"})); // logged before the delay was written: counts
+        add(2_000, 0, json!({"side": "buy", "error": "nothing filled", "late_ms": 180})); // feed on time: counts
+        add(2_000, 0, json!({"side": "buy", "error": "nothing filled", "late_ms": 23_349})); // feed 23 s late: does not
+        add(2_000, 0, json!({"side": "buy", "error": "nothing filled", "late_ms": LATE_FEED_MS + 1})); // just late: does not
+        add(2_000, 1, json!({"side": "buy", "late_ms": 90})); // filled
+        add(2_000, 0, json!({"side": "sell", "error": "nothing filled"})); // a sale waiting for a bid
+        add(1_000, 0, json!({"side": "buy", "error": "nothing filled"})); // before this run
+        assert_eq!(c.query_row(&unfilled_buys_sql(), params![1_500], |x| x.get::<_, i64>(0)).unwrap(), 2);
         // Real clearly worse than its paper twins (same game, bought within 30 s).
         let real = [t(1, 100_000, 15.0, 0.5), t(2, 200_000, 15.0, 0.6)];
         let paper = [t(1, 101_000, 100.0, 18.0), t(2, 202_000, 100.0, 16.0)];

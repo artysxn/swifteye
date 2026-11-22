@@ -311,7 +311,7 @@ SE.pages.telegram = {
 SE.pages.arbs = {
   title: 'Arbitrage Scout',
   render(el) {
-    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake ${SE.num({ id: 'aSt', min: 1, step: 10, value: SE.pref('arbStake') || 100, pre: '$', w: 96 })}</label><button class="btn" id="aHb">${ic('history')}History</button>`) +
+    el.innerHTML = P.head('Arbitrage Scout', `<span class="search">${ic('search')}<input class="input" id="aQ" placeholder="Team or league"></span><div id="aSp"></div><div id="aMin"></div><div id="aChk"></div><label class="muted" style="display:flex;align-items:center;gap:6px">Stake ${SE.num({ id: 'aSt', min: 1, step: 10, value: SE.pref('arbStake') || 100, pre: '$', w: 96 })}</label><button class="btn" id="aHb">${ic('history')}History</button>`) +
       `<div class="panel" id="aHist" hidden><div class="sec-head" style="margin-bottom:10px"><h2>${ic('history')}Past arbitrage</h2><div class="tools"><span class="muted" id="aHn"></span></div></div><div id="aHt"></div></div>` +
       `<div class="src-filter" id="aBk"></div>` +
       P.stats(P.stat('aN', 'balance', 'Arbitrage now', 'Pre-match sets of bets that pay out more than they cost, whatever the result.', true), P.stat('aB', 'trending_up', 'Best return'), P.stat('aL', 'hourglass_bottom', 'Typical lifetime', 'Median time an arbitrage stayed open before closing on its own, from the live scan every 5 s. Ones that ended at kick-off or with a restart are left out.'), P.stat('aNear', 'near_me', 'Within 2% of one', 'Sets that cost up to 2% more than they pay: one price move away.')) +
@@ -321,6 +321,11 @@ SE.pages.arbs = {
     let min = SE.pref('arbMin') ?? 0;
     P.sportSelect($('#aSp'), () => load());
     SE.seg($('#aMin'), [[-0.02, 'Near misses', 'Also show sets up to 2% short of an arbitrage.'], [0, 'All arbitrage'], [0.01, '1%+'], [0.02, '2%+']], min, (v) => { min = +v; SE.setPref('arbMin', min); load(); });
+    // Checked = every price agrees with other sources and any Polymarket / Kalshi leg has $10+ behind it.
+    let chk = SE.pref('arbChk') ?? 1;
+    SE.seg($('#aChk'), [[1, 'Checked', 'Only sets whose every price is confirmed by at least two other sources, and whose Polymarket or Kalshi legs have at least $10 on offer.'], [0, 'All', 'Also sets that no other source could confirm, or with almost nothing on offer. Treat these as "look into it", not as money.']], chk, (v) => { chk = +v; SE.setPref('arbChk', chk); load(); loadHist(); if (!$('#aHist').hidden) loadAll(); });
+    const sound = (a) => a.check === 'ok' && (a.takeable == null || a.takeable >= 10);
+    const take = (r) => (r.takeable == null ? '<span class="faint" data-tip="Every leg is at a bookmaker: their bet limits are not known.">limits unknown</span>' : `<b class="${r.takeable < 10 ? 'down' : ''}">$${r.takeable < 100 ? r.takeable.toFixed(0) : Math.round(r.takeable).toLocaleString()}</b>`) + (r.check !== 'ok' ? '<div class="faint" data-tip="Too few other sources price this game to confirm these prices.">not cross-checked</div>' : '');
     let life = {};
     const dur = (ms) => (ms == null ? '-' : ms < 60000 ? Math.round(ms / 1000) + 's' : ms < 3600000 ? `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s` : `${Math.floor(ms / 3600000)}h ${String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0')}m`);
     const left = (r) => {
@@ -335,6 +340,7 @@ SE.pages.arbs = {
       { key: 'k', label: 'Kick-off', fmt: (r) => `<span class="muted">${SE.fmtKick(r.start_ms)}</span><div class="faint">${SE.fmtIn(r.start_ms)}</div>`, sort: (r) => r.start_ms },
       { key: 'mk', label: 'Market', fmt: (r) => `${esc(SE.marketLabel(r.market))}${r.line != null ? ' <b>' + (r.market === 'handicap' && r.line > 0 ? '+' : '') + r.line + '</b>' : ''}` },
       { key: 'p', label: 'Return', cls: 'r', tip: 'Guaranteed profit on the total stake if every leg is placed at these prices.', fmt: (r) => `<b class="${r.profit > 0 ? 'up' : 'muted'}">${r.profit > 0 ? '+' : ''}${(r.profit * 100).toFixed(2)}%</b>`, sort: (r) => r.profit },
+      { key: 'tk', label: 'Can take', cls: 'r', tip: 'The largest total stake, across all the bets, that the Polymarket and Kalshi legs can take at these prices. A bigger stake moves the price. Bookmaker limits are not known.', fmt: (r) => take(r), sort: (r) => (r.takeable == null ? 1e12 : r.takeable) },
       { key: 'age', label: 'Open for', cls: 'r', tip: 'Since the live scan first saw this arbitrage. ≥ when it was already open when Swifteye started.', fmt: (r) => (r.age_ms == null ? '<span class="faint">-</span>' : `${r.age_partial ? '≥ ' : ''}${dur(r.age_ms)}`), sort: (r) => r.age_ms },
       { key: 'left', label: 'Est. left', cls: 'r', tip: 'Median lifetime of past arbitrage that lasted at least this long, minus how long this one has been open. A rough guide, not a promise.', fmt: (r) => left(r), sort: (r) => r.left_ms },
       { key: 'l', label: 'Bets', fmt: (r) => `<div class="legs">${r.legs.map((l) => `<div><span class="leg-o">${outLabel(l)}</span> ${SE.book(l.book, 'sm')} <b>${l.odds.toFixed(2)}</b> <span class="muted">$${l.stake.toFixed(2)}</span> <span class="faint">${SE.fmtAgo(l.updated_ms)}</span></div>`).join('')}</div>` },
@@ -384,6 +390,7 @@ SE.pages.arbs = {
       if (q) all = all.filter((a) => `${a.home} ${a.away} ${a.league}`.toLowerCase().includes(q));
       drawBooks(r.arbs);
       if (books.size) all = all.filter((a) => a.legs.every((l) => books.has(l.book)));
+      if (chk) all = all.filter(sound);
       const real = all.filter((a) => a.profit > 0);
       P.set('aN', real.length);
       P.set('aB', real.length ? `<span class="up">+${(real[0].profit * 100).toFixed(2)}%</span>` : '-');
@@ -393,7 +400,9 @@ SE.pages.arbs = {
       t.set(all.filter((a) => a.profit >= min - 1e-9));
     }
     async function loadHist() {
-      const h = await api('/arbs/history?limit=60');
+      const h = await api('/arbs/history?limit=400');
+      // Finds from before the scout cross-checked its prices are shown only under "All".
+      h.recent = h.recent.filter((x) => !chk || x.checked).slice(0, 60);
       const L = h.lifetime;
       const rowsOf = (list, name) => list.map(([k, n, m]) => `<tr><td>${esc(name(k))}</td><td class="r">${n}</td><td class="r"><b>${dur(m)}</b></td></tr>`).join('');
       $('#aLife').innerHTML = L.n ? `<table class="tbl compact"><thead><tr><th></th><th class="r">Finished</th><th class="r">Median life</th></tr></thead><tbody>
@@ -412,14 +421,15 @@ SE.pages.arbs = {
       { key: 'mk', label: 'Market', w: 120, fmt: (x) => `${esc(SE.marketLabel(x.market))}${x.line != null ? ' <b>' + x.line + '</b>' : ''}` },
       { key: 'b', label: 'Sources', w: 220, fmt: (x) => (x.books || '').split(',').filter(Boolean).map((b) => SE.book(b, 'sm')).join(' ') },
       { key: 'p', label: 'Best return', cls: 'r', w: 110, fmt: (x) => `<b class="up">+${((x.peak_profit || 0) * 100).toFixed(2)}%</b>`, sort: (x) => x.peak_profit || 0 },
+      { key: 'tk', label: 'Could take', cls: 'r', w: 110, tip: 'The largest total stake its Polymarket or Kalshi legs could take when it opened. Empty for ones found before this was recorded (20 Nov 2026) and for bookmaker-only sets.', fmt: (x) => (x.takeable == null ? '<span class="faint">-</span>' : `$${Math.round(x.takeable).toLocaleString()}`), sort: (x) => x.takeable || 0 },
       { key: 'l', label: 'Lasted', cls: 'r', w: 110, fmt: (x) => `${x.censored ? '≥ ' : ''}${dur(x.lasted_ms)}<div class="faint">${{ gone: 'closed', kickoff: 'kick-off', restart: 'restart' }[x.end_reason] || esc(x.end_reason || 'open')}</div>`, sort: (x) => x.lasted_ms },
     ], { sort: 'e', empty: 'No arbitrage has closed yet.', onClick: (x) => SE.go('#/match/' + x.match_id) });
     async function loadAll() {
       const h = await api('/arbs/history?limit=2000');
-      let rows = h.recent;
+      let rows = h.recent.filter((x) => !chk || x.checked);
       if (books.size) rows = rows.filter((x) => (x.books || '').split(',').every((b) => books.has(b)));
       if (!$('#aHn')) return;
-      $('#aHn').textContent = `${rows.length} finished${books.size ? ' on your chosen sources' : ''}`;
+      $('#aHn').textContent = `${rows.length} finished${books.size ? ' on your chosen sources' : ''}${chk ? ' · checked ones only (since 20 Nov)' : ' · including unchecked finds from before 20 Nov'}`;
       ht.set(rows);
     }
     $('#aHb').addEventListener('click', () => {

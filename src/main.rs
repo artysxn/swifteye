@@ -26,6 +26,7 @@ mod snipebot;
 mod store;
 mod suspect;
 mod telegram;
+mod valuebot;
 mod timing;
 mod venue;
 
@@ -64,6 +65,11 @@ pub struct Config {
 #[serde(default)]
 pub struct BookCfg {
     pub enabled: Option<bool>,
+    /// Start this feed paused: it is registered and can be resumed from the Feeds page or with
+    /// `POST /control/books/<name>`, but polls nothing until then. For a link that cannot carry
+    /// every feed at once (21 Nov 2026: 13 bookmaker feeds and Kalshi paused by hand after every
+    /// restart, or the Polymarket feed ran seconds late).
+    pub paused: Option<bool>,
     pub poll_ms: Option<u64>,
     /// Adapter-specific override (host, offering, country...).
     pub param: Option<String>,
@@ -108,6 +114,11 @@ pub struct App {
 impl App {
     pub async fn emit(&self, writes: Vec<Write>) {
         for w in writes {
+            // A recorded-only book's changes never reach the bots or the `changes` table.
+            let w = match w {
+                Write::Change(c) if books::record_only(&c.book) => Write::ChangeResearch(c),
+                w => w,
+            };
             if let Write::Change(c) = &w {
                 let _ = self.live.send(Arc::new(c.clone()));
             }
@@ -123,6 +134,18 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+
+    // SQLite keeps running totals of the memory it hands out, behind ONE lock that every thread
+    // takes on every allocation. With dozens of reader threads on a busy day they queue on it
+    // (Saturday 21 Nov 2026: five threads waiting at any moment, the Polymarket feed seconds
+    // late). Nothing here reads those totals, so they are switched off. This has to run before
+    // the first connection is opened; a refusal is logged and changes nothing.
+    let rc = unsafe { rusqlite::ffi::sqlite3_config(rusqlite::ffi::SQLITE_CONFIG_MEMSTATUS, 0 as std::os::raw::c_int) };
+    if rc == rusqlite::ffi::SQLITE_OK {
+        tracing::info!("sqlite: memory totals off (no shared lock on every allocation)");
+    } else {
+        tracing::warn!("sqlite: could not switch memory totals off (code {rc}); running as before");
+    }
 
     let cfg_path = std::env::args().nth(1).unwrap_or_else(|| "oddsfeed.toml".into());
     let cfg: Config = match std::fs::read_to_string(&cfg_path) {
@@ -178,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
     }
     predarb::spawn(app.clone());
     snipebot::spawn(app.clone());
+    valuebot::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);
@@ -207,6 +231,10 @@ fn start_books(app: &Arc<App>) {
                 let param = bc.param.clone();
                 let book = $make(param);
                 app.engine.lock().register(book.name(), book.source(), poll);
+                if bc.paused.unwrap_or(false) {
+                    app.engine.lock().control(book.name(), Some(true), None);
+                    tracing::info!("{}: starts paused (config)", book.name());
+                }
                 tracing::info!("{}: polling every {} ms — {}", book.name(), poll, book.source());
                 tokio::spawn(books::run(book, app.clone(), poll));
             }
@@ -253,6 +281,7 @@ fn start_books(app: &Arc<App>) {
             extra: extra.into(),
             sports: linebet::sport_ids(follows),
             pre: pre(),
+            details: Default::default(),
         });
     }
     start!("m88", 1500, |_p: Option<String>| m88::M88::new(follows, pre()));
@@ -282,14 +311,17 @@ fn start_books(app: &Arc<App>) {
         version: p.unwrap_or_else(|| "2.8.2".into()),
         follows: books::SPORTS.iter().copied().filter(|s| cfg.follows(s)).collect(),
     });
-    // Leon: param = the ctag (locale + build tag) its live page uses.
-    start!("leon", 1500, |p: Option<String>| leon::Leon { ctag: p.unwrap_or_else(|| "en-US-7da6p".into()) });
+    // Leon: param = the ctag (locale + build tag) its live page uses. 3 s, not 1.5 s: faster polling
+    // gets this address blocked for hours (see books/leon.rs).
+    start!("leon", 3000, |p: Option<String>| leon::Leon { ctag: p.unwrap_or_else(|| "en-US-7da6p".into()) });
     // Mostbet moves between mirror domains; param = the current one.
     start!("mostbet", 2000, |p: Option<String>| mostbet::Mostbet { host: p.unwrap_or_else(|| "0djawb3.com".into()), pre: Pre::new(ph, 60_000) });
     // Betby brands: (name, API host, brand id, site). Pre-match is ~600 KB, refreshed every minute.
     for (name, api, brand, origin) in [("duel", "https://api-a-c7818b61-600.sptpub.com", "2482975601191952386", "https://duel.com")] {
         start!(name, 1500, |_p: Option<String>| betby::Betby { name, api: api.into(), brand: brand.into(), origin: origin.into(), pre: Pre::new(ph, 60_000) });
     }
+    // SBOBET's public live pages: RECORDED ONLY (books::RECORD_ONLY) until its timing is tested.
+    start!("sbobet", 4000, |_p: Option<String>| sbobet::Sbobet::new(follows));
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
     // Kalshi: second prediction-market baseline, polled in batches.
@@ -306,5 +338,19 @@ fn start_books(app: &Arc<App>) {
         app.engine.lock().register(polymarket::NAME, polymarket::source(), 0);
         tracing::info!("polymarket: WebSocket, games up to {prematch} min before kick-off");
         tokio::spawn(polymarket::run(app.clone(), prematch));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_feed_can_be_set_to_start_paused_or_slower_in_the_config() {
+        let cfg: Config = toml::from_str("bind = \"127.0.0.1:1\"\n[books.kalshi]\npaused = true\n[books.betcity]\npoll_ms = 2000\n").unwrap();
+        assert_eq!(cfg.books["kalshi"].paused, Some(true));
+        assert_eq!(cfg.books["kalshi"].enabled, None); // still registered, so it can be resumed
+        assert_eq!(cfg.books["betcity"].poll_ms, Some(2000));
+        assert_eq!(cfg.books["betcity"].paused, None);
     }
 }

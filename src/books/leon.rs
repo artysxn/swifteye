@@ -8,6 +8,11 @@
 //!   `league.sport.name` (Football, Tennis, Ice Hockey, ..., Esports) and for e-sports the game in
 //!   `league.region.name` (CS2, Dota 2, ...).
 //! * Prices: the `primary` market ("Winner"), `runners[]` tagged HOME / DRAW / AWAY with `price`.
+//! * Leon's protection (22 Nov 2026): after hours of polling every 1.5 s it starts answering with
+//!   redirects and then drops every connection from our address for about 6 hours (seen nightly from
+//!   20 Nov, about 00:00-06:00 Norway). So Leon polls every 3 s, does not follow redirects, waits
+//!   15 minutes after a redirect or a refusal and 10 minutes once connections keep failing, instead
+//!   of retrying within seconds.
 
 use super::*;
 
@@ -22,9 +27,27 @@ impl Book for Leon {
     fn source(&self) -> String {
         format!("leon.bet /api-2/betline/events/inplayupcomingall (ctag {}), in play + upcoming", self.ctag)
     }
+    fn client(&self) -> reqwest::Client {
+        http_builder().redirect(reqwest::redirect::Policy::none()).build().expect("http client")
+    }
+    fn cool_down(&self, msg: &str, streak: u32) -> Option<std::time::Duration> {
+        let m = msg.to_ascii_lowercase();
+        if m.contains("redirected") || m.contains("http 403") || m.contains("http 429") {
+            Some(std::time::Duration::from_secs(15 * 60))
+        } else if streak >= 3 && (m.contains("connect") || m.contains("timed out") || m.contains("deadline")) {
+            Some(std::time::Duration::from_secs(10 * 60))
+        } else {
+            None
+        }
+    }
     async fn fetch(&mut self, http: &reqwest::Client) -> Result<Snapshot> {
         let url = format!("https://leon.bet/api-2/betline/events/inplayupcomingall?ctag={}&hideClosed=true&flags=reg,urlv2,orn2,cn,mm2,rrc,cmg", self.ctag);
-        let (v, recv_ms) = fetch_json(http.get(url).header("Referer", "https://leon.bet/live")).await?;
+        let resp = http.get(url).header("Referer", "https://leon.bet/live").send().await?;
+        if resp.status().is_redirection() {
+            let to: String = resp.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("?").chars().take(120).collect();
+            bail!("redirected ({}) to {to}", resp.status());
+        }
+        let (v, recv_ms) = read_json(resp).await?;
         if v["events"].is_null() {
             bail!("unexpected reply: {}", v.to_string().chars().take(160).collect::<String>());
         }

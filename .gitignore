@@ -12,3 +12,6 @@ oddsfeed.toml
 # Python virtual env and caches
 .venv/
 __pycache__/
+
+# research data rebuilt by tools/strategy_tests/price_paths_build.py (several MB each)
+tools/strategy_tests/price_paths_*.json

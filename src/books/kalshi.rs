@@ -53,9 +53,9 @@ struct Shared {
     ws_live: bool,
     /// contract ticker -> (event ticker, outcome), for recording quotes.
     tickers: HashMap<String, (String, Outcome)>,
-    /// Last recorded (bid, ask, depth, when) per contract, so only changes are written
-    /// (size-only changes at most every 2 s).
-    recorded: HashMap<String, (Option<f64>, Option<f64>, Depth, Ms)>,
+    /// Last recorded (bid, ask, depth, when, the order book's own best bid / ask) per contract,
+    /// so only changes are written (size-only changes at most every 2 s).
+    recorded: HashMap<String, (Option<f64>, Option<f64>, Depth, Ms, (Option<f64>, Option<f64>))>,
     /// Order books from the `orderbook_delta` channel (needs the API key): resting Yes bids and
     /// No bids, price in dollars x10000 -> contracts. A Yes ask is 1 - a No bid.
     books: HashMap<String, KBook>,
@@ -67,7 +67,19 @@ struct KBook {
     no: std::collections::BTreeMap<i64, f64>,
 }
 
+/// A level counts as the book's best price only with at least this many contracts on it:
+/// smaller ones are leftovers (0.01 of a contract) nobody can trade against.
+const BOOK_MIN_QTY: f64 = 1.0;
+
 impl KBook {
+    /// The best Yes bid and Yes ask as the order book itself shows them, in real time. The
+    /// `ticker` channel's bid / ask (what everything else here uses) can be seconds behind:
+    /// on 20 Nov 2026 one update in ten came over 5 s after Kalshi's own stamp. Recorded beside
+    /// the ticker's prices so the two can be compared before anything is switched over.
+    fn best(&self) -> (Option<f64>, Option<f64>) {
+        let top = |side: &std::collections::BTreeMap<i64, f64>| side.iter().rev().find(|l| *l.1 >= BOOK_MIN_QTY).map(|l| *l.0 as f64 / 10_000.0);
+        (top(&self.yes), top(&self.no).map(|p| 1.0 - p))
+    }
     /// (Yes bids, Yes asks = 1 - No bids) as (price, size). Levels on the wrong side of the
     /// `ticker` channel's best bid / ask are stale (an update we did not get or could not apply;
     /// seen as crossed books) and are left out, like the Polymarket feed does. The book keeps them,
@@ -111,15 +123,17 @@ impl Shared {
     fn record(&mut self, ticker: &str, bid: Option<f64>, ask: Option<f64>, server_ts: Option<Ms>) -> Option<Write> {
         let (event, outcome) = self.tickers.get(ticker)?.clone();
         let depth = self.books.get(ticker).map(|b| b.depth(bid, ask)).unwrap_or_default();
+        let best = self.books.get(ticker).map(|b| b.best()).unwrap_or((None, None));
         let now = now_ms();
-        if let Some((b, a, d, t)) = self.recorded.get(ticker) {
-            let price_same = (*b, *a) == (bid, ask);
+        if let Some((b, a, d, t, k)) = self.recorded.get(ticker) {
+            // A change of either price source is written at once; sizes at most every 2 s.
+            let price_same = (*b, *a) == (bid, ask) && *k == best;
             if price_same && (!depth.differs(d) || now - t < DEPTH_EVERY_MS) {
                 return None;
             }
         }
-        self.recorded.insert(ticker.to_string(), (bid, ask, depth, now));
-        Some(Write::KQuote { ts_ms: now, server_ts_ms: server_ts, event, outcome, bid, ask, est: false, depth })
+        self.recorded.insert(ticker.to_string(), (bid, ask, depth, now, best));
+        Some(Write::KQuote { ts_ms: now, server_ts_ms: server_ts, event, outcome, bid, ask, est: false, depth, book: best })
     }
 
     /// Hand the paper arbitrage this contract's current book (trimmed to the ticker's best prices).
@@ -156,7 +170,9 @@ impl Shared {
             let d = num(&m["delta_fp"]).or_else(|| num(&m["delta"]))?;
             let side = if m["side"].as_str() == Some("no") { &mut b.no } else { &mut b.yes };
             let q = side.get(&p).copied().unwrap_or(0.0) + d;
-            if q > 0.0 {
+            // Sizes come with two decimals; anything under half of 0.01 is rounding left over
+            // from adding them up, and would otherwise stay as a level that is not there.
+            if q > 0.005 {
                 side.insert(p, q);
             } else {
                 side.remove(&p);
@@ -656,3 +672,62 @@ impl super::Book for Kalshi {
 pub(crate) fn event_contracts(e: &Value, sport: &'static str) -> Vec<(Outcome, String)> {
     parse_event(e, "", sport).map(|g| g.tickers).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn shared() -> Shared {
+        let mut sh = Shared::default();
+        sh.tickers.insert("T".into(), ("EV".into(), Outcome::Home));
+        sh
+    }
+
+    /// The order book's best prices are read off the book, skip leftover crumbs, and a move of
+    /// the book is written even while the late ticker still shows the old price.
+    #[test]
+    fn book_best_is_recorded_beside_the_ticker() {
+        let mut sh = shared();
+        sh.book_msg("orderbook_snapshot", &json!({"market_ticker": "T", "yes_dollars_fp": [["0.4500", "100.00"], ["0.4600", "0.01"]], "no_dollars_fp": [["0.5200", "50.00"]]}));
+        // 0.46 holds 0.01 of a contract: not a price. Best bid 0.45, best ask 1 - 0.52 = 0.48.
+        let b = sh.books["T"].best();
+        assert!((b.0.unwrap() - 0.45).abs() < 1e-9 && (b.1.unwrap() - 0.48).abs() < 1e-9, "{b:?}");
+        // The ticker says 0.45 / 0.48: one row.
+        let w = sh.record("T", Some(0.45), Some(0.48), Some(1)).expect("first row");
+        match w {
+            Write::KQuote { bid, ask, book, .. } => assert_eq!((bid, ask, book.0.map(|x| (x * 100.0).round()), book.1.map(|x| (x * 100.0).round())), (Some(0.45), Some(0.48), Some(45.0), Some(48.0))),
+            _ => panic!(),
+        }
+        // Nothing changed: no row.
+        assert!(sh.record("T", Some(0.45), Some(0.48), Some(1)).is_none());
+        // The market moves up in the book (the 0.48 ask is taken, a 0.50 bid arrives); the ticker
+        // has not said so yet. A row is written at once, with the new book prices.
+        sh.book_msg("orderbook_delta", &json!({"market_ticker": "T", "side": "no", "price_dollars": "0.5200", "delta_fp": "-50.00"}));
+        sh.book_msg("orderbook_delta", &json!({"market_ticker": "T", "side": "no", "price_dollars": "0.4700", "delta_fp": "80.00"}));
+        sh.book_msg("orderbook_delta", &json!({"market_ticker": "T", "side": "yes", "price_dollars": "0.5000", "delta_fp": "30.00"}));
+        let w = sh.record("T", Some(0.45), Some(0.48), Some(1)).expect("the book moved");
+        match w {
+            Write::KQuote { bid, ask, book, .. } => {
+                assert_eq!((bid, ask), (Some(0.45), Some(0.48)), "the ticker's prices are stored as before");
+                assert!((book.0.unwrap() - 0.50).abs() < 1e-9 && (book.1.unwrap() - 0.53).abs() < 1e-9, "{book:?}");
+            }
+            _ => panic!(),
+        }
+    }
+
+    /// Adding and removing sizes with two decimals leaves no level behind.
+    #[test]
+    fn a_level_taken_to_zero_is_gone() {
+        let mut sh = shared();
+        sh.book_msg("orderbook_snapshot", &json!({"market_ticker": "T", "yes_dollars_fp": [["0.3000", "0.10"]]}));
+        for _ in 0..3 {
+            sh.book_msg("orderbook_delta", &json!({"market_ticker": "T", "side": "yes", "price_dollars": "0.3000", "delta_fp": "0.20"}));
+        }
+        for d in ["-0.30", "-0.30", "-0.10"] {
+            sh.book_msg("orderbook_delta", &json!({"market_ticker": "T", "side": "yes", "price_dollars": "0.3000", "delta_fp": d}));
+        }
+        assert!(sh.books["T"].yes.is_empty(), "{:?}", sh.books["T"].yes);
+    }
+}
+

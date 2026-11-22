@@ -141,6 +141,29 @@ pub enum Write {
         last: Option<f64>,
         depth: Depth,
     },
+    /// A SISTER market of a Polymarket game (map winner, totals, handicap, spread ...): the top of
+    /// book of one of its two tokens. Recorded only: stored in `pm_sister_quotes`, never broadcast.
+    PmSister {
+        ts_ms: Ms,
+        server_ts_ms: Ms,
+        match_id: i64,
+        event_id: String,
+        kind: String,
+        line: Option<f64>,
+        outcome: String,
+        token: String,
+        bid: Option<f64>,
+        ask: Option<f64>,
+        depth: Depth,
+    },
+    /// A bookmaker's price for a part of a game (see `model::PartQuote`). Recorded only.
+    BookPart { ts_ms: Ms, book: &'static str, book_event_id: String, kind: &'static str, line: f64, outcome: Outcome, price: Option<f64> },
+    /// A price change of a RECORDED-ONLY book (`books::RECORD_ONLY`): saved to `changes_research`,
+    /// never broadcast. App::emit turns such a book's `Change` into this.
+    ChangeResearch(Change),
+    /// A bookmaker's live score of a game, written when it (or its detail) changed. Recorded only
+    /// (`book_scores`): it bypasses the engine, nothing reads it live.
+    BookScore { ts_ms: Ms, book: &'static str, book_event_id: String, score: Option<String>, detail: Option<String>, clock: Option<String> },
     /// Kalshi top of book for one contract (probabilities). `est` = rebuilt from Kalshi's
     /// 1-minute candles for hours recorded before real quotes were kept.
     KQuote {
@@ -152,6 +175,9 @@ pub enum Write {
         ask: Option<f64>,
         est: bool,
         depth: Depth,
+        /// Best Yes bid and ask read off the real-time order book (None without one). `bid` /
+        /// `ask` above come from Kalshi's `ticker` channel, which can be seconds behind.
+        book: (Option<f64>, Option<f64>),
     },
 }
 

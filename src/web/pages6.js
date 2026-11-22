@@ -33,11 +33,11 @@ const SIG = {
   entered: 'Bought', move_too_small: 'Move too small', outside_hours: 'Outside trading hours', too_few_books: 'Only one feed moved', too_few_feeds: 'Only one feed moved',
   consensus_did_not_move: 'The market as a whole did not move', polymarket_does_not_lag: 'Polymarket is not behind in this game', polymarket_leads: 'Polymarket moved first',
   already_moved: 'Polymarket already moved', no_market_price: 'No Polymarket price', no_book_price: 'No bookmaker price', no_consensus: 'Too few bookmakers priced it',
-  data_gap: 'Gap in the recorded prices', book_reverted: 'Bookmaker moved back', basketball: 'Live basketball (skipped)', price_too_high: 'Price above 90¢',
+  data_gap: 'Gap in the recorded prices', book_reverted: 'Bookmaker moved back', basketball: 'Live basketball (skipped)', paper_trial: 'Bought on the paper trial', paper_only_sport: 'Sport is on the paper trial only', weak_game_dear_price: 'Weak game and a price over 60¢', price_too_high: 'Price above 90¢',
   price_above_set_limit: 'Price above the wider set\'s 40¢', gap_too_small: 'Expected gain too small', spread_too_wide: 'Spread too wide', price_out_of_range: 'Price too close to 0 or 100',
   price_ran: 'Price moved before the buy', no_cash: 'No free money for it', too_thin: 'Too little for sale', after_pause: 'Right after a pause in play', weak_feed: 'Triggered by a weak feed',
   wider_set_daily_stop: 'Wider set stopped for today', real_not_filled: 'Order did not fill', real_order_failed: 'Order failed', no_account_cash: 'No cash on the account',
-  already_in_game: 'Real money already in this game', feed_quiet: 'Polymarket price feed went quiet',
+  already_in_game: 'Real money already in this game', feed_quiet: 'Polymarket price feed went quiet', feed_late: 'Polymarket prices were arriving late',
   gone_at_match: 'Offer gone when the order matched', no_live_book: 'No live order book', no_offer: 'Nothing for sale', gap_usual_size: 'Gap is its usual size', swingy_game: 'Game swings too much',
 };
 const sigName = (k) => SIG[k] || k.replace(/_/g, ' ');
@@ -76,12 +76,12 @@ SE.pages.bots = {
       `<div data-tab="panel">` +
         `<div id="bpStats"></div>` +
         `<div class="grid g-main" style="margin-top:40px">` +
-          P.sec('show_chart', '<span id="bpChartTitle">Balance</span><span id="bpChartTag"></span>', '<div class="chart-wrap" id="bpChart"></div>', '', 'Steps at every sale. Green dot = won, red = lost. Shaded band = trading hours. With paper and real together, each line is the profit since the start of the period.') +
+          P.sec('show_chart', '<span id="bpChartTitle">Balance</span><span id="bpChartTag"></span>', '<div class="chart-wrap" id="bpChart"></div>', '', 'Steps at every sale. Green dot = won, red = lost. Shaded band = trading hours. With paper and real together, each line is the profit since the start of the period. Today, 7 days and All include the trades from before a restart of the paper wallet or the start of a real run: the chart then shows the profit since the start of the period, and a dashed line marks where the wallet restarted. Since restart shows the current wallet only.') +
           `<div>` + P.sec('hourglass_top', 'Open<span id="bpOpenTag"></span>', '<div id="bpOpen"></div>') + P.sec('bolt', 'Signals today', '<div id="bpSig"></div>', '<span class="muted" id="bpSigN"></span>', 'Every bookmaker move of 4+ points the bot checked today and what it decided. The same for paper and real.') + `</div>` +
         `</div>` +
         P.sec('insights', 'Projection<span id="bpProjTag"></span>', '<div id="bpProj"></div>', '<div id="bpProjSrc"></div><div id="bpProjH"></div>', 'Thousands of simulated futures from the chosen record: trades arrive at its rate, each with a return drawn from it, stakes as the settings say, daily stops applied. An estimate, not a promise.') +
         P.sec('receipt_long', 'Trades<span id="bpTradesTag"></span>', '<div id="bpTrades"></div>') +
-        P.sec('tune', 'Settings', '<div class="set-grid" id="bpCtl"></div>', `<button class="btn primary" id="bpSave" hidden>${ic('save')}Save</button>`, 'Safe set: 2+ independent feeds moved 10+ points, the market as a whole moved, Polymarket lagged earlier in this game, price 90¢ or less, no live basketball. Wider set: the same with looser numbers, prices of 40¢ or less. Both sell when Polymarket catches up, or at the give-up time.') +
+        P.sec('tune', 'Settings', '<div class="set-grid" id="bpCtl"></div>', `<button class="btn primary" id="bpSave" hidden>${ic('save')}Save</button>`, 'Safe set: 2+ independent feeds moved 8+ points, the market as a whole moved, Polymarket made up at least half of the earlier jumps in this game after the bookmakers, price 90¢ or less, no live basketball. Wider set: the same with looser numbers, prices of 40¢ or less. Both sell when Polymarket catches up, or at the give-up time.') +
       `</div>` +
       // ---- replay
       `<div data-tab="replay" hidden>` +
@@ -245,20 +245,26 @@ SE.pages.bots = {
       const now = Math.max(...ws.map((w) => pd[w].now));
       const day0 = now - (now % 86400000);
       const both = ws.length > 1;
-      const closedOf = (w) => pd[w].trades.filter((t) => t.closed_ms).sort((a, b) => a.closed_ms - b.closed_ms).map((t) => ({ ...t, wallet: w }));
+      // Trades from before the wallet's own start (earlier real runs, the paper wallet before a restart)
+      // are drawn too, so that a restart does not hide the overall trend. 'run' = the current wallet only.
+      const earlier = (w) => (range === 'run' ? [] : pd[w].history || []);
+      const closedOf = (w) => [...earlier(w), ...pd[w].trades.filter((t) => t.closed_ms)].sort((a, b) => a.closed_ms - b.closed_ms).map((t) => ({ ...t, wallet: w }));
       const all = ws.flatMap(closedOf).sort((a, b) => a.closed_ms - b.closed_ms);
       const first = all.length ? Math.min(...all.map((t) => t.ts)) : now - 3600000;
-      let from = range === 'today' ? day0 : range === 'week' ? now - 7 * 86400000 : Math.min(first - 600000, ...ws.map((w) => (pd[w].since > 0 ? pd[w].since : Infinity)));
-      if (range === 'all' && !all.length) from = Math.max(from, now - 6 * 3600000);
+      let from = range === 'today' ? day0 : range === 'week' ? now - 7 * 86400000 : range === 'run' ? Math.min(first - 600000, ...ws.map((w) => (pd[w].since > 0 ? pd[w].since : Infinity))) : first - 600000;
+      if ((range === 'all' || range === 'run') && !all.length) from = Math.max(from, now - 6 * 3600000);
       if (!isFinite(from)) from = now - 6 * 3600000;
-      // Value per wallet at each sale: balance (one wallet) or profit since the period start (both).
+      // Value per wallet at each sale: the wallet's balance, or the profit since the period start when
+      // both wallets are shown or the period reaches back past a restart (wallets that each started
+      // afresh share no balance).
+      const rel = both || ws.some((w) => earlier(w).some((t) => t.closed_ms >= from));
       const base = {}, cur = {};
       for (const w of ws) {
         let b = pd[w].start;
-        for (const t of closedOf(w)) if (t.closed_ms < from) b += t.pnl || 0;
+        for (const t of pd[w].trades) if (t.closed_ms && t.closed_ms < from) b += t.pnl || 0;
         base[w] = b; cur[w] = b;
       }
-      const val = (w) => (both ? cur[w] - base[w] : cur[w]);
+      const val = (w) => (rel ? cur[w] - base[w] : cur[w]);
       const xs = [from], line = Object.fromEntries(ws.map((w) => [w, [val(w)]])), win = [null], loss = [null], meta = [null];
       let n = 0;
       for (const t of all) {
@@ -271,17 +277,17 @@ SE.pages.bots = {
       xs.push(Math.max(now, xs[xs.length - 1] + 1));
       for (const w of ws) line[w].push(val(w));
       win.push(null); loss.push(null); meta.push(null);
-      const sig = [ws.join(), range, all.length, all.length ? all[all.length - 1].closed_ms : 0, ...ws.map((w) => pd[w].start), Math.floor(now / 300000), host.clientWidth, document.documentElement.dataset.theme].join('|');
+      const sig = [ws.join(), range, rel, all.length, all.length ? all[all.length - 1].closed_ms : 0, ...ws.map((w) => pd[w].start), Math.floor(now / 300000), host.clientWidth, document.documentElement.dataset.theme].join('|');
       if (sig === chartSig && chart) return;
       chartSig = sig; chartMeta = meta;
       if (chart) { chart._ro?.disconnect(); chart.destroy(); chart = null; }
       host.innerHTML = '';
-      const ref = both ? 0 : base[ws[0]];
+      const ref = rel ? 0 : base[ws[0]];
       const vals = ws.flatMap((w) => line[w]);
       const lo = Math.min(...vals, ref), hi = Math.max(...vals, ref), pad = Math.max((hi - lo) * 0.18, Math.abs(ref) * 0.01, 0.5);
       const axis = { stroke: css('--text-3'), grid: { stroke: css('--grid'), width: 1 }, ticks: { show: false }, font: '11px ' + css('--font') };
       const hours = anyP()?.window?.hours;
-      const fmtY = (v) => (both ? signed(v, hi - lo < 20 ? 2 : 0) : money(v, hi - lo < 20 ? 2 : 0));
+      const fmtY = (v) => (rel ? signed(v, hi - lo < 20 ? 2 : 0) : money(v, hi - lo < 20 ? 2 : 0));
       const one = ws[0], up = !both && cur[one] >= base[one];
       chart = new uPlot({
         width: host.clientWidth || 600, height: 260, ms: 1, legend: { show: false },
@@ -313,6 +319,18 @@ SE.pages.bots = {
               c.fillText('current rules', x + 5 * dpr, top + 4 * dpr);
               c.restore();
             }
+            // Where each wallet started afresh, when the chart reaches back before it.
+            for (const w of ws) {
+              const t0 = pd[w].since;
+              if (!(t0 > x0 && t0 < x1) || !earlier(w).length) continue;
+              const x = Math.round(u.valToPos(t0, 'x', true)), dpr = devicePixelRatio || 1;
+              c.save();
+              c.strokeStyle = css('--text-3'); c.lineWidth = dpr; c.setLineDash([2 * dpr, 4 * dpr]);
+              c.beginPath(); c.moveTo(x + 0.5, top); c.lineTo(x + 0.5, top + height); c.stroke();
+              c.setLineDash([]); c.font = `${11 * dpr}px ${css('--font')}`; c.fillStyle = css('--text-3'); c.textBaseline = 'top'; c.textAlign = 'right';
+              c.fillText(w === 'real' ? (pd[w].scope === 'run' ? 'this run' : 'real restart') : 'paper restart', x - 5 * dpr, top + (w === 'real' ? 32 : 18) * dpr);
+              c.restore();
+            }
             if (!hours) return;
             c.save(); c.fillStyle = 'rgba(128,128,128,0.07)';
             for (let day = Math.floor(x0 / 86400000) * 86400000; day < x1; day += 86400000) {
@@ -337,7 +355,7 @@ SE.pages.bots = {
             const i = u.cursor.idx;
             if (i == null || u.cursor.left < 0) { SE.tipHide(); return; }
             const t = chartMeta[i], rect = u.over.getBoundingClientRect();
-            const rows = ws.map((w, k) => `<div class="row"><span>${both ? tag(w, true) : 'Balance'}</span><b>${fmtY(u.data[k + 1][i])}</b></div>`).join('');
+            const rows = ws.map((w, k) => `<div class="row"><span>${both ? tag(w, true) : rel ? 'Profit' : 'Balance'}</span><b>${fmtY(u.data[k + 1][i])}</b></div>`).join('');
             SE.tipShow((t
               ? `<div class="t">${SE.fmtDateTime(t.closed_ms)}${both ? ' · ' + tag(t.wallet, true) : ''}</div><div class="row"><b>${esc(t.home || '')} v ${esc(t.away || '')}</b></div><div class="row"><span>${esc(betName(t))} · ${cents(t.entry)} → ${cents(t.exit)}</span><b class="${t.pnl > 0 ? 'up' : 'down'}">${signed(t.pnl)}</b></div>`
               : `<div class="t">${SE.fmtDateTime(u.data[0][i])}</div>`) + rows, rect.left + u.cursor.left, rect.top + u.cursor.top);
@@ -348,8 +366,8 @@ SE.pages.bots = {
       const ro = new ResizeObserver(() => { if (host.clientWidth) chart?.setSize({ width: host.clientWidth, height: 260 }); });
       ro.observe(host);
       chart._ro = ro;
-      $('#bpChartTitle').textContent = both ? 'Profit' : 'Balance';
-      if (!n) host.insertAdjacentHTML('beforeend', `<div class="over">No trades ${range === 'today' ? 'today' : range === 'week' ? 'in 7 days' : 'yet'}</div>`);
+      $('#bpChartTitle').textContent = rel ? 'Profit' : 'Balance';
+      if (!n) host.insertAdjacentHTML('beforeend', `<div class="over">No trades ${range === 'today' ? 'today' : range === 'week' ? 'in 7 days' : range === 'run' ? 'since the restart' : 'yet'}</div>`);
     }
 
     // ================================================================ control panel: lists
@@ -585,12 +603,12 @@ SE.pages.bots = {
           f('payments', 'Wider max', n('b_max_trade', sn.b_max_trade, 1, '$')) +
         `</div><div>` +
           f('account_balance', 'Real wallet', n('bankroll', sn.bankroll, 5, '$'), 'The real bot\'s own money inside your Polymarket account. Never more than the cash on the account. Changing it starts the real wallet afresh.') +
-          f('percent', 'Real stake', n('r_pct', +(sn.r_pct * 100).toFixed(1), 1, '', '%'), 'Share of the real wallet on a trade. Its own number, never the paper stake.') +
-          f('payments', 'Real max per trade', n('r_max_trade', sn.r_max_trade, 1, '$'), 'Most real dollars in one trade.') +
+          f('percent', 'Real stake', n('r_pct', +(sn.r_pct * 100).toFixed(1), 1, '', '%'), 'Share of what the real wallet holds now: $12 of $40, $120 of $400. Half of it in a game with a weak delay score. Never more than Real max per trade.') +
+          f('payments', 'Real max per trade', n('r_max_trade', sn.r_max_trade, 1, '$'), 'A ceiling on one real trade. While it is lower than the real stake share, every trade is this size: raise it to let the stake grow with the wallet. The smallest real trade is $5.') +
           f('shield', 'Real loss stop', n('daily_loss', sn.daily_loss, 5, '$'), 'Real money goes back to paper once it has lost this much.') +
           f('payments', 'Real money', sw('ctlReal', sn.real, 'Asks for a typed confirmation.')) +
         `</div><div>` +
-          f('tune', 'Size by edge', sw('ctlEdge', sn.edge_sizing), 'Bigger stake when the expected gain is bigger (½× to 3×), up to each wallet\'s max per trade.') +
+          f('tune', 'Size by edge', sw('ctlEdge', sn.edge_sizing), 'Paper only: a bigger paper stake when the expected gain is bigger (½× to 3×), up to the paper max per trade. Real money always stakes its flat share.') +
           f('call_split', 'Wider set', sw('ctlB', sn.b_enabled), 'More trades at a lower win rate, small stakes. Paper only.') +
           f('block', 'Wider daily stop', n('b_daily_loss', sn.b_daily_loss, 5, '$'), 'The wider set stops for the day after losing this much. 0 = never.') +
           f('timer_off', 'Give up after', n('give', Math.round((sn.give_up_s || 900) / 60), 1, '', 'min'), 'An unsold trade is sold at this point.') +
@@ -623,7 +641,7 @@ SE.pages.bots = {
       $$('[data-until]', el).forEach((x) => { const t = +x.dataset.until; x.textContent = t ? `${durMin(t - Date.now())} left` : ''; });
     }
     function setView(v) { view = v; modeSeg = ''; SE.setPref('botView', v); chartSig = ''; projSig = ''; tradeTbl = null; pd = {}; load(); }
-    SE.seg($('#bpRange'), [['today', 'Today'], ['week', '7 days'], ['all', 'All']], range, (v) => { range = v; SE.setPref('botRange', v); chartSig = ''; drawChart(); });
+    SE.seg($('#bpRange'), [['today', 'Today'], ['week', '7 days'], ['run', 'Since restart', 'The current wallet only: since the paper wallet was last restarted, or since the real run began.'], ['all', 'All', 'Every trade since the first one, across restarts and runs.']], range, (v) => { range = v; SE.setPref('botRange', v); chartSig = ''; drawChart(); });
 
     // ================================================================ replay
     let simKind = SE.pref('botSim') || 'snipe-plan', simTimer = null, simChart = null, simSeq = 0;

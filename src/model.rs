@@ -134,6 +134,19 @@ pub struct EventIn {
 }
 
 /// The full live list one poll of a book returned.
+/// A bookmaker's price for a PART of a game (map 1, first set, first half, a quarter, a period).
+/// Recorded for research only: it never enters the engine, so it is not matched, not shown, not
+/// broadcast and no bot can see it. `event` = the book's id of the whole game.
+#[derive(Clone, Debug)]
+pub struct PartQuote {
+    pub event: String,
+    pub kind: &'static str,
+    pub line: f64,
+    pub outcome: Outcome,
+    /// Decimal odds; None = not offered right now.
+    pub price: Option<f64>,
+}
+
 pub struct Snapshot {
     pub events: Vec<EventIn>,
     /// When the response body finished arriving (ms since epoch).

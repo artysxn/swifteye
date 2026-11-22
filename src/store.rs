@@ -66,6 +66,71 @@ CREATE TABLE IF NOT EXISTS pm_quotes(
 );
 CREATE INDEX IF NOT EXISTS pm_quotes_match ON pm_quotes(match_id, ts_ms);
 
+-- SISTER markets of a Polymarket game (map winner, totals, handicap, spread ...): top of book of one
+-- token per market (the other token is its mirror), probabilities 0..1. kind = Polymarket's own
+-- market type. RESEARCH ONLY: no bot reads this table and nothing in it is broadcast.
+CREATE TABLE IF NOT EXISTS pm_sister_quotes(
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  server_ts_ms INTEGER,
+  match_id INTEGER NOT NULL,
+  event_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  line REAL,
+  outcome TEXT NOT NULL,
+  token TEXT NOT NULL,
+  bid REAL, ask REAL, bid_size REAL, ask_size REAL
+);
+CREATE INDEX IF NOT EXISTS pm_sister_match ON pm_sister_quotes(match_id, ts_ms);
+-- Bookmaker prices for PARTS of a game (map 1, first set, first half ...): decimal odds, NULL = not
+-- offered now. book_event_id = the book's id of the whole game (join book_events for the match).
+-- RESEARCH ONLY, like pm_sister_quotes.
+CREATE TABLE IF NOT EXISTS book_part_quotes(
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  book TEXT NOT NULL,
+  book_event_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  line REAL NOT NULL,
+  outcome TEXT NOT NULL,
+  price REAL
+);
+CREATE INDEX IF NOT EXISTS book_part_event ON book_part_quotes(book, book_event_id, ts_ms);
+-- Price changes of RECORDED-ONLY books (books::RECORD_ONLY): the same columns as `changes`, kept
+-- apart so nothing that reads `changes` (the bots, the consensus, the replay, the research tools)
+-- sees a book before its timing was tested (owner, 22 Nov 2026).
+CREATE TABLE IF NOT EXISTS changes_research(
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  book TEXT NOT NULL,
+  book_event_id TEXT NOT NULL,
+  match_id INTEGER NOT NULL,
+  market TEXT NOT NULL,
+  line REAL,
+  outcome TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  old_price REAL,
+  new_price REAL,
+  book_ts_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS changes_research_match ON changes_research(match_id, ts_ms);
+-- Bookmakers' LIVE SCORES: one row each time a book's score of a game in play changed, or its
+-- detail did (1xBet platform: games / rounds / quarters of each period, the points of the tennis
+-- game being played, who serves, red cards and penalties), with the clock as the book showed it.
+-- ts_ms = when the poll that showed it arrived. book_event_id = the book's id of the game (join
+-- book_events for the match). RESEARCH ONLY (owner, 22 Nov 2026: what caused each jump): nothing
+-- reads it live.
+CREATE TABLE IF NOT EXISTS book_scores(
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  book TEXT NOT NULL,
+  book_event_id TEXT NOT NULL,
+  score TEXT,
+  detail TEXT,
+  clock TEXT
+);
+CREATE INDEX IF NOT EXISTS book_scores_event ON book_scores(book, book_event_id, ts_ms);
+
 -- Kalshi top of book per contract (event ticker + outcome), probabilities 0..1.
 -- est = 1: rebuilt from Kalshi's 1-minute candles (bid/ask closes) for earlier hours.
 CREATE TABLE IF NOT EXISTS kalshi_quotes(
@@ -152,11 +217,18 @@ pub fn open(path: &Path) -> Result<Connection> {
     let c = Connection::open(path)?;
     c.busy_timeout(Duration::from_secs(5))?;
     c.execute_batch(SCHEMA)?;
+    // When SQLite starts the write-ahead file over by itself, also cut it back to this size.
+    let _ = c.execute_batch(&format!("PRAGMA journal_size_limit = {WAL_RESET_BYTES};"));
     // Order-book size columns (added Nov 2026); "duplicate column" on later starts is fine.
     for t in ["pm_quotes", "kalshi_quotes"] {
         for col in ["bid_size", "ask_size", "bid_depth", "ask_depth"] {
             let _ = c.execute(&format!("ALTER TABLE {t} ADD COLUMN {col} REAL"), []);
         }
+    }
+    // Kalshi's best bid / ask as its real-time order book shows them (20 Nov 2026), beside the
+    // `ticker` channel's `bid` / `ask`, which arrive late.
+    for col in ["book_bid", "book_ask"] {
+        let _ = c.execute(&format!("ALTER TABLE kalshi_quotes ADD COLUMN {col} REAL"), []);
     }
     Ok(c)
 }
@@ -212,7 +284,58 @@ pub fn restore(path: &Path, engine: &mut Engine) -> Result<()> {
     Ok(())
 }
 
-pub fn spawn_writer(path: PathBuf, mut rx: mpsc::Receiver<Write>) -> std::thread::JoinHandle<()> {
+/// The write-ahead file is started over once it is bigger than this.
+const WAL_RESET_BYTES: u64 = 32 << 20;
+/// Above this size a try waits longer for readers (see `WalReset::wait_big`).
+const WAL_BIG_BYTES: u64 = 1 << 30;
+
+/// When and how patiently the writer starts the write-ahead file over.
+#[derive(Clone, Copy)]
+pub struct WalReset {
+    /// Start the file over once it is bigger than this.
+    pub bytes: u64,
+    /// How often the writer looks at the file's size.
+    pub look: Duration,
+    /// The longest one try waits on each reader that is in the way. The writer stores nothing
+    /// while it waits, so this stays far below the 400 ms the snipe bot allows for storing.
+    pub wait: Duration,
+    /// The same, once the file is past `WAL_BIG_BYTES`: something has blocked every short try.
+    pub wait_big: Duration,
+}
+
+impl Default for WalReset {
+    fn default() -> Self {
+        WalReset { bytes: WAL_RESET_BYTES, look: Duration::from_secs(5), wait: Duration::from_millis(60), wait_big: Duration::from_millis(250) }
+    }
+}
+
+/// Start the write-ahead file over when it has grown past `cfg.bytes`. Returns how long the
+/// writer was held, and the file's size before.
+///
+/// SQLite starts the file over by itself only at a moment when no reader is using it. The snipe
+/// bot reads on every bookmaker move and web pages poll, so a reader is always in flight: that
+/// moment never came and the file grew without end (1.7 GB in an hour on 20 Nov 2026, about
+/// 65 MB a minute). So the writer asks for it: copy what is left into the database, wait
+/// briefly for the readers that began earlier, cut the file to zero. Readers are never blocked,
+/// and a try that cannot finish in time changes nothing and is repeated at the next look.
+fn reset_wal(c: &Connection, wal: &Path, cfg: &WalReset) -> (Duration, u64) {
+    let size = std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0);
+    if size <= cfg.bytes {
+        return (Duration::ZERO, size);
+    }
+    let t = Instant::now();
+    let _ = c.busy_timeout(if size > WAL_BIG_BYTES { cfg.wait_big } else { cfg.wait });
+    // One row: (1 when it could not finish, frames in the file, frames copied to the database).
+    let _ = c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    let _ = c.busy_timeout(Duration::from_secs(5));
+    (t.elapsed(), size)
+}
+
+pub fn spawn_writer(path: PathBuf, rx: mpsc::Receiver<Write>) -> std::thread::JoinHandle<()> {
+    spawn_writer_with(path, rx, WalReset::default())
+}
+
+pub fn spawn_writer_with(path: PathBuf, mut rx: mpsc::Receiver<Write>, wal_cfg: WalReset) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("sqlite-writer".into())
         .spawn(move || {
@@ -223,6 +346,12 @@ pub fn spawn_writer(path: PathBuf, mut rx: mpsc::Receiver<Write>) -> std::thread
                     return;
                 }
             };
+            let wal = PathBuf::from(format!("{}-wal", path.display()));
+            let mut looked = Instant::now();
+            // Time the last reset try held the writer: taken off the next collecting window, so
+            // what arrived meanwhile is stored no later than it would have been.
+            let mut held = Duration::ZERO;
+            let mut warned: Option<Instant> = None;
             let mut buf: Vec<Write> = Vec::with_capacity(4096);
             loop {
                 // Block for the first item, then drain whatever else is queued for a short window.
@@ -230,7 +359,7 @@ pub fn spawn_writer(path: PathBuf, mut rx: mpsc::Receiver<Write>) -> std::thread
                     Some(w) => buf.push(w),
                     None => break,
                 }
-                let deadline = Instant::now() + Duration::from_millis(200);
+                let deadline = Instant::now() + Duration::from_millis(200).saturating_sub(std::mem::take(&mut held));
                 while buf.len() < 20_000 {
                     match rx.try_recv() {
                         Ok(w) => buf.push(w),
@@ -246,6 +375,18 @@ pub fn spawn_writer(path: PathBuf, mut rx: mpsc::Receiver<Write>) -> std::thread
                 if let Err(e) = flush(&mut c, &mut buf) {
                     tracing::error!("db write failed: {e}");
                     buf.clear();
+                }
+                if looked.elapsed() >= wal_cfg.look {
+                    looked = Instant::now();
+                    let (took, before) = reset_wal(&c, &wal, &wal_cfg);
+                    held = took;
+                    let after = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+                    if before > WAL_BIG_BYTES && after < before {
+                        tracing::info!("write-ahead file started over (it had reached {} MB)", before >> 20);
+                    } else if after > WAL_BIG_BYTES && warned.map_or(true, |w| w.elapsed() > Duration::from_secs(600)) {
+                        warned = Some(Instant::now());
+                        tracing::warn!("write-ahead file is {} MB and cannot be started over yet: a long read is in the way", after >> 20);
+                    }
                 }
             }
             let _ = flush(&mut c, &mut buf);
@@ -277,16 +418,49 @@ fn flush(c: &mut Connection, buf: &mut Vec<Write>) -> Result<()> {
         let mut ins_pm = tx.prepare_cached(
             "INSERT INTO pm_quotes(ts_ms,server_ts_ms,match_id,event_id,outcome,bid,ask,last,bid_size,ask_size,bid_depth,ask_depth) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         )?;
+        let mut ins_sister = tx.prepare_cached(
+            "INSERT INTO pm_sister_quotes(ts_ms,server_ts_ms,match_id,event_id,kind,line,outcome,token,bid,ask,bid_size,ask_size) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        )?;
+        let mut ins_part = tx.prepare_cached("INSERT INTO book_part_quotes(ts_ms,book,book_event_id,kind,line,outcome,price) VALUES(?1,?2,?3,?4,?5,?6,?7)")?;
+        let mut ins_research = tx.prepare_cached(
+            "INSERT INTO changes_research(ts_ms,book,book_event_id,match_id,market,line,outcome,kind,old_price,new_price,book_ts_ms)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        )?;
+        let mut ins_score = tx.prepare_cached("INSERT INTO book_scores(ts_ms,book,book_event_id,score,detail,clock) VALUES(?1,?2,?3,?4,?5,?6)")?;
         let mut ins_k = tx.prepare_cached(
-            "INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est,bid_size,ask_size,bid_depth,ask_depth) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            "INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est,bid_size,ask_size,bid_depth,ask_depth,book_bid,book_ask) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         )?;
         for w in buf.drain(..) {
             match w {
                 Write::PmQuote { ts_ms, server_ts_ms, match_id, event_id, outcome, bid, ask, last, depth: d } => {
                     ins_pm.execute(params![ts_ms, server_ts_ms, match_id, event_id, outcome.as_str(), bid, ask, last, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth])?;
                 }
-                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est, depth: d } => {
-                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth])?;
+                Write::PmSister { ts_ms, server_ts_ms, match_id, event_id, kind, line, outcome, token, bid, ask, depth: d } => {
+                    ins_sister.execute(params![ts_ms, server_ts_ms, match_id, event_id, kind, line, outcome, token, bid, ask, d.bid_size, d.ask_size])?;
+                }
+                Write::BookPart { ts_ms, book, book_event_id, kind, line, outcome, price } => {
+                    ins_part.execute(params![ts_ms, book, book_event_id, kind, line, outcome.as_str(), price])?;
+                }
+                Write::ChangeResearch(ch) => {
+                    ins_research.execute(params![
+                        ch.ts_ms,
+                        ch.book,
+                        ch.book_event_id,
+                        ch.match_id,
+                        ch.market.as_str(),
+                        ch.line,
+                        ch.outcome.as_str(),
+                        ch.kind.as_str(),
+                        ch.old_price,
+                        ch.new_price,
+                        ch.book_ts_ms
+                    ])?;
+                }
+                Write::BookScore { ts_ms, book, book_event_id, score, detail, clock } => {
+                    ins_score.execute(params![ts_ms, book, book_event_id, score, detail, clock])?;
+                }
+                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est, depth: d, book } => {
+                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth, book.0, book.1])?;
                 }
                 Write::Change(ch) => {
                     ins_change.execute(params![
@@ -357,4 +531,93 @@ pub fn query_json(path: &Path, sql: &str, args: &[rusqlite::types::Value], limit
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn change(i: i64) -> Write {
+        Write::Change(Change {
+            ts_ms: 1_700_000_000_000 + i,
+            book: "testbook",
+            book_event_id: format!("e{}", i % 97),
+            match_id: i % 97,
+            market: Market::X12,
+            line: None,
+            outcome: Outcome::Home,
+            kind: ChangeKind::Move,
+            old_price: Some(1.9),
+            new_price: Some(2.0),
+            book_ts_ms: None,
+        })
+    }
+
+    /// Writes for `secs` seconds while three readers overlap without a pause (the snipe bot's
+    /// load). Returns the write-ahead file's biggest and last size.
+    fn run(name: &str, cfg: WalReset, secs: u64) -> (u64, u64) {
+        let dir = std::env::temp_dir().join(format!("swifteye-wal-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.db");
+        drop(open(&db).unwrap());
+        let (tx, rx) = mpsc::channel::<Write>(100_000);
+        let writer = spawn_writer_with(db.clone(), rx, cfg);
+        let stop = Arc::new(AtomicBool::new(false));
+        let readers: Vec<_> = (0..3u64)
+            .map(|k| {
+                let (db, stop) = (db.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let c = open_ro(&db).unwrap();
+                    std::thread::sleep(Duration::from_millis(10 * k));
+                    while !stop.load(Ordering::Relaxed) {
+                        // A read that stays open 30 ms: with three of them staggered, one is
+                        // always in flight.
+                        let _ = c.execute_batch("BEGIN");
+                        let _: i64 = c.query_row("SELECT COUNT(*) FROM changes WHERE match_id = 5", [], |r| r.get(0)).unwrap_or(0);
+                        std::thread::sleep(Duration::from_millis(30));
+                        let _ = c.execute_batch("COMMIT");
+                    }
+                })
+            })
+            .collect();
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        let (mut top, t, mut i) = (0u64, Instant::now(), 0i64);
+        while t.elapsed() < Duration::from_secs(secs) {
+            for _ in 0..400 {
+                tx.blocking_send(change(i)).unwrap();
+                i += 1;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            top = top.max(std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0));
+        }
+        std::thread::sleep(Duration::from_millis(600));
+        let last = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+        let rows: i64 = open_ro(&db).unwrap().query_row("SELECT COUNT(*) FROM changes", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, i, "every write is stored");
+        stop.store(true, Ordering::Relaxed);
+        for r in readers {
+            r.join().unwrap();
+        }
+        drop(tx);
+        writer.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        (top, last)
+    }
+
+    /// With readers always in flight the write-ahead file only grows; with the writer's reset it
+    /// stays near the size it is reset at.
+    #[test]
+    fn wal_is_started_over_under_constant_readers() {
+        let never = WalReset { bytes: u64::MAX, ..WalReset::default() };
+        let (top_off, last_off) = run("off", never, 6);
+        let on = WalReset { bytes: 256 << 10, look: Duration::from_millis(200), ..WalReset::default() };
+        let (top_on, last_on) = run("on", on, 6);
+        println!("write-ahead file, no reset: top {} KB, end {} KB | with reset: top {} KB, end {} KB", top_off >> 10, last_off >> 10, top_on >> 10, last_on >> 10);
+        assert!(last_off > 4 << 20, "the load must reproduce the growth (got {} KB)", last_off >> 10);
+        assert!(top_on < 6 << 20, "the reset keeps the file small (top {} KB)", top_on >> 10);
+        assert!(top_on * 4 < top_off);
+    }
 }

@@ -565,7 +565,7 @@ fn line_round(app: &App) {
     {
         let eng = app.engine.lock();
         for (book, bs) in &eng.books {
-            if *book == "polymarket" || *book == "kalshi" {
+            if *book == "polymarket" || *book == "kalshi" || crate::books::record_only(book) {
                 continue;
             }
             for es in bs.events.values() {
