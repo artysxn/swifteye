@@ -6,6 +6,19 @@ const { esc, ic } = SE;
 const P = SE.P;
 
 SE.CHANGELOG = [
+  { date: '2026-11-22', icon: 'login', area: 'Feeds', title: 'Pinnacle as a signed-in member, recorded only',
+    lines: [
+      'Pinnacle\'s free guest feed turned out to be a copy kept up to 15 minutes. Signed-in members get the live server.',
+      'Type your Pinnacle login in Settings and Swifteye reads the member server every 3 seconds. It never bets.',
+      'Its prices are kept apart until a test shows how far ahead of the guest copy and the other bookmakers it is.',
+      'If Pinnacle refuses the sign-in or asks for a captcha, Swifteye stops and waits for you.',
+    ] },
+  { date: '2026-11-22', icon: 'network_check', area: 'Feeds', title: 'Less data downloaded',
+    lines: [
+      'Pinnacle\'s pre-match lists are read without player and team props (4.8 MB of the 5.3 MB each time) and once a minute instead of every 15 seconds.',
+      'Polymarket\'s game list re-reads games that are live or start within 2 hours every minute, and the rest every 10 minutes.',
+      'Together about 450 kB a second less, of roughly 2.5 MB a second.',
+    ] },
   { date: '2026-11-22', icon: 'add_circle', area: 'Feeds', title: 'SBOBET added, recorded only',
     lines: [
       'SBOBET\'s public live pages are now read every 4 seconds: winner prices for tennis, basketball, football, e-sports, hockey, volleyball, American football and baseball.',

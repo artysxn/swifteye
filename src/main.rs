@@ -15,6 +15,7 @@ mod kalacct;
 mod lag;
 mod matcher;
 mod model;
+mod pinacct;
 mod pmacct;
 mod predmeta;
 mod predarb;
@@ -285,7 +286,13 @@ fn start_books(app: &Arc<App>) {
         });
     }
     start!("m88", 1500, |_p: Option<String>| m88::M88::new(follows, pre()));
-    start!("pinnacle", 2000, |_p: Option<String>| pinnacle::Pinnacle::new(follows, pre()));
+    // Pinnacle's guest lists are Cloudflare copies kept up to ~15 min (max-age 905): re-reading the
+    // pre-match list every `pr` (15 s) fetched the same copy again. Once a minute is plenty.
+    start!("pinnacle", 2000, |_p: Option<String>| pinnacle::Pinnacle::new(follows, Pre::new(ph, pr.max(60_000))));
+    // Pinnacle as a signed-in member (uncached lists): RECORDED ONLY until its timing is tested.
+    // Idle until the owner saves a login in Settings (pinnacle.json).
+    let db = app.db_path.clone();
+    start!("pinnacle_member", 3000, |_p: Option<String>| pinnacle_member::PinMember::new(db.clone(), follows));
     start!("fonbet", 1000, |p: Option<String>| fonbet::Fonbet::new("fonbet", p.unwrap_or_else(|| "line52w.bk6bba-resources.com".into()), 1600, ph));
     // PARI (pari.ru) runs on Fonbet's platform: same feed on its own line hosts, market scope 2300.
     start!("pari", 1000, |p: Option<String>| fonbet::Fonbet::new("pari", p.unwrap_or_else(|| "line-vk02-w.pb06e2-resources.ru".into()), 2300, ph));

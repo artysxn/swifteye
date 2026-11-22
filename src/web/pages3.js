@@ -406,6 +406,13 @@ SE.pages.settings = {
           <div class="field" style="align-items:start"><label for="kP" data-tip="The private key file Kalshi gave you when creating the key (PEM). Paste its whole text.">Private key</label><textarea class="input mono" id="kP" style="height:90px;padding-top:8px;resize:vertical" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></div>
           <div style="display:flex;gap:8px;margin-top:16px;align-items:center"><button class="btn primary" id="kSave">${ic('save')}Save</button><button class="btn" id="kTest">${ic('sync')}Test connection</button><span class="muted" id="kMsg"></span></div>
           <p class="note" style="margin-top:16px">Stored on this machine in kalshi.json next to the database. The private key is never shown again; leave the masked text to keep it. Swifteye only reads your Kalshi account.</p>`)}
+        ${P.sec('sports_score', 'Pinnacle (signed in)', `
+          <div class="field"><label for="nU" data-tip="Your Pinnacle login. Used only to read odds from the signed-in server, which is live; the guest feed is a copy up to 15 minutes old. Nothing is ever bet.">Username</label><input class="input mono" id="nU" autocomplete="off"></div>
+          <div class="field"><label for="nP">Password</label><input class="input mono" id="nP" type="password" autocomplete="new-password"></div>
+          <div class="field"><label for="nT" data-tip="Pinnacle asks a captcha at sign-in. Sign in on pinnacle.com in your own browser, press F12, open Network, click any request to api.arcadia.pinnacle.com and copy its X-Session request header here.">Session (X-Session)</label><input class="input mono" id="nT" type="password" autocomplete="off" placeholder="From your signed-in browser"></div>
+          <div class="field"><label for="nD" data-tip="The X-Device-UUID request header of the same request. A session only works with the device that signed in.">Device (X-Device-UUID)</label><input class="input mono" id="nD" autocomplete="off" placeholder="From the same request"></div>
+          <div style="display:flex;gap:8px;margin-top:16px;align-items:center"><button class="btn primary" id="nSave">${ic('login')}Save and sign in</button><span class="muted" id="nMsg"></span></div>
+          <p class="note" style="margin-top:16px">Pinnacle asks a captcha when a program signs in, so the usual way is: sign in on pinnacle.com in your own browser, press F12, open Network, click any request to api.arcadia.pinnacle.com, and copy its X-Session and X-Device-UUID request headers into the two boxes. Stored on this machine in pinnacle.json; secrets show masked. The odds are recorded for research only. If the session ends, Swifteye stops and waits for a new one.</p>`)}
         ${P.sec('palette', 'Display', `
           <div class="field"><label>Theme</label><div id="sTheme"></div></div>
           <div class="field"><label>Odds</label><div id="sOdds"></div></div>
@@ -450,6 +457,21 @@ SE.pages.settings = {
       $('#kMsg').textContent = 'Checking';
       try { const a = await api('/kalshi/account'); $('#kMsg').textContent = !a.has_key ? 'Nothing saved yet' : a.balance?.error ? 'Failed: ' + a.balance.error : `Connected. Balance $${((a.balance?.balance ?? 0) / 100).toFixed(2)}`; }
       catch (e) { $('#kMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    });
+    const nShow = (s) => {
+      if (!$('#nMsg')) return;
+      const st = s.status || {};
+      const read = st.state === 'signed in' && st.polls ? ` · ${st.games} live games, cache ${st.cache}${st.age_s != null ? `, copy ${st.age_s} s old` : ''}` : '';
+      $('#nMsg').textContent = (s.has_login ? st.state || 'waiting' : 'No login saved') + (st.detail ? ': ' + st.detail : '') + read;
+    };
+    const nFill = (s) => { if (!$('#nU')) return; $('#nU').value = s.username || ''; $('#nP').value = s.password || ''; $('#nT').value = s.session_token || ''; $('#nD').value = s.session_uuid || ''; nShow(s); };
+    api('/pinnacle/settings').then(nFill);
+    $('#nSave').addEventListener('click', async () => {
+      try {
+        nFill(await api('/pinnacle/settings', { body: { username: $('#nU').value, password: $('#nP').value, session_token: $('#nT').value, session_uuid: $('#nD').value } }));
+        $('#nMsg').textContent = 'Saved; signing in';
+        for (let i = 0; i < 10; i++) { await new Promise((r) => setTimeout(r, 3000)); if (!$('#nMsg')) return; const s = await api('/pinnacle/settings'); nShow(s); if (['signed in', 'refused', 'guest only'].includes(s.status?.state) && (s.status.state !== 'signed in' || s.status.polls)) break; }
+      } catch (e) { $('#nMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     });
     api('/info').then((i) => {
       const row = (k, v) => `<div class="field" style="grid-template-columns:130px minmax(0,1fr)"><label>${k}</label><span class="muted" style="word-break:break-all">${v}</span></div>`;

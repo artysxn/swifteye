@@ -204,6 +204,21 @@ pub fn source() -> String {
     "Polymarket CLOB market WebSocket (mid of Yes token); games from Gamma soccer tag".into()
 }
 
+/// Discovery re-reads games live or starting within this many minutes every minute.
+const NEAR_MIN: i64 = 120;
+/// ... and the whole pre-match window this often.
+const FULL_EVERY_MS: Ms = 10 * 60_000;
+
+/// The near list plus the games of the last full discovery that start after `edge` (the near
+/// list's end). A far game that has come inside `edge` is taken from the near list only, so a
+/// game closed or moved out of the window drops out within a minute, as before.
+fn with_far(mut near: Vec<PmEvent>, far: &[PmEvent], edge: Ms) -> Vec<PmEvent> {
+    let ids: std::collections::HashSet<String> = near.iter().map(|e| e.id.clone()).collect();
+    near.extend(far.iter().filter(|e| e.start_ms.is_some_and(|s| s > edge) && !ids.contains(&e.id)).cloned());
+    near.sort_by(|a, b| a.id.cmp(&b.id));
+    near
+}
+
 pub async fn run(app: Arc<App>, prematch_min: i64) {
     let http = http_client();
     let (tx, mut rx) = watch::channel::<Arc<Vec<PmEvent>>>(Arc::new(Vec::new()));
@@ -219,8 +234,24 @@ pub async fn run(app: Arc<App>, prematch_min: i64) {
             // Ball sports: the lines picked for a game stay picked (the nearest-to-even line drifts
             // with the score; re-picking would reconnect the sister feed every minute).
             let mut picked: HashMap<String, Vec<Sister>> = HashMap::new();
+            // Two speeds (network): each Gamma event carries every market of the game, so the
+            // football pages alone were ~70 MB (~10 MB on the wire) a minute. Games live or starting
+            // within NEAR_MIN are re-read every minute as before; the rest of the window every
+            // FULL_EVERY_MS, kept in `far` in between.
+            let mut far: Vec<PmEvent> = Vec::new();
+            let mut far_at: Ms = 0;
             loop {
-                match discover(&http, prematch_min, &app.cfg).await {
+                let now = now_ms();
+                let full = far_at == 0 || now - far_at >= FULL_EVERY_MS || prematch_min <= NEAR_MIN;
+                let res = if full {
+                    discover(&http, prematch_min, &app.cfg).await.inspect(|evs| {
+                        far = evs.clone();
+                        far_at = now;
+                    })
+                } else {
+                    discover(&http, NEAR_MIN, &app.cfg).await.map(|near| with_far(near, &far, now + NEAR_MIN * 60_000))
+                };
+                match res {
                     Ok(mut evs) => {
                         for e in evs.iter_mut().filter(|e| !is_esports_sport(&e.sport) && !e.sister.is_empty()) {
                             e.sister = picked.entry(e.id.clone()).or_insert_with(|| e.sister.clone()).clone();
@@ -880,6 +911,25 @@ mod tests {
                 {"sportsMarketType": "moneyline", "outcomes": outs, "clobTokenIds": "[\"t1\", \"t2\"]"},
             ],
         })
+    }
+
+    #[test]
+    fn near_list_keeps_far_games_until_the_next_full_read() {
+        let base = parse_two_way(&event("Vikings vs. 49ers", ["Vikings", "49ers"]), Some("amfootball")).unwrap();
+        let ev = |id: &str, start_min: i64, home: &str| PmEvent { id: id.into(), start_ms: Some(start_min * 60_000), home: home.into(), ..base.clone() };
+        let edge = 120 * 60_000;
+        // Last full read: A soon, B later, C soon (since closed), D later, E with no start.
+        let far = vec![ev("a", 30, "old"), ev("b", 300, "far"), ev("c", 60, "far"), ev("d", 200, "far"), PmEvent { id: "e".into(), start_ms: None, ..base.clone() }];
+        // This minute's near read: A (fresh copy) and a new game F; C is gone.
+        let near = vec![ev("f", 10, "near"), ev("a", 30, "near")];
+        let got = with_far(near, &far, edge);
+        let ids: Vec<&str> = got.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "d", "f"], "sorted by id like discover(); C dropped, E (no start) dropped");
+        assert_eq!(got[0].home, "near", "a game inside the near window comes from the near read");
+        // A far game also returned by the near read (its start moved inside) is not doubled.
+        let got = with_far(vec![ev("b", 100, "near")], &far, edge);
+        assert_eq!(got.iter().filter(|e| e.id == "b").count(), 1);
+        assert_eq!(got.iter().find(|e| e.id == "b").unwrap().home, "near");
     }
 
     #[test]

@@ -88,6 +88,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/pm/settings", get(pm_settings_get).post(pm_settings_post))
         .route("/pm/account", get(pm_account))
         .route("/kalshi/settings", get(kalshi_settings_get).post(kalshi_settings_post))
+        .route("/pinnacle/settings", get(pin_settings_get).post(pin_settings_post))
         .route("/kalshi/account", get(kalshi_account))
         .route("/control/scope", post(control_scope))
         .route("/books", get(books))
@@ -811,6 +812,22 @@ async fn kalshi_settings_post(State(app): S, Json(edit): Json<Value>) -> Respons
     let c = crate::kalacct::merge(crate::kalacct::load(&app.db_path), &edit);
     match crate::kalacct::save(&app.db_path, &c) {
         Ok(()) => Json(crate::kalacct::public_view(&c)).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
+}
+
+async fn pin_settings_get(State(app): S) -> Json<Value> {
+    Json(crate::pinacct::public_view(&crate::pinacct::load(&app.db_path)))
+}
+
+/// Save the Pinnacle login; the member collector signs in (once) on its next poll.
+async fn pin_settings_post(State(app): S, Json(edit): Json<Value>) -> Response {
+    let c = crate::pinacct::merge(crate::pinacct::load(&app.db_path), &edit);
+    match crate::pinacct::save(&app.db_path, &c) {
+        Ok(()) => {
+            crate::pinacct::bump();
+            Json(crate::pinacct::public_view(&c)).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
     }
 }

@@ -18,6 +18,7 @@ pub mod mostbet;
 pub mod novibet;
 pub mod olimp;
 pub mod pinnacle;
+pub mod pinnacle_member;
 pub mod polymarket;
 pub mod sbobet;
 pub mod sportybet;
@@ -122,7 +123,7 @@ pub trait Book: Send + 'static {
 /// broadcast, so the bots, the consensus, the replay and every research tool reading `changes` stay
 /// exactly as before. Their games still get `book_events` rows (for joins). Take a book off this list
 /// only after its timing against Polymarket was tested.
-pub const RECORD_ONLY: &[&str] = &["sbobet", "hkjc"];
+pub const RECORD_ONLY: &[&str] = &["sbobet", "hkjc", "pinnacle_member"];
 
 pub fn record_only(book: &str) -> bool {
     RECORD_ONLY.contains(&book)

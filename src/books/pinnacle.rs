@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 const API: &str = "https://guest.api.arcadia.pinnacle.com/0.1";
 /// The key pinnacle.com itself sends for guests.
-const KEY: &str = "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R";
+pub(super) const KEY: &str = "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R";
 
 /// (Pinnacle sport id, our sport key). "esports" is refined per league from its title.
 pub const SPORT_IDS: &[(i64, &str)] = &[
@@ -55,7 +55,11 @@ async fn sport_list(http: &reqwest::Client, id: i64, sport: &'static str, live: 
     let (mu, mk) = if live {
         (format!("/sports/{id}/matchups/live"), format!("/sports/{id}/markets/live/straight"))
     } else {
-        (format!("/sports/{id}/matchups"), format!("/sports/{id}/markets/straight?primaryOnly=true"))
+        // `withSpecials=false`: without it the football list is ~4.8 MB a refresh, ~90% player /
+        // team props ("special" matchups) that `parse` drops anyway. Same Regular games (checked
+        // 2026-11-22: 1201 of 1201). The live lists keep their old URLs: the query string is part of
+        // Cloudflare's cache key, and the live copy without specials was older (6 games missing).
+        (format!("/sports/{id}/matchups?withSpecials=false"), format!("/sports/{id}/markets/straight?primaryOnly=true&withSpecials=false"))
     };
     let (a, b) = futures::join!(get(http, mu), get(http, mk));
     let ((mu, t1), (mk, t2)) = (a?, b?);
@@ -137,7 +141,7 @@ fn decimal(american: f64) -> Option<f64> {
     }
 }
 
-fn parse(mu: &Value, mk: &Value, sport: &'static str, live: bool) -> Vec<EventIn> {
+pub(super) fn parse(mu: &Value, mk: &Value, sport: &'static str, live: bool) -> Vec<EventIn> {
     let mut markets: HashMap<i64, Vec<&Value>> = HashMap::new();
     for m in mk.as_array().into_iter().flatten() {
         if m["period"].as_i64() != Some(0) || m["isAlternate"].as_bool() == Some(true) {

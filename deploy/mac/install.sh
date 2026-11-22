@@ -65,7 +65,13 @@ EOF
 
 echo "==> (Re)starting $LABEL…"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# bootout returns before the old job is gone; bootstrap then fails with "5: Input/output error"
+# and the collector stays DOWN (seen 2026-11-22). Retry for up to ~20 s.
+for i in $(seq 1 10); do
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then break; fi
+  if [ "$i" = 10 ]; then echo "launchctl bootstrap kept failing; run: launchctl bootstrap gui/$(id -u) $PLIST"; exit 1; fi
+  sleep 2
+done
 launchctl enable "gui/$(id -u)/$LABEL"
 
 for _ in $(seq 1 20); do
