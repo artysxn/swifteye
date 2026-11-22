@@ -42,8 +42,10 @@ pub fn sport_ids(follows: impl Fn(&str) -> bool) -> Vec<i64> {
 
 impl Linebet {
     fn url(&self, feed: &str, sports: &str) -> String {
+        // Since ~2026-11-22 LineFeed answers 406 NotAcceptable to `noFilterBlockEvent`; LiveFeed still takes it.
+        let block = if feed == "LiveFeed" { "&noFilterBlockEvent=true" } else { "" };
         format!(
-            "https://{}/service-api/{feed}/Get1x2_VZip?sports={sports}&count=500&lng=en&mode=4{}&getEmpty=true&noFilterBlockEvent=true",
+            "https://{}/service-api/{feed}/Get1x2_VZip?sports={sports}&count=500&lng=en&mode=4{}&getEmpty=true{block}",
             self.host, self.extra
         )
     }

@@ -130,6 +130,12 @@ where the source has a stamp.
 - **Linebet** (1xBet platform): `/service-api/LiveFeed/Get1x2_VZip?sports=1&count=500&mode=4...`. T 1/2/3 = 1X2, 7/8 = handicap, 9/10 = total, 180/181 = BTTS, `B` = blocked. Lists simulated leagues ("Short Football 3x3", "MLS+", "4x4"), which `is_esoccer` filters out.
 - **Fonbet**: website is Cloudflare-challenged, but the line CDN `line52w.bk6bba-resources.com/events/list?version=N` is open. Deltas by `packetVersion`, full refresh every 30 s. Factors: 921/922/923 = 1X2, 930/931 = total, 927/928 = handicap.
 - **VINN**: Altenar `sb2frontend-altenar2.biahosted.com/api/widget/GetLiveEvents?integration=vinn&sportId=66`.
+- **HKJC** (`books/hkjc.rs`, record-only): GraphQL GET `info.cld.hkjc.com/graphql/base-get/` with the
+  page's exact `matchList` query text. Needs `Content-Type: application/json` on the GET (Apollo CSRF guard;
+  without it the origin answers 400 "Internal server error - BAD_REQUEST", which edge-cache hits hide).
+  One market family per request (HAD+EHA / HDC+EDC / HIL+EHL). HDC/HIL `condition` "a/b" = quarter line
+  (mean). Pool `updateAt` does not move with prices: no source stamp. Guests' page polls every 12 s;
+  logged-in users get Solace MQTT push (`wss://ueb.hkjc.com`, token needed, not used).
 - **Polymarket**:
   - Gamma `/events?tag_id=100350` (soccer). Limit above 50 needs gzip.
   - Title "Home vs. Away". Three moneyline markets; Yes token from `clobTokenIds`.

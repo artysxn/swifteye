@@ -7,6 +7,7 @@ pub mod betcity;
 pub mod betika;
 pub mod betpawa;
 pub mod fonbet;
+pub mod hkjc;
 pub mod kalshi;
 pub mod kambi;
 pub mod leon;
@@ -121,7 +122,7 @@ pub trait Book: Send + 'static {
 /// broadcast, so the bots, the consensus, the replay and every research tool reading `changes` stay
 /// exactly as before. Their games still get `book_events` rows (for joins). Take a book off this list
 /// only after its timing against Polymarket was tested.
-pub const RECORD_ONLY: &[&str] = &["sbobet"];
+pub const RECORD_ONLY: &[&str] = &["sbobet", "hkjc"];
 
 pub fn record_only(book: &str) -> bool {
     RECORD_ONLY.contains(&book)
@@ -375,6 +376,15 @@ pub fn is_esoccer(e: &EventIn) -> bool {
         })
         || teams.contains("esports")
         || teams.contains("(e)")
+        // Sportradar's Simulated Reality League. Novibet writes "Ѕimulated" with a Cyrillic Ѕ,
+        // so match the rest of the word and the "SRL" tag on league or team names.
+        || l.contains("imulated reality")
+        || has_srl_token(&l)
+        || has_srl_token(&teams)
+}
+
+fn has_srl_token(s: &str) -> bool {
+    s.split(|c: char| !c.is_alphanumeric()).any(|t| t == "srl")
 }
 
 // ---- small JSON helpers -------------------------------------------------
@@ -421,4 +431,20 @@ pub fn naive_ms(s: &str, offset_h: i64) -> Option<Ms> {
 
 pub fn join_league(parts: &[&str]) -> String {
     parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" / ")
+}
+
+#[cfg(test)]
+mod esoccer_tests {
+    use super::*;
+
+    fn ev(league: &str, home: &str, away: &str) -> EventIn {
+        EventIn { league: league.into(), home: home.into(), away: away.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn simulated_reality_league_is_filtered_even_with_a_cyrillic_s() {
+        assert!(is_esoccer(&ev("\u{0405}imulated Reality League / Netherlands - Eredivisie SRL", "Ajax Amsterdam (SRL)", "ADO Den Haag SRL")));
+        assert!(is_esoccer(&ev("Netherlands / Eredivisie", "Sparta Rotterdam (SRL)", "AZ Alkmaar (SRL)")));
+        assert!(!is_esoccer(&ev("Netherlands / Eredivisie", "Sparta Rotterdam", "AZ Alkmaar")));
+    }
 }

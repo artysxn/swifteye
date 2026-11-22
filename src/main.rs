@@ -321,6 +321,7 @@ fn start_books(app: &Arc<App>) {
         start!(name, 1500, |_p: Option<String>| betby::Betby { name, api: api.into(), brand: brand.into(), origin: origin.into(), pre: Pre::new(ph, 60_000) });
     }
     // SBOBET's public live pages: RECORDED ONLY (books::RECORD_ONLY) until its timing is tested.
+    start!("hkjc", 2000, |_p: Option<String>| hkjc::Hkjc { pre: Pre::new(ph, 60_000) });
     start!("sbobet", 4000, |_p: Option<String>| sbobet::Sbobet::new(follows));
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);

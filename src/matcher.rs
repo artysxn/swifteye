@@ -275,6 +275,8 @@ impl Names {
                 "res" | "reserves" | "reserve" | "ii" | "b" => Some("reserves"),
                 // Academy / junior rosters of an e-sports org must not match the main roster.
                 "academy" | "junior" | "juniors" | "jr" | "youth" | "challengers" => Some("academy"),
+                // Simulated Reality League copy of a real fixture ("Ajax Amsterdam (SRL)").
+                "srl" => Some("simulated"),
                 "u17" | "u18" | "u19" | "u20" | "u21" | "u22" | "u23" => Some(match t {
                     "u17" => "u17",
                     "u18" => "u18",
@@ -388,6 +390,8 @@ mod tests {
         assert!(s("Bayern München", "Bayern Munchen") >= 0.99);
         assert!(s("Linfield Swifts (res)", "Linfield") < 0.01);
         assert!(s("Arsenal W", "Arsenal") < 0.01);
+        assert!(s("Ajax Amsterdam (SRL)", "Ajax") < 0.01);
+        assert!(s("ADO Den Haag SRL", "ADO Den Haag") < 0.01);
         assert!(s("Arsenal (W)", "Arsenal Women") >= 0.99);
         assert!(s("Real Madrid", "Real Betis") < 0.7);
         assert!(s("Irapuato", "Celaya") < 0.3);
