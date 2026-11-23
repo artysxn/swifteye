@@ -1,7 +1,7 @@
 //! Normalised types every bookmaker adapter produces, and the change records
 //! the engine derives from them.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub type Ms = i64;
 
@@ -10,7 +10,7 @@ pub fn now_ms() -> Ms {
     crate::clock::now_ms()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Market {
     /// Full-time 1X2 (three-way result).
     #[serde(rename = "1x2")]
@@ -46,7 +46,7 @@ impl Market {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Outcome {
     Home,
@@ -88,15 +88,18 @@ pub fn line_from_key(k: i32) -> Option<f64> {
     }
 }
 
-/// One price as an adapter saw it.
-#[derive(Clone, Debug)]
+/// One price as an adapter saw it. (Deserialize: browser_books.py posts these to /ingest.)
+#[derive(Clone, Debug, Deserialize)]
 pub struct QuoteIn {
     pub market: Market,
+    #[serde(default)]
     pub line: Option<f64>,
     pub outcome: Outcome,
     /// `None` = listed but suspended / not bettable right now.
+    #[serde(default)]
     pub price: Option<f64>,
     /// The bookmaker's own change timestamp, when the feed carries one.
+    #[serde(default)]
     pub book_ts: Option<Ms>,
 }
 
@@ -113,22 +116,28 @@ impl QuoteIn {
 }
 
 /// One live event as an adapter saw it.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct EventIn {
     pub id: String,
     pub sport: String,
     pub league: String,
     pub home: String,
     pub away: String,
+    #[serde(default)]
     pub start_ms: Option<Ms>,
     /// Sportradar match id when the book exposes it; used for exact matching.
+    #[serde(default)]
     pub sr_id: Option<String>,
     /// The id is probably Sportradar but not guaranteed (Polymarket gameId): use it
     /// for an exact link when it hits, but never let it block a name match.
+    #[serde(default)]
     pub sr_weak: bool,
     /// In play (true) or not started yet (false).
+    #[serde(default)]
     pub live: bool,
+    #[serde(default)]
     pub score: Option<String>,
+    #[serde(default)]
     pub clock: Option<String>,
     pub quotes: Vec<QuoteIn>,
 }

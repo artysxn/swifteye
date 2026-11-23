@@ -92,6 +92,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/kalshi/account", get(kalshi_account))
         .route("/control/scope", post(control_scope))
         .route("/books", get(books))
+        .route("/ingest", post(ingest))
         .route("/matches", get(matches))
         .route("/matches/{id}", get(match_detail))
         .route("/matches/{id}/changes", get(match_changes))
@@ -150,6 +151,7 @@ async fn index() -> Json<Value> {
             "GET /lag/books/events?trigger_book=&follower_book=&limit=": "each book-to-book jump behind the summary",
             "GET /query?sql=SELECT...&limit=": "read-only SQL over tables matches, book_events, changes",
             "GET /stats": "row counts and changes per book in the last 5 minutes",
+            "POST /ingest": "browser_books.py posts {book, recv_ms, events} here (BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle)",
             "POST /matches/{into}/merge/{from}": "fix a missed cross-book match",
             "POST /events/{book}/{event_id}/unlink": "fix a wrong cross-book match"
         },
@@ -167,6 +169,14 @@ async fn books(State(app): S) -> Json<Value> {
     let mut v: Vec<_> = eng.books.values().map(|b| b.status.clone()).collect();
     v.sort_by_key(|s| s.name);
     Json(json!({"started_ms": app.started_ms, "now_ms": now_ms(), "books": v}))
+}
+
+/// One poll of browser_books.py (books/browser.rs): applied to the engine like a Rust adapter's snapshot.
+async fn ingest(State(app): S, Json(body): Json<Value>) -> Response {
+    match crate::books::browser::ingest(&app, body).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 #[derive(Deserialize, Default)]

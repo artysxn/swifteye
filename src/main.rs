@@ -60,6 +60,27 @@ pub struct Config {
     /// How often to refresh the bookmakers' pre-match lists.
     pub prematch_refresh_ms: i64,
     pub books: HashMap<String, BookCfg>,
+    /// browser_books.py (BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle).
+    pub browser_books: BrowserCfg,
+}
+
+/// `[browser_books]`: oddsfeed starts browser_books.py and keeps it running (books/browser.rs).
+/// Per-book `[books.<name>] enabled / paused` work for these books too; `poll_ms` does not (the
+/// script sets its own pace).
+#[derive(Deserialize, Clone)]
+#[serde(default)]
+pub struct BrowserCfg {
+    pub enabled: bool,
+    /// Folder holding browser_books.py. Default: the repo the exe was built in.
+    pub dir: Option<String>,
+    /// Python with `requests` and `camoufox`. Default: that folder's .venv.
+    pub python: Option<String>,
+}
+
+impl Default for BrowserCfg {
+    fn default() -> Self {
+        BrowserCfg { enabled: true, dir: None, python: None }
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -88,6 +109,7 @@ impl Default for Config {
             prematch_hours: 8.0,
             prematch_refresh_ms: 15_000,
             books: HashMap::new(),
+            browser_books: BrowserCfg::default(),
         }
     }
 }
@@ -332,6 +354,9 @@ fn start_books(app: &Arc<App>) {
     start!("sbobet", 4000, |_p: Option<String>| sbobet::Sbobet::new(follows));
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
+    // BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle: browser_books.py posts them
+    // to /ingest. RECORDED ONLY (books::RECORD_ONLY) until their timing is tested.
+    browser::start(app);
     // Kalshi: second prediction-market baseline, polled in batches.
     // With an API key Kalshi pushes over its WebSocket and a poll is only a memory read, so it
     // runs every 250 ms; without one each poll is a batched REST call. Key edits apply on restart.

@@ -9,6 +9,25 @@ and for those the notes say how the odds would be read if the page were reachabl
 Legend: **wired** = adapter running in Swifteye; **open** = reachable, feed found or likely,
 not wired yet; **blocked** = challenge / geo-block / refused from here.
 
+## Wired 2026-11-23: browser_books.py
+
+Collected by `browser_books.py` (repo root), which oddsfeed starts and which posts to `/ingest`
+(`books/browser.rs`). Recorded only. Checked from this PC on 23 Nov: every feed below answered a
+plain request with no challenge.
+
+| Book | How | Notes |
+|---|---|---|
+| BC.Game | Betby `api-k-c7818b61-623.sptpub.com`, brand `2103509236163162112` | the site itself was "connection refused" on 17 Nov; the feed host is open. |
+| Rollbit | Betby `api-a-c7818b61-600.sptpub.com`, brand `2103518166582956032` | same host as Duel. |
+| Rainbet | Betby `api-a-c7818b61-600.sptpub.com`, brand `2374656571012681728` | the site is Cloudflare-challenged; the feed host is open. |
+| CSGO500 | Betby `api-h-c7818b61-608.sptpub.com`, brand `2195256717934206976` | |
+| CSGOEmpire | Betby `api-h-c7818b61-608.sptpub.com`, brand `2432911154364948480` | |
+| Cloudbet | `www.cloudbet.com/sports-api/c/v6/sports/events?live=true&sports=soccer`, then `/events/{id}?markets=soccer.match_odds&...` per game | fetched inside a headless browser page; 1X2, totals, Asian handicap, BTTS. |
+| Shuffle | `shuffle.com/sports?section=live`, rendered and read as text every 60 s | no odds JSON found; 1X2 only, no kick-off time; the page mixes sports (two-way games are dropped). |
+
+The script reads football only, and for the Betby brands only the board's top slice (about half
+of the live football: 25 of 53 games on BC.Game, 23 Nov 07:20 UTC).
+
 ## Wired in this round
 
 | Book | How | Notes |
