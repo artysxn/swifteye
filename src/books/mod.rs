@@ -6,6 +6,7 @@ pub mod betby;
 pub mod betcity;
 pub mod betika;
 pub mod betpawa;
+pub mod browser;
 pub mod fonbet;
 pub mod hkjc;
 pub mod kalshi;
@@ -122,7 +123,11 @@ pub trait Book: Send + 'static {
 /// broadcast, so the bots, the consensus, the replay and every research tool reading `changes` stay
 /// exactly as before. Their games still get `book_events` rows (for joins). Take a book off this list
 /// only after its timing against Polymarket was tested.
-pub const RECORD_ONLY: &[&str] = &["sbobet", "hkjc"];
+pub const RECORD_ONLY: &[&str] = &[
+    "sbobet", "hkjc",
+    // browser_books.py (books/browser.rs), added 23 Nov 2026.
+    "bcgame", "rollbit", "rainbet", "csgo500", "csgoempire", "cloudbet", "shuffle",
+];
 
 pub fn record_only(book: &str) -> bool {
     RECORD_ONLY.contains(&book)

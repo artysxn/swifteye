@@ -62,11 +62,14 @@ The **Changelog** page lists what changed and when. Add an entry at the top of
 | Kambi | Unibet, LeoVegas, Paf |
 | Fonbet platform | Fonbet, PARI, Mostbet |
 | Altenar | VINN, BetKing |
-| Betby | Duel |
+| Betby | Duel; BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire (through `browser_books.py`) |
 | Own feeds | Pinnacle, Marathonbet, Leon, Olimpbet, Betcity, M88, Thunderpick, SportyBet, betPawa, Betika |
+| Headless browser (`browser_books.py`) | Cloudbet (its sports API, fetched inside the page), Shuffle (the rendered live page) |
 
 Every adapter reads the same public JSON the bookmaker's own live page loads. Nothing logs in,
-solves challenges or works around blocks. `docs/BOOKMAKERS.md` has the details per feed,
+solves challenges or works around blocks. `browser_books.py` (started and kept running by the
+collector, posting to `POST /ingest`) covers the seven crypto books above; it needs the repo's
+`.venv` with `requests` and `camoufox`, and they are recorded only until their timing is tested. `docs/BOOKMAKERS.md` has the details per feed,
 including the ones that are blocked.
 
 Feeds that share one trading desk count as one group when the bot asks "how many bookmakers moved".

@@ -6,6 +6,12 @@ const { esc, ic } = SE;
 const P = SE.P;
 
 SE.CHANGELOG = [
+  { date: '2026-11-23', icon: 'add_circle', area: 'Feeds', title: 'Seven crypto bookmakers added, recorded only',
+    lines: [
+      'BC.Game, Rollbit, Rainbet, CSGO500 and CSGOEmpire (live football from their Betby feeds, every 5 seconds), Cloudbet (live football, every 5 seconds) and Shuffle (its live page, once a minute).',
+      'They are collected by browser_books.py, which the collector now starts by itself and restarts if it stops. Its errors show on the Feeds page under each bookmaker.',
+      'Like SBOBET and HKJC, their prices are kept apart. No bot, replay or chart uses them until a test shows how they move against Polymarket.',
+    ] },
   { date: '2026-11-22', icon: 'add_circle', area: 'Feeds', title: 'SBOBET added, recorded only',
     lines: [
       'SBOBET\'s public live pages are now read every 4 seconds: winner prices for tennis, basketball, football, e-sports, hockey, volleyball, American football and baseball.',

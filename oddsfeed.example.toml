@@ -39,5 +39,12 @@ param = "line52w.bk6bba-resources.com"   # Fonbet line CDN host
 [books.vinn]
 param = "vinn"              # Altenar integration name
 
+[browser_books]             # browser_books.py: BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle
+enabled = true              # started and kept running by the collector, posts to /ingest
+# dir = "D:/Dev/claude/oddsfeed"          # folder with browser_books.py (default: the repo the exe was built in)
+# python = "D:/Dev/claude/oddsfeed/.venv/Scripts/python.exe"   # needs requests + camoufox
+# [books.shuffle]           # per book: enabled = false, or paused = true (poll_ms is set by the script)
+# paused = true
+
 [books.polymarket]          # WebSocket, poll_ms not used
 param = "30"                # start watching this many minutes before kick-off

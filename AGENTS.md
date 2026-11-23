@@ -199,6 +199,31 @@ Snipe window research: `tools/snipe_research.mjs` (gates in `src/snipe.rs`, chos
 60% of the data, checked on the last 40%). Kalshi real quotes in `kalshi_quotes` (est=1 rows =
 backfill from Kalshi's 1-minute candles, run at startup).
 
+## 8d. Browser books (2026-11-23)
+
+BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet and Shuffle come from `browser_books.py`
+(repo root, written by the local Qwen agent; use it as written). oddsfeed starts it with the repo's
+`.venv` Python (`requests` + `camoufox`), restarts it when it exits, and points it at its own
+`bind` address; it POSTs `{book, recv_ms, events}` to `/ingest` (`books/browser.rs`).
+
+- The five sptpub books: `GET {host}/api/v4/live/brand/{brand}/en/0` → `version` → `.../en/{version}`,
+  football only, 1X2 (market 1) + totals (market 18), every 5 s, plain HTTP. The script reads the
+  `version` slice only (= `top_events_versions`), about half the live football board; the Rust
+  Betby adapter (Duel) reads `top` + `rest`.
+- Cloudbet: `/sports-api/c/v6/sports/events?live=true&sports=soccer`, then one
+  `/sports-api/c/v6/sports/events/{id}` per game, fetched inside a headless Camoufox page.
+- Shuffle: `shuffle.com/sports?section=live` rendered and read as text every 60 s; its page mixes
+  sports and the script tags every game football. `/ingest` drops "football" games priced
+  home/away with no draw and no other market (NCAA basketball, etc.).
+- `/ingest` fixes on the way in: raw PC-clock `recv_ms` → NTP-corrected; no `live` flag → live;
+  1X2/BTTS `line 0.0` → no line; BTTS over/under → yes/no; `start_ms 0` → unknown; then the usual
+  e-soccer and followed-sport filters.
+- The script's lines "<book> poll fail: ..." become that book's poll errors on the Feeds page.
+  It posts nothing when a list is empty, so a book with no live games shows its last poll time.
+- All seven are RECORD_ONLY. Not used: Gamdom and CSGORoll (no sports section).
+- Config: `[browser_books] enabled / dir / python`; per book `[books.bcgame] enabled / paused`.
+  The Mac has no `.venv` with camoufox yet, so these books are off there (one warning at start).
+
 ## 9. Hard rules
 
 - Never change the system clock; correct timestamps in software (clock.rs).
