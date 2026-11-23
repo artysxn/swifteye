@@ -45,9 +45,25 @@ cd ~/swifteye-src && ./deploy/mac/install.sh
 | Group | Pages |
 |---|---|
 | Delay | Overview, Rankings (who moves first), Snipe window, Latency |
-| Markets | Matches, Sheet, Charts, Movers, Edges, Arbitrage Scout, Bots, Suspicious |
+| Markets | Matches, Sheet, Charts, Movers, Edges, Arbitrage Scout, Bots, Trade review, Suspicious |
 | Tools | Data, Query (read-only SQL), API, Control panel, Polymarket, Kalshi, Telegram |
 | Other | Statistics, Changelog, Settings |
+
+**Trade review** is where you teach the move detection. Pick a game a bot traded (its real and
+paper trades, and the replay paper bot's trades over everything recorded), or one no bot traded
+that had Polymarket and a bookmaker (search, filter by bookmaker, or Random). Its chart
+draws Polymarket at full strength and the bookmakers faint until you click one in the legend. On it:
+paint one line along a bookmaker's move and one along Polymarket's (the same movement), set where
+to buy and sell and the most to pay, or mark a bot's own trade as right, wrong, or right at other
+points. Each saved mark measures the delay, the size of Polymarket's move against the
+bookmaker's and their correlation on the recorded prices, keeps a copy of those prices, and is
+written to the `trade_labels` table and to `trade_labels.json` next to the database.
+Paint as many bookmaker/Polymarket pairs as you like (K and P; K again starts another pair), and place
+buys of your own (B) on any game, bought or not; each is its own mark. **Import trades** loads another
+machine's trades export (the "Swifteye trades" .html page, its .zip, or the JSON) for grading: its games
+appear under Bought marked "Mac export". **Analysis** draws the superline and the waves (who moved
+first, how far behind Polymarket was) and lists each line's measured lead over Polymarket and
+correlation on the game and over all games (`tools/waves/run.py`).
 
 The **Changelog** page lists what changed and when. Add an entry at the top of
 `src/web/changelog.js` when something a user would notice ships.
@@ -184,6 +200,9 @@ The **API** page in the app lists every endpoint. The most used:
 | `GET /bots/panel?real=0` | A wallet's trades, signals and state |
 | `GET /bots/sim?kind=…` | A replay result |
 | `GET /adaptive` | The replay's status and the rule picker's history |
+| `GET /review/labels` | Every Trade review mark (also `trade_labels.json` next to the database) |
+| `POST /review/import` | Import a trades export (HTML page or JSON body) for grading |
+| `GET /review/wave_scores` | The latest `tools/waves/run.py` scores per line, or null |
 
 ```bash
 curl "localhost:8787/matches?min_books=3"

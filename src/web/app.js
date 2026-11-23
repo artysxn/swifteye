@@ -447,7 +447,8 @@ SE.ratePerMin = () => {
 
 // ---------------------------------------------------------------- charts (uPlot)
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-/** series: [{ label, color, values, book?, width?, dash?, points? (scatter), linear? (straight segments) }] */
+/** series: [{ label, color, values, book?, width?, dash?, points? (scatter), linear? (straight segments) }]
+ *  opts.draw(u): an extra canvas layer drawn after the series (Trade review's marks). */
 SE.chart = (el, xs, series, opts = {}) => {
   el.innerHTML = '';
   const yFmt = opts.yFmt || ((v) => (v == null ? '' : v.toFixed(2)));
@@ -480,7 +481,7 @@ SE.chart = (el, xs, series, opts = {}) => {
       ],
       hooks: {
         // Vertical markers (e.g. map starts): a dashed line and a small label at the top.
-        draw: opts.marks?.length ? [(u) => {
+        draw: [...(opts.draw ? [opts.draw] : []), ...(opts.marks?.length ? [(u) => {
           const c = u.ctx, { top, height, left, width } = u.bbox, dpr = devicePixelRatio || 1;
           c.save();
           c.font = `${11 * dpr}px ${cssVar('--font')}`;
@@ -506,7 +507,7 @@ SE.chart = (el, xs, series, opts = {}) => {
             lastRight = Math.max(lastRight, bx + w);
           }
           c.restore();
-        }] : [],
+        }] : [])],
         setCursor: [(u) => {
           const i = u.cursor.idx;
           if (i == null || u.cursor.left < 0) { SE.tipHide(); return; }

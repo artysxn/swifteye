@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
 use rusqlite::types::Value as SqlVal;
@@ -77,6 +77,15 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/bots/test/{bot}", post(bots_test))
         .route("/bots/test-sellback/{id}", post(bots_test_sellback))
         .route("/assets/pages6.js", get(|| async { asset("pages6.js", "text/javascript; charset=utf-8", include_str!("web/pages6.js")) }))
+        .route("/assets/pages7.js", get(|| async { asset("pages7.js", "text/javascript; charset=utf-8", include_str!("web/pages7.js")) }))
+        .route("/assets/waves.js", get(|| async { asset("waves.js", "text/javascript; charset=utf-8", include_str!("web/waves.js")) }))
+        .route("/review/wave_scores", get(review_wave_scores))
+        .route("/review/games", get(review_games))
+        .route("/review/books", get(review_books))
+        .route("/review/game/{id}", get(review_game))
+        .route("/review/labels", get(review_labels).post(review_save))
+        .route("/review/labels/{id}", delete(review_delete))
+        .route("/review/import", post(review_import).layer(axum::extract::DefaultBodyLimit::max(300 * 1024 * 1024)))
         .route("/assets/changelog.js", get(|| async { asset("changelog.js", "text/javascript; charset=utf-8", include_str!("web/changelog.js")) }))
         .route("/predarb/order/{id}", post(predarb_order))
         .route("/predarb/sell/{ts}/{id}", post(predarb_sell))
@@ -151,6 +160,13 @@ async fn index() -> Json<Value> {
             "GET /lag/books/events?trigger_book=&follower_book=&limit=": "each book-to-book jump behind the summary",
             "GET /query?sql=SELECT...&limit=": "read-only SQL over tables matches, book_events, changes",
             "GET /stats": "row counts and changes per book in the last 5 minutes",
+            "GET /review/games?kind=bought|other&q=&book=&random=1&limit=": "Trade review: games a bot traded, or started games with Polymarket and a bookmaker that no bot traded",
+            "GET /review/game/{id}": "Trade review: one game's Polymarket bid/ask, bookmaker 1X2 prices, bot trades, skipped moves and marks",
+            "GET /review/labels?match=": "Trade review marks (also in <db dir>/trade_labels.json)",
+            "POST /review/labels": "save a mark: {id?, match_id, kind, outcome, side, buy_ms, sell_ms, cap, trade_id, pm_seg, book_seg, note}",
+            "DELETE /review/labels/{id}": "delete a mark",
+            "GET /review/wave_scores": "Trade review: the latest tools/waves/run.py scores per source (lead over Polymarket, precision, lead-lag, correlation), or null",
+            "POST /review/import": "import another machine's trades export (the Swifteye trades HTML page or its JSON) for grading; games get negative ids",
             "POST /ingest": "browser_books.py posts {book, recv_ms, events} here (BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle)",
             "POST /matches/{into}/merge/{from}": "fix a missed cross-book match",
             "POST /events/{book}/{event_id}/unlink": "fix a wrong cross-book match"
@@ -169,6 +185,70 @@ async fn books(State(app): S) -> Json<Value> {
     let mut v: Vec<_> = eng.books.values().map(|b| b.status.clone()).collect();
     v.sort_by_key(|s| s.name);
     Json(json!({"started_ms": app.started_ms, "now_ms": now_ms(), "books": v}))
+}
+
+// ---- Trade review (review.rs, page #/review)
+
+#[derive(Deserialize, Default)]
+struct ReviewQ {
+    kind: Option<String>,
+    q: Option<String>,
+    book: Option<String>,
+    random: Option<u8>,
+    limit: Option<usize>,
+    #[serde(rename = "match")]
+    match_id: Option<i64>,
+}
+
+async fn review_blocking(f: impl FnOnce() -> anyhow::Result<Value> + Send + 'static) -> Response {
+    match tokio::task::spawn_blocking(f).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+async fn review_games(State(app): S, Query(q): Query<ReviewQ>) -> Response {
+    let db = app.db_path.clone();
+    let kind = if q.kind.as_deref() == Some("other") { "other" } else { "bought" };
+    review_blocking(move || crate::review::games(&db, kind, q.q.as_deref().unwrap_or(""), q.book.as_deref().unwrap_or(""), q.random == Some(1), q.limit.unwrap_or(200).clamp(1, 1000), &crate::review::replay_trades())).await
+}
+
+async fn review_books(State(app): S) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::books(&db)).await
+}
+
+async fn review_game(State(app): S, Path(id): Path<i64>) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::game(&db, id, &crate::review::replay_trades())).await
+}
+
+async fn review_labels(State(app): S, Query(q): Query<ReviewQ>) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::labels(&db, q.match_id)).await
+}
+
+async fn review_save(State(app): S, Json(b): Json<Value>) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::save(&db, &b)).await
+}
+
+/// Import another machine's trades export (the "Swifteye trades" HTML page or its JSON) for grading.
+async fn review_import(State(app): S, body: axum::body::Bytes) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::import(&db, &body)).await
+}
+
+/// The latest scores of tools/waves/run.py (`<db dir>/waves/scores.json`), or null before its first run.
+async fn review_wave_scores(State(app): S) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::wave_scores(&db)).await
+}
+
+async fn review_delete(State(app): S, Path(id): Path<i64>) -> Response {
+    let db = app.db_path.clone();
+    review_blocking(move || crate::review::delete(&db, id)).await
 }
 
 /// One poll of browser_books.py (books/browser.rs): applied to the engine like a Rust adapter's snapshot.

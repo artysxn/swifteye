@@ -539,7 +539,24 @@ impl Flt {
 }
 
 thread_local! {
-    static FLT: std::cell::Cell<Flt> = std::cell::Cell::new(Flt { cap: true, ..Default::default() });
+    static FLT: std::cell::Cell<Flt> = std::cell::Cell::new(paper_flt());
+}
+
+/// The filters the paper record and its closed trades are built with: nothing bought above 90c, no
+/// other filter (the per-thread starting value, which `view` and `closed_since` were written for).
+fn paper_flt() -> Flt {
+    Flt { cap: true, ..Default::default() }
+}
+
+/// Run `f` with the paper record's filters, then put back what the thread had. The filters are a
+/// per-thread setting that `bot_sim` and the research replays leave behind on the blocking threads
+/// they ran on; read as found, the Trade review's list came back empty (23 Nov 2026).
+fn with_paper_flt<T>(f: impl FnOnce() -> T) -> T {
+    let before = flt();
+    FLT.with(|x| x.set(paper_flt()));
+    let out = f();
+    FLT.with(|x| x.set(before));
+    out
 }
 
 fn flt() -> Flt {
@@ -1801,7 +1818,8 @@ fn trade_json(base: &str, t: &Taken) -> Value {
     json!({"base": base, "ts": c.tf, "exit_ts": x.ts, "match_id": c.match_id, "sport": c.sport, "home": c.home, "away": c.away,
         "outcome": c.outcome, "dir": c.dir, "trigger": c.trigger, "entry": f.entry, "exit": f.exit, "pnl": f.pnl, "spent": f.spent,
         "stake": t.stake, "filled": f.filled, "reason": if x.caught { "caught up" } else { "gave up" }, "after_pause": c.pause,
-        "move": c.bm[0], "books": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "px": c.px})
+        "move": c.bm[0], "books": c.books[0], "fol": c.fol[0], "pm_tr": c.pm_tr, "b_tr5": c.b_tr5, "b_tr10": c.b_tr10, "b_rng": c.b_rng, "px": c.px,
+        "t0": c.t0, "spread": c.sp[0]})
 }
 
 /// Balance after each closed trade: [[exit time, balance], ...], starting at `from`.
@@ -1825,7 +1843,12 @@ fn backtest(cands: &[&Cand], p: &Policy, now: Ms, bank: &Bank, base: &str) -> (V
 /// The paper bot as a backtest: the rules picked last (from every finished trade so far) replayed
 /// over the WHOLE dataset; each re-pick re-runs it. The default rules replayed the same way for
 /// comparison. Each run in the history also shows its rules over the whole dataset.
-pub fn view(_app: &App) -> Value {
+/// The paper bot's page (Snipe window), with the paper record's filters whatever the thread was left with.
+pub fn view(app: &App) -> Value {
+    with_paper_flt(|| view_inner(app))
+}
+
+fn view_inner(_app: &App) -> Value {
     let now = now_ms();
     let chunks = snapshot();
     let (runs, status, error, from, nchunks, bank, warm) = {
@@ -2208,8 +2231,13 @@ pub fn sim_summary(start: f64, from: Option<Ms>, now: Ms, mut t: Vec<(Ms, Ms, f6
     })
 }
 
-/// Newly closed paper trades of the current rules (for Telegram).
+/// Newly closed paper trades of the current rules (for Telegram and the Trade review page), with the
+/// paper record's filters whatever the thread was left with.
 pub fn closed_since(since: Ms) -> Vec<Value> {
+    with_paper_flt(|| closed_since_inner(since))
+}
+
+fn closed_since_inner(since: Ms) -> Vec<Value> {
     let now = now_ms();
     let chunks = snapshot();
     let (runs, bank) = {
@@ -2224,7 +2252,12 @@ pub fn closed_since(since: Ms) -> Vec<Value> {
         let cands = all_cands(&chunks, bi);
         let rules = runs.iter().filter(|r| r.base == *base).last().map(|r| r.active).unwrap_or_else(|| policy(&default_idx(base)));
         let (trades, _, _) = backtest(&cands, &rules, now, &bank, base);
-        out.extend(trades.into_iter().filter(|t| t["exit_ts"].as_i64().unwrap_or(0) > since));
+        out.extend(trades.into_iter().filter(|t| t["exit_ts"].as_i64().unwrap_or(0) > since).map(|mut t| {
+            // The rules it traded on: where it sells (share of the move caught up) and when it gives up.
+            t["catch"] = json!(rules.catch);
+            t["give_up_s"] = json!(rules.give_up_s);
+            t
+        }));
     }
     out.sort_by_key(|t| t["exit_ts"].as_i64());
     out

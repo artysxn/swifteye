@@ -21,6 +21,7 @@ mod predmeta;
 mod predarb;
 mod prune;
 mod rank;
+mod review;
 mod settle;
 mod snipe;
 mod snipebot;
@@ -221,6 +222,9 @@ async fn main() -> anyhow::Result<()> {
     timing::init(&app.db_path);
     if let Err(e) = bots::init(&app) {
         tracing::warn!("bots: {e:#}");
+    }
+    if let Err(e) = review::init(&app.db_path) {
+        tracing::warn!("trade review: {e:#}");
     }
     predarb::spawn(app.clone());
     snipebot::spawn(app.clone());

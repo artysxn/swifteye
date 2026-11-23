@@ -6,6 +6,30 @@ const { esc, ic } = SE;
 const P = SE.P;
 
 SE.CHANGELOG = [
+  { date: '2026-11-23', icon: 'stacked_line_chart', area: 'Bots', title: 'Trade review: who is ahead, second by second',
+    lines: [
+      'With Analysis on, a strip under the chart shows each second whether the superline is ahead of Polymarket (green: Polymarket should rise, red: should fall), Polymarket is ahead (blue), or the two simply disagree for minutes (grey).',
+      'Two more rows show the up and down waves of the superline and of Polymarket: solid until the peak, with a tick where the wave was first detected. Hover anywhere for the numbers: both prices, the gap, the expected catch-up and the wave in progress.',
+      'The Measured panel gives the lead at the bot\'s buy and how often the superline\'s leads came true on that game.',
+      'Your own buys can now be Up or Down; drag a buy\'s cash-out below what it paid and it becomes a Down buy.',
+    ] },
+  { date: '2026-11-23', icon: 'insights', area: 'Bots', title: 'Trade review: imported trades, Analysis, more buys and line pairs',
+    lines: [
+      'Import trades loads a trades export from another machine (the .html page, its .zip or the JSON). Its games show under Bought with a Mac export tag, each trade ready to grade like any other.',
+      'Analysis draws the superline (each bookmaker family\'s quickest move, kept only when other families confirm it) and the waves: shaded where bookmakers were ahead of Polymarket, a thin blue mark where Polymarket moved first.',
+      'Under the chart, Measured shows the wave a trade bought (who moved first, when the trigger moved, how much of the move Polymarket had already made when the bot bought) and, for every line, how often it beat Polymarket, its median lead, its lead-lag and correlation, on this game and over all games.',
+      'B now places a buy of your own on a bought game too, as many as you like; click a buy to edit it.',
+      'Paint as many bookmaker and Polymarket line pairs as you like: K and P paint a pair, K again starts the next. Each pair is measured and saved by itself.',
+    ] },
+  { date: '2026-11-23', icon: 'rate_review', area: 'Bots', title: 'Trade review: mark what the bots should have done',
+    lines: [
+      'A new page under Markets. Open a game a bot traded (its real and paper trades, and the replay paper bot\'s trades over everything recorded), or one no bot traded that had Polymarket and a bookmaker: search it, filter by bookmaker, or take a random one.',
+      'Paint one line along a bookmaker\'s move and one along Polymarket\'s, and they are saved as the same movement: how many seconds apart they moved, how far Polymarket went against the bookmaker, and how closely the two followed each other.',
+      'A bought game opens on its trade, drawn like the Telegram trade chart: the token in cents, Polymarket\'s sell and buy price and only the bookmaker the bot acted on (add others, or the middle of all bookmakers, from the legend), and the bot\'s buy, sale, cash-out price, break-even and give-up time.',
+      'Drag the buy, the sale, the cash-out and price-cap lines or the give-up line to make your version; the bot\'s stays faint behind it, with both side by side under the chart. Give a verdict (Right, Wrong, Fix) if you like. Everything saves by itself and comes back when you open the trade again.',
+      'Set where a bot should have bought and sold and the most it should have paid, or mark a bot\'s own trade as right, wrong, or right at other points. Keys: K, P, B and S, Esc to stop.',
+      'Marks are kept with the prices they were made on, for working out what the move detection misses.',
+    ] },
   { date: '2026-11-23', icon: 'add_circle', area: 'Feeds', title: 'Seven crypto bookmakers added, recorded only',
     lines: [
       'BC.Game, Rollbit, Rainbet, CSGO500 and CSGOEmpire (live football from their Betby feeds, every 5 seconds), Cloudbet (live football, every 5 seconds) and Shuffle (its live page, once a minute).',
