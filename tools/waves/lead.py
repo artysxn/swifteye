@@ -175,6 +175,7 @@ def trends(p, P=TREND):
                 u, U[i] = 0.0, 0.0
     if cur is not None:
         cur['end'] = n - 1
+        cur['open'] = True          # still running when the data stops: its end is not known (a live caller must not read it as ended)
         eps.append(cur)
     for c in eps:
         c['amp'] = float(x[c['peak']] - x[c['on']]) if not math.isnan(x[c['on']]) else float('nan')

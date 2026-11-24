@@ -14,6 +14,7 @@ mod engine;
 mod exec;
 mod kalacct;
 mod lag;
+mod maker;
 mod matcher;
 mod model;
 mod pinacct;
@@ -252,6 +253,7 @@ async fn main() -> anyhow::Result<()> {
     predarb::spawn(app.clone());
     snipebot::spawn(app.clone());
     valuebot::spawn(app.clone());
+    maker::spawn(app.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("API on http://{}", cfg.bind);

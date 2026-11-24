@@ -20,6 +20,19 @@ use serde_json::{json, Value};
 use sha3::{Digest, Keccak256};
 
 const CLOB: &str = "https://clob.polymarket.com";
+
+/// The exchange's address. Always Polymarket's, except in this crate's own tests, which point the
+/// resting-order calls at a pretend exchange on this machine (maker.rs).
+fn clob() -> String {
+    #[cfg(test)]
+    if let Some(u) = TEST_CLOB.lock().clone() {
+        return u;
+    }
+    CLOB.to_string()
+}
+
+#[cfg(test)]
+pub(crate) static TEST_CLOB: std::sync::LazyLock<parking_lot::Mutex<Option<String>>> = std::sync::LazyLock::new(Default::default);
 const KALSHI: &str = "https://api.elections.kalshi.com";
 const CHAIN_ID: u64 = 137;
 /// Exchange contracts and their EIP-712 domain versions (docs.polymarket.com, create-order, Nov 2026):
@@ -250,7 +263,7 @@ pub async fn token_facts(http: &reqwest::Client, token: &str) -> Result<Facts> {
         }
     }
     let get = |path: String| async move {
-        let r = http.get(format!("{CLOB}{path}")).send().await?;
+        let r = http.get(format!("{}{path}", clob())).send().await?;
         let s = r.status();
         let t = r.text().await?;
         if !s.is_success() {
@@ -538,6 +551,220 @@ pub async fn pm_api_from_key(http: &reqwest::Client, pk: &str) -> Result<(String
     parse(&serde_json::from_str(&t)?).context("no credentials in Polymarket's reply")
 }
 
+// ---------------------------------------------------------------- resting (maker) orders
+//
+// Used only by maker.rs, and only while its Real switch is on. A resting order is a GTC limit
+// order sent post-only: the venue refuses it if it would trade at once, so it can only ever be the
+// resting side of a trade (no fee). Facts from docs.polymarket.com, read 24 Nov 2026:
+// `POST /order` with `"orderType": "GTC", "postOnly": true`; a post-only order that would cross
+// is refused with "invalid post-only order: order crosses book"; `DELETE /orders` takes a JSON
+// array of order ids and answers `{"canceled": [...], "not_canceled": {id: reason}}`;
+// `GET /data/orders` lists the key's open orders (`size_matched` = shares filled so far);
+// `POST /v1/heartbeats` arms the venue's own dead-man switch (see `pm_heartbeat`).
+// NOT exercised against the live venue while this was written: the first real call is the owner's
+// test (maker.rs `test`), which places one order far from the price and cancels it.
+
+/// What the venue answered to one resting order.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RestAck {
+    pub order_id: String,
+    /// "live" = resting. Anything else is unexpected for a post-only order and is reported as is.
+    pub status: String,
+    pub price: f64,
+    pub shares: f64,
+    pub sent_ms: crate::model::Ms,
+    pub latency_ms: i64,
+    pub prep_ms: i64,
+}
+
+/// Price and size of a resting order as they go on the wire: the price to the cent (it must also
+/// sit on the market's own tick), the size in hundredths of a share, cut down.
+pub fn rest_px_size(price: f64, shares: f64, tick: f64) -> Result<(f64, f64)> {
+    let px = (price * 100.0).round() / 100.0;
+    if (px - price).abs() > 1e-6 {
+        bail!("a resting order's price must be whole cents ({price})");
+    }
+    if !(0.01..=0.99).contains(&px) {
+        bail!("price out of range ({px})");
+    }
+    let steps = px / tick.max(1e-6);
+    if (steps - steps.round()).abs() > 1e-6 {
+        bail!("price {px} is not on this market's tick ({tick})");
+    }
+    let n = (shares * 100.0 + 1e-6).floor() / 100.0;
+    if n <= 0.0 {
+        bail!("no shares");
+    }
+    Ok((px, n))
+}
+
+/// (makerAmount, takerAmount) in 6-decimal units. Buy: dollars given, shares got. Sell: shares
+/// given, dollars got. Dollars keep 4 decimals (hundredths of a share at a cent price).
+fn rest_amounts(buy: bool, px: f64, n: f64) -> (u64, u64) {
+    let usdc = ((n * px) * 1e4).round() / 1e4;
+    if buy {
+        ((usdc * 1e6).round() as u64, (n * 1e6).round() as u64)
+    } else {
+        ((n * 1e6).round() as u64, (usdc * 1e6).round() as u64)
+    }
+}
+
+/// Who makes and who signs an order for these credentials: (maker, signer, signature type).
+fn pm_parties(c: &PmCreds) -> Result<(String, String, u8)> {
+    let signer = signer_address(&c.private_key).context("Polymarket trading key")?;
+    if c.api_key.trim().is_empty() || c.api_secret.trim().is_empty() || c.passphrase.trim().is_empty() {
+        bail!("Polymarket API key / secret / passphrase missing (Settings)");
+    }
+    let wallet = if c.wallet.trim().is_empty() { signer.clone() } else { c.wallet.trim().to_lowercase() };
+    let sig_type = if wallet == signer { 0 } else { c.signature_type };
+    Ok(match sig_type {
+        0 => (signer.clone(), signer, 0),
+        3 => (wallet.clone(), wallet, 3),
+        t => (wallet, signer, t),
+    })
+}
+
+/// The signed JSON body of one resting order (GTC, post-only). No network: unit-tested.
+fn rest_order_body(c: &PmCreds, token: &str, buy: bool, px: f64, n: f64, neg: bool, v2: bool, salt: u64, ts_ms: u64) -> Result<String> {
+    let (maker, order_signer, sig_type) = pm_parties(c)?;
+    let (maker_amount, taker_amount) = rest_amounts(buy, px, n);
+    let o = PmOrder { salt, maker, signer: order_signer, token_id: token.to_string(), maker_amount, taker_amount, side: if buy { 0 } else { 1 }, signature_type: sig_type, timestamp: ts_ms };
+    let sig = if sig_type == 3 { deposit_wallet_signature(&c.private_key, &o, neg, v2)? } else { sign_digest(&c.private_key, &order_digest(&o, neg, v2)?)? };
+    let zero32 = format!("0x{}", "0".repeat(64));
+    Ok(json!({
+        "deferExec": false,
+        "order": {
+            "builder": zero32, "expiration": "0", "maker": o.maker, "makerAmount": o.maker_amount.to_string(),
+            "metadata": zero32, "salt": o.salt, "side": if buy { "BUY" } else { "SELL" }, "signature": sig,
+            "signatureType": o.signature_type, "signer": o.signer, "takerAmount": o.taker_amount.to_string(),
+            "timestamp": o.timestamp.to_string(), "tokenId": o.token_id,
+        },
+        "orderType": "GTC",
+        "owner": c.api_key.trim(),
+        "postOnly": true,
+    })
+    .to_string())
+}
+
+async fn l2_send(http: &reqwest::Client, c: &PmCreds, method: reqwest::Method, path: &str, query: &str, body: Option<String>) -> Result<(reqwest::StatusCode, Value, String)> {
+    let b = body.clone().unwrap_or_default();
+    let mut req = http.request(method.clone(), format!("{}{path}{query}", clob()));
+    if let Some(b) = body {
+        req = req.header("Content-Type", "application/json").body(b);
+    }
+    for (k, v) in crate::pmacct::l2_headers(c, method.as_str(), path, &b)? {
+        req = req.header(k, v);
+    }
+    let r = req.send().await?;
+    let st = r.status();
+    let text = r.text().await?;
+    let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    Ok((st, v, text))
+}
+
+/// Place one resting order: `shares` of `token` at `price`, buy or sell, post-only.
+pub async fn pm_rest_place(http: &reqwest::Client, c: &PmCreds, token: &str, buy: bool, price: f64, shares: f64) -> Result<RestAck> {
+    let t_prep = crate::model::now_ms();
+    let Facts { tick, neg_risk: neg, v2, min_size, .. } = token_facts(http, token).await?;
+    let prep_ms = crate::model::now_ms() - t_prep;
+    let (px, n) = rest_px_size(price, shares, tick)?;
+    if n + 1e-9 < min_size {
+        bail!("under this market's smallest order ({n} < {min_size} shares)");
+    }
+    let body = rest_order_body(c, token, buy, px, n, neg, v2, rand::random::<u32>() as u64, crate::model::now_ms() as u64)?;
+    let sent_ms = crate::model::now_ms();
+    let (status, v, text) = l2_send(http, c, reqwest::Method::POST, "/order", "", Some(body)).await?;
+    let latency_ms = crate::model::now_ms() - sent_ms;
+    if !status.is_success() || v["success"].as_bool() == Some(false) {
+        bail!("Polymarket refused the resting order (HTTP {status}): {}", v["errorMsg"].as_str().or(v["error"].as_str()).unwrap_or(&text.chars().take(200).collect::<String>()));
+    }
+    let id = v["orderID"].as_str().unwrap_or("").to_string();
+    if id.is_empty() {
+        bail!("Polymarket accepted the order but gave no order id: {}", text.chars().take(200).collect::<String>());
+    }
+    Ok(RestAck { order_id: id, status: v["status"].as_str().unwrap_or("").to_lowercase(), price: px, shares: n, sent_ms, latency_ms, prep_ms })
+}
+
+/// Cancel resting orders by id. Returns (cancelled ids, [(id, the venue's reason it was not)]).
+pub async fn pm_cancel(http: &reqwest::Client, c: &PmCreds, ids: &[String]) -> Result<(Vec<String>, Vec<(String, String)>)> {
+    if ids.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let (status, v, text) = l2_send(http, c, reqwest::Method::DELETE, "/orders", "", Some(serde_json::to_string(ids)?)).await?;
+    if !status.is_success() {
+        bail!("Polymarket cancel: HTTP {status}: {}", text.chars().take(200).collect::<String>());
+    }
+    let done = v["canceled"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
+    let not = v["not_canceled"].as_object().into_iter().flatten().map(|(k, r)| (k.clone(), r.as_str().map(str::to_string).unwrap_or_else(|| r.to_string()))).collect();
+    Ok((done, not))
+}
+
+/// The API key's open orders, every page: order id -> (shares filled so far, status).
+pub async fn pm_open_orders(http: &reqwest::Client, c: &PmCreds) -> Result<std::collections::HashMap<String, (f64, String)>> {
+    let mut out = std::collections::HashMap::new();
+    let mut cursor = String::new();
+    for _ in 0..20 {
+        let q = if cursor.is_empty() { String::new() } else { format!("?next_cursor={cursor}") };
+        let (status, v, text) = l2_send(http, c, reqwest::Method::GET, "/data/orders", &q, None).await?;
+        if !status.is_success() {
+            bail!("Polymarket open orders: HTTP {status}: {}", text.chars().take(200).collect::<String>());
+        }
+        let rows = v["data"].as_array().or_else(|| v.as_array()).cloned().unwrap_or_default();
+        for r in &rows {
+            if let Some(id) = r["id"].as_str() {
+                out.insert(id.to_string(), (crate::books::num(&r["size_matched"]).unwrap_or(0.0), r["status"].as_str().unwrap_or("").to_uppercase()));
+            }
+        }
+        cursor = v["next_cursor"].as_str().unwrap_or("").to_string();
+        if rows.is_empty() || cursor.is_empty() || cursor == "LTE=" {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// One order by id: (shares filled, status in capitals: LIVE, MATCHED, CANCELED, ...).
+pub async fn pm_order_state(http: &reqwest::Client, c: &PmCreds, id: &str) -> Result<(f64, String)> {
+    let path = format!("/data/order/{id}");
+    let (status, v, text) = l2_send(http, c, reqwest::Method::GET, &path, "", None).await?;
+    if !status.is_success() || v.is_null() {
+        bail!("Polymarket order {id}: HTTP {status}: {}", text.chars().take(200).collect::<String>());
+    }
+    Ok((crate::books::num(&v["size_matched"]).unwrap_or(0.0), v["status"].as_str().unwrap_or("").to_uppercase()))
+}
+
+/// Polymarket's own dead-man switch. The first accepted heartbeat ARMS it for this API key: from
+/// then on, 10 s without one makes the venue cancel EVERY open order of the key (all markets, all
+/// programs). Send every 5 s with the id the last reply gave ("" the first time); a wrong id is
+/// answered with the expected one, which is sent again once. Returns the id for the next call.
+pub async fn pm_heartbeat(http: &reqwest::Client, c: &PmCreds, id: &str) -> Result<String> {
+    let mut id = id.to_string();
+    for _ in 0..2 {
+        let (status, v, text) = l2_send(http, c, reqwest::Method::POST, "/v1/heartbeats", "", Some(json!({"heartbeat_id": id}).to_string())).await?;
+        let next = v["heartbeat_id"].as_str().unwrap_or("").to_string();
+        if status.is_success() && !next.is_empty() {
+            return Ok(next);
+        }
+        if next.is_empty() || next == id {
+            bail!("Polymarket heartbeat: HTTP {status}: {}", text.chars().take(200).collect::<String>());
+        }
+        id = next;
+    }
+    bail!("Polymarket heartbeat: the id was refused twice")
+}
+
+/// What the Polymarket account is worth now: free cash + its positions at Polymarket's own marks.
+pub async fn pm_equity(http: &reqwest::Client, c: &PmCreds) -> Result<f64> {
+    let cash = pm_cash(http, c).await?;
+    let w = c.wallet.trim().to_lowercase();
+    if w.is_empty() {
+        bail!("no Polymarket wallet saved");
+    }
+    let v: Value = http.get(format!("https://data-api.polymarket.com/v2/value?user={w}")).send().await?.json().await?;
+    let val = v.as_array().and_then(|a| a.first()).map(|x| &x["value"]).or(Some(&v["value"])).and_then(crate::books::num).context("no value in the reply")?;
+    Ok(cash + val)
+}
+
 // ---------------------------------------------------------------- one account, two bots
 
 /// Free cash on one venue account as this process knows it: the last balance read, minus what was
@@ -692,6 +919,45 @@ mod tests {
         assert_eq!(word_dec("256").unwrap()[30..], [1, 0]);
         let w = word_dec("29498536440894343989369031289293084556573417799065103660169559734904616858853").unwrap();
         assert_ne!(w, [0u8; 32]);
+    }
+
+    #[test]
+    fn resting_order_prices_sizes_and_amounts() {
+        assert_eq!(rest_px_size(0.49, 20.0, 0.01).unwrap(), (0.49, 20.0));
+        assert_eq!(rest_px_size(0.49, 9.929, 0.001).unwrap(), (0.49, 9.92));
+        assert_eq!(rest_px_size(0.50, 5.0, 0.0025).unwrap(), (0.5, 5.0));
+        assert!(rest_px_size(0.495, 20.0, 0.001).is_err(), "half cents are refused");
+        assert!(rest_px_size(0.49, 20.0, 0.1).is_err(), "off the market's tick");
+        assert!(rest_px_size(1.0, 20.0, 0.01).is_err());
+        assert!(rest_px_size(0.5, 0.0, 0.01).is_err());
+        // Buy 20 at 51c: give $10.20, get 20 shares. Sell 9.92 at 49c: give 9.92 shares, get $4.8608.
+        assert_eq!(rest_amounts(true, 0.51, 20.0), (10_200_000, 20_000_000));
+        assert_eq!(rest_amounts(false, 0.49, 9.92), (9_920_000, 4_860_800));
+    }
+
+    #[test]
+    fn resting_order_body_is_post_only_gtc_and_signed_by_the_key() {
+        use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+        let pk = format!("{:064x}", 7);
+        let me = signer_address(&pk).unwrap();
+        let c = PmCreds { wallet: me.clone(), api_key: "key-1".into(), api_secret: "c2VjcmV0".into(), passphrase: "p".into(), private_key: pk.clone(), ..Default::default() };
+        let v: Value = serde_json::from_str(&rest_order_body(&c, "123", false, 0.49, 9.92, false, false, 77, 1_795_000_000_000).unwrap()).unwrap();
+        assert_eq!(v["orderType"], "GTC");
+        assert_eq!(v["postOnly"], true);
+        assert_eq!(v["owner"], "key-1");
+        assert_eq!(v["order"]["side"], "SELL");
+        assert_eq!(v["order"]["makerAmount"], "9920000");
+        assert_eq!(v["order"]["takerAmount"], "4860800");
+        assert_eq!(v["order"]["expiration"], "0");
+        assert_eq!(v["order"]["maker"], me.as_str());
+        // The signature is over exactly the order the body carries.
+        let o = PmOrder { salt: 77, maker: me.clone(), signer: me.clone(), token_id: "123".into(), maker_amount: 9_920_000, taker_amount: 4_860_800, side: 1, signature_type: 0, timestamp: 1_795_000_000_000 };
+        let d = order_digest(&o, false, false).unwrap();
+        let s = hex_bytes(v["order"]["signature"].as_str().unwrap()).unwrap();
+        let vk = VerifyingKey::recover_from_prehash(&d, &Signature::from_slice(&s[..64]).unwrap(), RecoveryId::from_byte(s[64] - 27).unwrap()).unwrap();
+        assert_eq!(vk, *signing_key(&pk).unwrap().verifying_key());
+        // No trading key, no order.
+        assert!(rest_order_body(&PmCreds::default(), "123", true, 0.5, 5.0, false, false, 1, 1).is_err());
     }
 
     #[test]

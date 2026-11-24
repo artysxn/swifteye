@@ -1416,7 +1416,7 @@ fn pretend_game(id: &str, home: &str, away: &str, h: f64, a: f64, start_ms: Ms) 
 }
 
 /// An app with no feeds, no database and no accounts: only an engine with the pretend books.
-fn pretend_app(dir: &Path) -> Arc<App> {
+pub(crate) fn pretend_app(dir: &Path) -> Arc<App> {
     let (tx, mut rx) = tokio::sync::mpsc::channel(1_000);
     tokio::spawn(async move { while rx.recv().await.is_some() {} });
     let (live, _) = tokio::sync::broadcast::channel(16);

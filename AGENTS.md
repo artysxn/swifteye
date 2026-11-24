@@ -759,6 +759,51 @@ Tool: `tools/waves/` (`waves.py` library, `run.py`, `test_waves.py` synthetic ca
   model on the wave starts reads the inputs plus every model's out-of-sample call and predicts dollars; top 3%, one
   position a game, next to the same model without the other models' calls. Labels use the survivorship-safe price
   path (waves2.one with lab=True).
+- REAL ODDS: POOLING POLYMARKET, KALSHI, THE BOOKMAKERS AND THE SUPERLINE AGAINST OFFICIAL RESULTS (`fair.py results /
+  build / test`, 24 Nov; results = Gamma outcomePrices of the resolved moneyline markets, cached in fair_results.json:
+  4,043 of 4,133 games; 54,535 snapshots of 3,225 games at 120 / 60 / 30 / 10 / 3 min before kick-off and 10..90 min
+  in play). Bets held to the result pay the cost once. (1) WHO IS CLOSEST: before kick-off log loss Polymarket 0.5736,
+  bookmakers' consensus 0.5747, superline 0.5744, mean of PM + books 0.5737; in play 0.5241 / 0.5267 / 0.5259; where
+  Kalshi is quoted too PM 0.5864, Kalshi 0.5875, books 0.5890. Polymarket's price is the best single forecast and
+  averaging does not improve it. (2) PM 10 min before kick-off is calibrated in every band (priced 6 / 15 / 25 / 38 /
+  50 / 62 / 75 / 85 / 94% -> won 8 / 17 / 27 / 35 / 50 / 63 / 74 / 85 / 90%); buying at the ask loses -$1.4..-11 per
+  $100 in every band; favourites at 55-90c: 1,913 bets -$2.30 (90% -4.9..+0.2), tennis +$1.02, football -$9.82;
+  21-23 Nov -$4.27. (3) When the bookmakers are 4+ pt away from PM the truth is nearer the bookmakers (220 sides: PM
+  74%, books 68%, won 67%; 205 sides: PM 27%, books 33%, won 31%); at 2-4 pt PM is right; superline and Kalshi
+  disagreements: PM right. (4) POOL (logistic in log-odds with interactions) and boosted trees, trained on games 6 h+
+  before each day: both WORSE than PM's own price out of sample (log loss +0.006..+0.008, 90% range above 0); the
+  pool's weights: PM x0.97, bookmakers' gap -0.19, superline's +0.32. (5) BETS: the model's bets lose (-$14..-23 per
+  $100 before kick-off); plain rules: bookmakers 2+ / 4+ pt above the cost -$6.49 (355 bets) / -$5.21 (95; 90%
+  -44..+42); superline 4+ pt above the cost +$20.34 (146; 90% -16.7..+61.4); favourite 55-90c with bookmakers 1+ pt
+  above the cost (the favs rule at T-10) 32 bets +$10.97 (90% -8.4..+29.0). Nothing is distinguishable from zero:
+  a 27c bet has a standard deviation of ~160% of the stake, so a 7% edge needs ~2,000 bets (months at ~14 a day).
+  In-play "bet on Kalshi where PM is above its cost" +$10 is the stale-Kalshi-recording artifact.
+- "SUPERLINE 4+ PT ABOVE THE COST" TAKEN APART (`fair_sl.py`, 24 Nov, owner: "investigate"). The +$20.34 over 146 bets
+  is not robust: counting only the 120 / 60 / 30 / 10-min snapshots (so a later closing price exists) the same rule
+  is 137 bets at -$4.82 per $100 (90% -35..+30); the median bet is -$100 and without the 5 best it is -$41.79 (27c
+  tokens: a lottery). The low-noise check, Polymarket's own move by kick-off (mid at the last snapshot minus the
+  price paid; no signal = -1.17c, the half spread): superline 1+ pt above the cost -0.60c, 2+ -0.43, 3+ -0.30, 4+
+  +0.02, 5+ +0.65, 6+ +1.35 (90% -1.28..+4.28), 10+ +1.76; mirror (superline 4+ / 6+ pt BELOW the bid) -1.70c /
+  -2.69c. So Polymarket does drift about 1-2.5c toward the superline before kick-off when the gap is 4-6+ pt (a real,
+  monotone effect), but that is a quarter of the gap: selling before kick-off loses -$13 (4+), -$10 (5+), -$5 (6+)
+  per $100. How much of a gap is TRUE (logistic on results, log-odds = a + b PM + c (line - PM), resampled by game):
+  superline c = +0.36 (90% -0.11..+0.89) 10 min before, +0.40 at 60 min, +0.36 in play; bookmakers' middle +0.33 /
+  +0.45 / +0.13; highest family +0.19. Best estimate: the truth is about a third of the way from Polymarket to the
+  superline, not proven different from zero. At a third, a 6-pt gap is worth 2 pt = the cost of the bet (fee +
+  half spread at ~27c); only gaps of 8-10+ pt would clear it, and those are ~20 bets a week. By slice (all noise at
+  these sizes): cs2 +$37 (32 bets), price 30-55c +$31 (32), 55c+ -$28 (21), first seen 2 h before -$55 (54).
+- SUSPICIOUS-MATCH BETTING PATTERNS (`suspect_model.py fetch / test`, 24 Nov; cs2_activity has no direction, so every
+  trade of 812 lower-tier CS2 games was fetched from the Data API and the patterns rebuilt from trades up to 10 min
+  before the listed start; 373 games had 15+ such trades; median $1,875 traded by 39 wallets). The price is nearly
+  right with a mild favourite-longshot tilt (priced 23 / 38 / 50 / 62 / 79% -> won 19 / 38 / 52 / 66 / 82%): always
+  the favourite -$1.08 per $100, always the underdog -$14.43 (90% -25.6..-2.9). Patterns as bets: big money ($500+
+  wallets, 20%+ of volume) on the FAVOURITE +$10.26 (103 bets, won 77% vs 70% needed; 90% -0.6..+20.4), on the
+  UNDERDOG -$22.44 (31); one wallet with 40%+ of the money: its side +$6.18, against it -$34.47 (90% -51.0..-16.8);
+  following a 10+ pt drift -$16.04 (90% -28.5..-2.9), fading it -$11.01; late money +$2.87; suspect.rs score 80+:
+  favourite +$2.74, underdog -$18.12 (78 games: the favourite won 68% at 65c, so the 8-of-17 seen on 17-21 Nov was
+  small-sample); games with 3+ big underdog bets: underdog -$17.64. A logistic model on all patterns is worse than
+  the price alone (log loss +0.030, 90% +0.006..+0.056). Reading: heavy underdog money and drift do NOT win; the
+  big wallets are mostly on the favourite and mostly right; nothing here is a proven edge on 373 games.
 - WHY NOT ON POLYMARKET: Polymarket is the fastest venue we record (it moved before the bookmaker even published in
   ~70% of 179k bookmaker jumps), so the superline, built from bookmakers, mostly trails it; when the superline is
   ahead and PM has not moved, the bookmakers are usually wrong (gap 20+ pt: PM follows 13% within a minute); and on
@@ -986,6 +1031,417 @@ public trades).
 - Every conclusion drawn from our Kalshi RECORDING before this (8g: "Polymarket leads Kalshi", feed holes, the paper
   arbitrages of 18 Nov, the Kalshi-lag locks) was measured on the broken feed and must be measured again before it is
   used. What Kalshi's own public trades showed (real gaps are swept in milliseconds) does not depend on our feed.
+
+## 8k. Which way will the next wave go: the full direction test (24 Nov 2026, PC, on the Mac recording)
+
+Owner, 24 Nov: "There may be a positive gain to be made if we are able to predict which way a wave will go with a
+model, because we have a lot of signals and edges available otherwise that are beating the general public."
+`tools/signals/wavedir.py build / test` (build 5 min with 22 workers, test 25 min on the 4090; data
+run/signals/mac/wavedir.npz, report wavedir.txt). It follows the Mac's two rules of 8h: rows are decided only where
+the recording is alive (the game's newest Polymarket row <= 15 s old, feed <= 1 s late: 18.9% of rows dropped) and a
+sale is valued at the first live bid (a dead recording = unknown, not 0, not the frozen price). 1,351,278 in-play
+decision seconds, 2,882 games; scored on 19-23 Nov, every model trained on the days before the day it is scored on.
+
+A wave's FIRST MOVE = the second after its CUSUM onset; a call made before it is made before the price has moved.
+- IS A WAVE COMING within 30 s: AUC 0.741 (up 0.799, down 0.777; a BIG wave of 0.45+ log-odds: 0.808 / 0.794). A wave
+  follows 23.4% of decision seconds, 76% of the model's top 1%.
+- WHICH WAY, given one comes within 30 s. (a) Every such second: 85.4% right (AUC 0.942), but that is one mechanical
+  fact: in 95% of them Polymarket is already moving, and a wave the same way cannot "start" while one runs, so the
+  next start is the pull-back ("against the side Polymarket is moving" alone: 86.5%; waves alternate 64.5%, as the
+  Mac's pilot found). (b) POLYMARKET AT REST (no move for 10 s, both CUSUMs at 0; 9,052 seconds, 1,245 games): a
+  model trained only there is right 58.3% (AUC 0.618); its surer half 63.4%, its surest 10% 71.7% (644 seconds, 279
+  games). So the inputs DO carry direction before the move. Simple rules at rest: superline "ahead" 63.2% (has a view
+  13% of the time), bookmaker families that moved in 5 s 59.2% (38%), order book best level 58.2%, order-flow
+  imbalance 60 s 57.3%, superline gap 54.9%, trade prints 50%, Polymarket's last wave 50.6%. By the size of the wave
+  that came: under 0.25 log-odds 58.7%, big (0.45+) 55.5%, the biggest (1.0+, goal-size) 45.6%: the bigger the wave,
+  the less anything says which way. Within 2 min, at rest: 56.5%.
+- THE CEILING ($ per $100, fees + depth; no model). Bought the side the wave then took: -$5.15 sold after 1 min,
+  -$4.63 after 2 min, -$4.18 after 5 min, -$4.32 when the wave ends, +$1.18 at the very top of the wave (not
+  knowable). Wrong way -$17. No wave -$11. A right call LOSES on the average wave: the median wave is 0.28 log-odds
+  (about 7 pt at 50c), the spread 2c and the two fees 2.5c, and a fixed exit does not sell at the top. By price paid:
+  20-80c -$2.07 (2 min), outside -$8.11. From rest: -$1.01 (2 min), -$0.24 (5 min), +$0.17 (wave ends). Only BIG
+  waves pay when right: biggest 20% +$10.91 (2 min) / +$13.86 (5 min); big waves from rest +$20.65 / +$25.10.
+  Big waves are 17% of the waves that start from rest = 1.9% of resting seconds.
+- THE NUMBERS A CALL NEEDS (from rest, all 7 days; `wavedir_rest.py`, wavedir_rest.txt): big wave right +$19.96 / wrong
+  -$37.72 (2 min), small wave right -$5.54 / wrong -$15.44, no wave -$10.33. If a big wave were CERTAIN the
+  direction must be right 65% (2 min) / 62% (5 min). With a PERFECT direction a big wave must follow 34% / 30% of
+  the calls; with 75% direction 65% / 55%. The model has 55.5% direction on big waves and a big wave after 8-12% of
+  its at-rest calls. While Polymarket is moving it is worse (big right +$8.04, needs 78% direction).
+- THE MODEL'S CALLS AS TRADES (thresholds from held-back earlier data, one position a game), every rule loses and
+  every 90% range is below zero: up-minus-down chance top 0.1% 1,328 trades -$9.59 (2 min); chance x direction top
+  0.1% 567 trades -$11.74; big-up minus big-down top 0.1% 569 trades -$4.97 (5 min); at rest only: 539 trades
+  -$5.86, big waves at rest 627 trades -$6.04. The calls ARE right about the wave (their way after 57-84%, the other
+  way 0-1%) and still lose: the surest calls sit seconds before the move at the widest spreads.
+- ONE MODEL FOR DOLLARS that reads the inputs and all eight calls: -$2.28..-$4.03 per $100 (498-2,189 trades); the same
+  model without the calls -$1.63..-$2.84. The direction calls add nothing to it.
+- WAVE AFTER WAVE (237,783 waves): same way as the one before 35.5%; within 30 s of the last one ending 34.0%, later
+  than that 50%. At a wave's onset the gap to the superline pointed its way 76.4% (Polymarket coming back to the
+  level), the superline being in a wave pointed its way only 40.0% (Polymarket moved first and is pulling back),
+  superline "ahead" 58.4%.
+- LIVE SCORES (book_scores, 22 Nov 05:40 - 23 Nov 12:52; 21,065 changes two books agreed on, 537 games): Polymarket
+  had moved before we saw the score everywhere. Football goals: +11.5c in the 60 s before, +9.8c in the last 10 s,
+  0.0c in the 10 s after; buying the scorer then -$8..-$12 per $100. CS2 rounds: +2.0c before, 0 after, -$6..-$8.
+  Tennis -$8..-$11, basketball -$13. Where Polymarket had not moved yet: -$7..-$15. Same answer as the Mac's
+  scorelead.py with a stricter event rule (a second book must show the new score).
+- New inputs tried: trade prints from pm_quotes.last (a biased sample, see 8h PRINTS; as a direction input ~50%)
+  and the last waves' directions. Correction to 8g: map-winner markets ARE recorded since 21 Nov
+  (pm_sister_quotes, kind child_moneyline; the Mac's identity.py uses them).
+- READING. Direction is not the missing piece. Before the move the inputs call it 58% (72% for the surest tenth),
+  which is real, but a right call is worth less than the round trip on all but the biggest fifth of waves, and for
+  those the direction is the event itself (55%, 46% for goal-size moves) and our event feeds trail Polymarket.
+  Untested use of the same calls: steering RESTING orders (which side to pull), on the Mac's real trade prints
+  (makersim.py); a taker cannot use them.
+
+RIDING A WAVE THAT HAS ALREADY STARTED (`waveride.py build / test`, waveride.npz / waveride.txt; owner, 24 Nov: "if a
+wave lasts for 15 seconds, and we detect it 1 second in, there's still 14 seconds"). Direction is then known, nothing
+is predicted. 179,212 waves in play with a live recording, 2,827 games, 17-23 Nov.
+- TIME LEFT IS NOT MOVE LEFT. First move -> top takes 3 / 25 / 94 s (quartiles), so there is time; but the biggest
+  single second carries 57% of the whole move (half or more in one second in 60% of waves) and that second IS the
+  first move in 41% of waves (median 2 s after it). The whole move is 3.5c at the median (price 46c). A taker's buy
+  lands 1 s later at the earliest (Polymarket's delay window): by then the mid has made 33% of the move (mean 44%)
+  and the ask is 2.5c above the mid before the wave.
+- THE WAVE'S SIDE, bought at each moment ($ per $100; 2 min / 5 min; hindsight that it IS a wave): 1 s before the
+  first move -1.79 / +0.09; in the second of the first move -5.43 / -3.14; 1 s after -6.67 / -4.25; 3 s after
+  -7.35 / -5.11; 10 s after -8.89 / -6.55; 1 s after DETECTION (CUSUM alarm, 82% of the move made) -13.77 / -13.32.
+  Sold at the exact top (not knowable) +3.4..+4.4 before detection, -4.83 after it.
+- BIG WAVES ARE SLOWER, and there the owner is right: big waves from rest (3,185; whole move 12.5c, to the top
+  58 / 155 / 393 s; 14% of the move made 1 s in). Before the first move +28.68 / +33.08; 1 s after +10.57 / +15.48;
+  3 s after +8.36 / +14.92; 5 s after +3.89 / +9.18; 10 s after +0.58 / +4.76; at detection -5.82 / -4.42. About
+  half the profit survives getting in 1-3 s late, IF one knows at that second that it will be a big wave.
+- WHAT CAN BE DONE LIVE. 61,123 first ticks from rest (2,694 games): 15% become a wave, 2.7% a big wave. Buy every
+  first tick -$10.50 (one position a game: 21,691 trades -$10.78, 90% far below 0). By tick size: under 0.03
+  log-odds -10.57 (4% waves), 0.06-0.12 -10.69 (25%), 0.12-0.30 -11.84 (98% waves, 11% big), 0.30+ -13.56 (100% /
+  65% big: the jump was the move). The dial between first tick and detection (CUSUM at 25 / 50 / 75 / 100% of the
+  alarm level): -10.54 / -10.76 / -10.73 / -10.72: flat. Hindsight split: ticks that became a big wave +4.12 /
+  +6.33, a small wave about -11, no wave -10.9.
+- A MODEL AT THE FIRST TICK ("will this tick become a big wave", all inputs seen from the tick's side; trained on
+  earlier days, 30-min gap; 50,070 ticks scored): AUC 0.826; its top 1% are waves 97% and BIG 40% (all ticks 2.3%),
+  but break-even needs a big wave after ~59% of picks and its surest picks are ticks that already jumped: -$9.35 per
+  $100 (481 trades). A model trained on the dollars instead: top 1% -$2.64 (460 trades, 90% -1,440..-1,004), top 10%
+  -$3.91 (3,559). Nothing above zero.
+- READING. The money in "right call on a big wave from rest" is real and half of it is still there 1-3 s in; what is
+  missing is knowing AT THE FIRST TICK that this tick is one of the 2.7%. Waiting until it is clear costs 82% of
+  the move. A round trip costs ~9-10% of the stake (2c spread + 2.5c fees on a 50c token); the median wave's whole
+  move is 3.5c.
+
+## 8l. Resting orders steered by the bookmakers, and the rewards recorder on the PC (24 Nov 2026, PC)
+
+Owner, 24 Nov: "experiment with resting orders then, and liquidity rewards." Data: run/signals/mac/lab (paths.py and
+prints_fetch.py run here on the Mac recording: 1,006 two-way games, 309,086 public trades; no football, it is
+three-way) and run/rewards_pc.
+
+RESTING ORDERS. The Mac's `makersim2.py` gives the same baseline here (968 games, 237,923 real trades): what the
+resting side of ALL real trades kept after 5 min, cents a share: spread 1c or less -0.47, 2c +0.29, 3-4c +1.16
+[+0.33..+1.92], 5c+ +1.92 [+0.48..+3.67]; our own order one cent inside a 5c+ spread in a calm market: reaction 0 s
++0.65, 1 s +0.11, 2 s -0.07, 3 s -0.53 (hockey is an outlier at -5c: not understood, check its markets).
+`makersteer.py build / test` asks the new question: a resting order only has to decide WHICH SIDE TO LEAVE IN THE
+BOOK, and the direction study (8k) says the bookmakers know a little. Same fill rule as makersim2 (a real taker trade
+reaching our price while we are first in line, or trading through it; live recording only; 20 shares; one fill a side
+a minute); every fill is stored with all inputs known at the second the quote was decided, seen from our side of the
+fill. 805 games with fills, 75,449 simulated fills over 12 settings (inside 2 / 3 / 5c+, 1 or 2 s late, calm or any
+market), in play. Cents a share kept after 5 min, share-weighted, [90% by game]:
+- PLAIN, any market: inside 2c+ -0.42 (1 s) / -1.17 (2 s); 3c+ -0.17 / -1.03; 5c+ +0.32 [-0.03..+0.69] / -0.77.
+- WHICH SIGNALS SPLIT GOOD FILLS FROM BAD (inside 2c+, 2 s; 12,915 fills, all -0.98): the superline "ahead" on our
+  side +1.13 [+0.03..+2.23] (676 fills), against us -3.22 [-3.96..-2.39] (1,060); bookmaker families that moved in the
+  last 30 s: with us -0.18, against -1.77; superline above / below Polymarket: -0.23 / -1.92. Inside 5c+: families in
+  5 s +1.50 [+0.07..+2.96] / -2.01 [-3.40..-0.74]; superline ahead +1.52 / -4.96 [-6.62..-3.48]. Polymarket's OWN
+  move works the other way (a fill after it moved our way keeps -1.4, after it moved against us +0.7: the pull-back
+  of 8k). Order-book size, order flow and trade prints split nothing.
+- RULES, inside 5c+, 1 s late (4,517 fills): plain +0.61 [+0.26..+0.95], 17-20 Nov +0.51, 21-23 Nov +0.72, held to
+  the result +1.48 [+0.15..+2.67]. "Never leave a side against the bookmakers' last 30 s": 72% of the fills, +1.21
+  [+0.75..+1.65], halves +1.03 / +1.40, at the result +2.56 [+0.84..+4.19]. "Only with them": 22%, +2.17
+  [+1.15..+3.18]. "Never against the superline's 60 s move" +1.28 [+0.80..+1.80]. At 2 s the plain order is -0.31 and
+  the same rules bring it to +0.10 / +0.87 [-0.31..+1.95]: reaction time decides.
+- A MODEL ON FILLS (trees on the fills of earlier days, all settings together, 10-min gap; 62,029 fills scored on
+  18-23 Nov; rank correlation with what a fill kept +0.13). Leaving a side only where it expects a gain: inside 5c+,
+  1 s: 1,920 of 4,152 fills, +2.33 [+1.75..+2.95], at the result +3.24 [+1.32..+5.05] (the pulled ones -0.57);
+  5c+, 2 s: +1.43 [+0.64..+2.23]; 3c+, 1 s: +1.26 [+0.77..+1.78]; 2c+, 1 s: 4,439 of 12,755, +1.04 [+0.58..+1.52]
+  (pulled -1.05); 2c+, 2 s: +0.21 [-0.22..+0.68]. By day (2c+, 1 s) -0.14, +0.53, +1.30, +1.11, +1.42, +2.06.
+- LEAK CHECK (`build --lag 6 --name makersteer_lag6.npz`): a public trade's stamp is a few seconds late and is placed
+  within 5 s, so an input read "at the decision" could hold a move made after the real trade. With every input read
+  6 s EARLIER: superline ahead still +2.90 [+0.78..+4.93] / -2.96 (5c+, 2 s); the 5 s family signal is gone (it is
+  6 s stale by construction); 5c+, 1 s: never against the bookmakers' 30 s +0.98 [+0.47..+1.42] (halves +0.86 /
+  +1.11, result +2.14 [+0.57..+3.74]), never against the superline's 60 s move +1.32 [+0.79..+1.81], model +2.14
+  [+1.37..+2.91] (result +2.98 [+0.68..+5.23]); 2c+, 1 s model +0.50 [+0.04..+0.93]. The truth is between the two.
+- DOLLARS A DAY on the scored days, these 805 games only (5-min mark / held to the result; an order of S shares takes
+  min(S, the real trade)): 5c+, 1 s, plain S 20 +75 / +159, S 100 +110 / +368; never against the bookmakers S 20
+  +94 / +194, S 100 +218 / +554, S 500 +289 / +434 (leak check +76 / +161, +161 / +477, +194 / +225); model S 100
+  +221 / +332, S 500 +355 / +274. 2c+, 1 s, model: S 100 +263 / +445 (leak check +49 / +139). The trades that
+  filled us: median 23 shares, 90% under 223. So: a few hundred dollars a day at most at these sizes.
+- NOT in the test: other makers stepping in front of us, the queue at a shared price, our own order changing who
+  trades, getting out of a position other than waiting for the result, football. Nothing here has met a real
+  order. FIRST POSITIVE RESULT of the project that holds in both halves of the week, out of sample by day and under
+  the leak check; next = a live paper version in the collector (needs Polymarket's trade events with sizes recorded).
+
+WHAT IMPROVES IT (`makersteer_tune.py`, on the same fills; 100-share orders, 6 scored days, these 805 games):
+- ONLY WIDE SPREADS. By the spread when the quote was decided (1 s late; plain -> model keeps): 2c -1.35 -> -0.07;
+  3c -0.63 -> +0.44; 4c -0.31 -> +0.01; 5-6c +0.24 -> +1.80 [+0.64..+2.94]; 7-9c +1.18 -> +2.49 [+1.15..+3.80];
+  10c+ +0.73 -> +2.28 [+0.50..+4.22]. Under 5c nothing pays even with the model.
+- SPEED. One more second costs the plain order 0.6-0.8c a share (5c+: +0.41 at 1 s, -0.39 at 2 s; makersim2 in a calm
+  market: +0.65 at 0 s, +0.11 at 1 s); the model's picks lose less (5c+: +1.77 -> +1.30).
+- NOT TOO PICKY. Model line at 0 to +0.5c is best (2c+: 4,439 fills +0.85c, $263 a day; +0.5c: 2,050 fills +1.55c,
+  $224); above +1c it falls apart (830 fills, +0.38 [-0.95..+1.83]). Rule AND model lifts the cents (5c+: +1.77 ->
+  +2.29 [+1.49..+3.09]) but not the dollars ($221 -> $195 a day). Staking by the call adds little.
+- MORE DAYS. The model's kept fills by the day scored (fills seen before): 18 Nov (4k) -0.17, 19 Nov (12k) +0.43,
+  20 Nov (19k) +0.59, then +1.1 / +1.4 / +2.1 on 21-23 Nov: it is still improving with data.
+- A REAL BOOK OF POSITIONS (fills in time order, a cap on shares held per game, buys and sells netted, the rest held to
+  the result, so nothing is left unpaid): 5c+, 1 s, never against the bookmakers: cap 300 shares $+325 a day
+  [+41..+616], 83% of days up, worst day -$508, about $5k tied up on the busiest day; cap 1,000 $+554 [+150..+959],
+  worst day -$153. 5c+, 2 s, model: cap 1,000 $+354 [+91..+635]. Plain 5c+: $+337 [-120..+769]. 2c+ with the model:
+  $+386 [-184..+973] (not clear of zero). A cap of 100 shares throws most of it away.
+- Not testable on recorded data: other makers stepping in front, pulling an order inside the taker's 1 s delay
+  window, joining the best price instead of improving it, football (three-way), reward pots on the same orders.
+  Paper-bot settings these tests point to: spreads of 5c+ only, one cent inside, 100 shares, react under 1 s, pull the
+  side the bookmakers' last 30 s (or a superline lead) is against, cap 300-1,000 shares a game, hold to the result.
+
+A $175 WALLET, MODEL VARIANTS, FINE TUNING (`makerwallet.py`; owner, 24 Nov: "is there any code, model improvement,
+or settings fine tuning that will make it work better? Assume a 175 dollar wallet"). Needs makersteer_states.npz (what
+a bot saw every in-play second of every game; written by makersteer.py build). The wallet test replays every fill in
+time order across all 805 games: an order only exists if the wallet can pay for it at that second (a buy of S shares
+at q locks S x q, an offer S x (1 - q) unless we hold the shares; widest spreads get the money first; at a fill a
+median 6 orders qualify at once, $46 to rest them all at 20 shares), positions net out in a game, the rest is paid
+at the result. 6 days (18-23 Nov), spreads of 5c+, never against the bookmakers' last 30 s, cap 2 orders a game.
+- HELD TO THE RESULT, $175 becomes: 5 shares an order $247 (lowest $156), 10 shares $324, 20 shares $401, 40 shares
+  $0.07 (ruin: 80 shares x ~50c = a quarter of the wallet on one game's result; the edge is ~2.5c on ~50c, so the
+  Kelly stake is about 5% of the wallet a game), 10% of the wallet an order $44. Ranges by game are wide (5 shares
+  $137..$347). And tuning is worthless here: over 576 settings the result of one half of the week says nothing
+  about the other (rank correlation +0.09; the best of 18-20 Nov, $1,218, made $25 on 21-23 Nov).
+- GETTING OUT (a code change, the one that matters): while we hold shares in a game the order that reduces the
+  position always rests, one cent inside whatever the spread is (2c+), whatever the rule says; it needs no money.
+  $175 becomes: 5 shares $269 ($188..$354 by game, lowest $146), 10 shares $305 ($160..$448), 20 shares $299, 40
+  shares $183; about two thirds of entries are sold again before the result. Now settings carry over: rank
+  correlation between the halves +0.66, 85% of the 576 settings grow the wallet in both halves.
+- WHAT THE SETTINGS ARE WORTH (getting out, 10 shares): no rule $217; bookmaker rule $305; + never against a
+  superline lead $299; only with the bookmakers $298 ($232..$367); bookmaker rule + the fill model $403
+  ($307..$499, lowest $169, 60% of games up); model alone $408. Spreads 3c+ $118 (loses), 4c+ $203, 5c+ $305, 6c+
+  $337 ($213..$462), 7c+ $325, 8c+ $318. The cap per game (1 / 2 / 4 / 8 orders) changes nothing ($301-$309).
+  Medians over the grid, first / second half: with the model $284 / $320, without $215 / $255.
+- A SHARE OF THE WALLET AN ORDER (the order grows with the wallet): with exits and the model, 10% an order, the most
+  robust setting of the grid (best worse-half): $575 and $721 on the two halves, $1,406-$1,572 over the six days
+  straight, lowest $167. Do not read the level as a forecast: it compounds a simulated edge on one week and assumes
+  we are always first in line; fills are capped by the real trades (median 23 shares) so it cannot scale far.
+- MODEL VARIANTS (12, each trained on earlier days, compared on the 4,152 fills inside 5c+ at 1 s, each keeping the
+  same ~46% of fills; first model +1.66c [+1.00..+2.36], $216 a day at 100 shares): none is clearly better. Linear
+  model on 49 inputs +2.12c, +$62 a day vs the first [-6..+130]; five seeds averaged +1.91c, +$42 [-8..+89]; bigger
+  trees +$32 [-18..+84]; 1-min target +$11; training only on wide spreads is WORSE (-$85 [-159..-18]): the narrow-
+  spread fills teach it what a bad fill looks like. Rank correlation with what a fill keeps 0.12-0.14 for all: the
+  inputs carry about this much, a cleverer model does not add to it. More days of fills and fresher bookmaker
+  feeds would.
+- For a $175 wallet these point to: spreads of 5c+ (6c+ if the wallet should work less), bookmaker rule + the fill
+  model, 10 shares an order (or 5% of the wallet), the exit order always resting, react under 1 s.
+
+THE AUDIT (`makeraudit.py --signals DIR --results fair_results.json`, makeraudit.txt; owner: "how many trades? how
+often does it win? is the test correct?" and "WHY does it make money, on what, which games, every game?"). Setting A
+= 5c+ spreads, bookmaker rule, 10 shares, exit order, $175; B = A + the fill model. 18-23 Nov, 805 games.
+- WHAT: the match-winner market of a game, in play, only in seconds with a 5c+ spread: 31% of the in-play time with
+  a live book (424 of 1,354 h); 70% of games have a minute of it, the median game 13 min. A makes 2,242 entry fills
+  (374 a day) in 59% of the games, B 1,165 (194 a day) in 39%; a traded game has 2 trades at the median, a tenth
+  have 12+. By sport (A): cs2 958 trades +$48, valorant 748 +$50 (its spread is 5c+ 76% of the time), american
+  football +$34, dota2 +$17, basketball +$4, tennis -$3, hockey -$21. It lives on thin esports markets.
+- WHY, cents a share (5c+, 1 s): at the fill the spread pays +3.14 (we buy that far under the middle of the book);
+  over the next 5 min the price moves -2.27 against us (the other side is right on average); kept +0.87. Fills the
+  rule allows: +3.26 - 1.85 = +1.41; fills it forbids: +2.83 - 3.36 = -0.53; allowed and the model agrees:
+  +3.58 - 0.96 = +2.63; allowed but the model says no: -0.02. The income is the spread paid by people who cross a
+  wide gap; the filters only remove the ones who know something.
+- TRADES (first in, first out): A 2,815 trades (469 a day), won 58%, average win +$0.67, average loss -$0.81,
+  +4.6c a trade; 88% closed by an exit fill (won 62%, +$388, held 3 min), 12% left to the result (won 24%, -$257);
+  days -12 / +25 / +27 / +68 / +1 / +20; the 10 best of 473 games make MORE than the whole profit (without them
+  -$19). B 1,474 trades (246 a day), won 66%, win +$0.63, loss -$0.75, +15.5c a trade; 91% exits (won 68%, +$282),
+  9% to the result (won 40%, -$53); all six days up; 60% of games up; without the 10 best games still +$110.
+- CORRECT? The mechanics check out: the wallet replay equals a sum by hand ($540.00 both ways), trades add up to the
+  wallet change, the results equal Polymarket's official ones in 805 of 805 games, bookmaker signals 6 s stale
+  change little ($293 / $396), the rule upside down loses ($125), a random rule allowing the same share of fills
+  does no better than no rule ($230 median vs $217; the real rule $305), both halves are up.
+- BUT IT IS THIN. Per share traded A makes +0.69c, B +2.35c. Wallet after 6 days from $175 (A / B): every fill half a
+  cent worse $119 / $311; 1c worse $15 / $218; 2c worse $0 / $48; 2 s reaction $0 / $220; 2 s and half a cent worse
+  $0 / $137; 2 s, half a cent, stale signals and no part fills $0 / $91; a random half of the entry fills $226 /
+  $290; faster bots take our best 10% of fills $25 / $264, best 20% $0 / $166. So the rule alone (A) is NOT a
+  result: any small worsening erases it. With the model (B) it survives one moderate worsening at a time but not
+  two together. Unprovable offline: that we are first in line at our price and that we react inside a second.
+  Earlier lines in this section that quote the rule-only wallet ($305) must be read with this.
+
+IMPROVING RULE + MODEL (`makerlib.py` = the wallet replay as a class; `makerbetter.py`, `makerexit.py`; needs
+`makersteer.py build --name makersteer_flow.npz`, which also adds the REAL ORDER FLOW inputs `fl_*` (signed shares
+the takers bought minus sold over 30 / 120 / 600 s from Polymarket's public trades, read 6 s before the decision).
+Owner: "can we improve it further? Maybe something to do with confidence scaling". $175, 10 shares, 18-23 Nov;
+each idea changes one thing, is run on both halves from a fresh wallet, and is compared with the base by game.
+About 40 variants were tried on six days, so single gains are suggestive, not proven.
+- HELPED (kept only if better in BOTH halves): FIVE SEEDS AVERAGED $384 -> $406 (+$22 [-7..+53]); CONFIDENCE
+  SCALING, two steps (20 shares where the call is above its usual level of earlier days, else 10) $406 -> $479
+  (+$72 [+26..+118]; per share +2.33c -> +2.58c; the same total size flat makes $437; scaling it UPSIDE DOWN loses
+  $44: the call's order carries information); A SMARTER EXIT (the exit order does not rest while the bookmakers
+  moved OUR way in the last 30 s) $479 -> $502 (+$23 [-40..+85]); the model version of it (no exit where the model
+  expects that sale to lose more than 1c) $548 (+$69 [+2..+133]); all five such variants beat the base in both
+  halves. An exit fill is as likely to be a bad fill as an entry.
+- DID NOT HELP: the real order flow as model inputs ($359, -$25 [-70..+21]); a higher line (call above +0.5c
+  $383, above +1c $282) or a lower one (-0.5c $348); 3-4c spreads on the surest calls (-$15); switching off sports
+  that lost on earlier days (-$29; with the model every sport is up: cs2 +$103, valorant +$80, hockey +$19,
+  dota2 +$11, tennis +$9, basketball +$8); the model without the rule is the same (+$12 [-17..+42]).
+- HURT: a TIME STOP (selling a stuck position into the bid as a taker): after 2 min $102, 5 min $233, 10 min $286,
+  20 min $365, 40 min $371, 90 min $390 against $406. No exit order at all $418 against $479.
+- SIZE is leverage, not edge: 10 / 15 / 20 / 30 shares (with the scaling and the smarter exit) $502 / $605 / $705 /
+  $830, per share the same +3.1c. If faster bots take our best 20% of fills: $162 / $158 / $80 / $110.
+- STRESS, wallet after 6 days from $175 (five seeds | + scaling | + smarter exit): as tested 406 | 479 | 502; every
+  fill half a cent worse 312 | 364 | 406; 1c worse 217 | 260 | 323; 2 s reaction 213 | 250 | 329; 2 s AND half a
+  cent worse 125 | 162 | 249; the best 10% of fills lost 266 | 309 | 310; the best 20% lost 172 | 187 | 162. The
+  combined bad case moved from a loss to a gain; losing the best fifth of the fills is still about break-even.
+- Settings these point to for $175: spreads of 5c+, bookmaker rule, five-seed model call above 0, 10 shares (20 on a
+  call above its usual level), the exit order resting except while the bookmakers moved our way (or the model
+  expects the sale to lose over 1c), no stops.
+
+HOW ACCURATE IS IT (`makeralign.py`, makeralign.txt; owner: "is this backtest 100% accurate?"). No. Measured:
+- WHEN A TRADE HAPPENED. The public trade stamp is a whole second and runs late; each trade is placed within
+  [stamp - 5, stamp] where the recorded best quote is nearest its price. Of the entry fills: 19% CLEAN (price matched
+  and the book did not move for 6 s: placement cannot matter), 41% PLACED (matched, but the book moved in the
+  window), 41% NO MATCH (the trade's price is not at our recorded best quote, median 0.5c off: our book is one
+  snapshot a second). The edge per share is in all three (rule + model, 5c+: CLEAN +2.51 [+1.24..+3.71], PLACED
+  +3.00, NO MATCH +3.29), so placement does not create it; the dollars do depend on counting the less certain fills.
+  TRAP hit on the way: prices in the paths files are 32-bit floats; comparing them to a trade price needs a
+  tolerance (0.05c), not 1e-6 (the first run called 76% of fills "no match").
+- WERE WE FIRST IN LINE (the assumption that cannot be simulated; the trade's own price is evidence). 84% of entry
+  fills: the real trade printed AT or THROUGH the best quote we had recorded, so nobody was quoting better and our
+  order one cent inside would have been taken first. 14%: a sub-cent print inside it. 2%: at our price (someone was
+  already there; these 21-61 fills show +6..+9c a share, i.e. they are the too-good ones). Counting ONLY the 84%
+  (entries and exits), the final setting makes $175 -> $377 (halves $265 / $286, +2.39c a share, lowest $166)
+  instead of $502; with every fill half a cent worse on top $293; at 2 s reaction $276.
+- So: headline $502, conservative fill counting $377, conservative and half a cent worse $293. Exact: the money
+  accounting, the official results, no fee for resting orders (Polymarket's documentation), no future data in the
+  model. Not in any number: other bots reacting to our order, our order changing who trades, sub-second reaction,
+  order rejections and downtime, anything beyond these six days and 805 games, football; and the extras were
+  picked among ~40 variants on the same days.
+
+LIQUIDITY REWARDS ON THE PC. `run/rewards_pc` = a copy of tools/rewards (the scripts write next to themselves) +
+`launch.py` (runs one under `python -I`). Recorder 2 runs there since 24 Nov 13:01 Norway time for 72 h
+(`python -I launch.py rec2.py 72`, PID in rec2.pid; it stops when the PC is switched off). Read it with
+`python -I launch.py paperbot.py --quick` once it holds a day. New tool `tools/rewards/week_cost.py` (copy it there to
+run): the markets the rule picks at the newest pass, and what a week of real trades would have cost the minimum pair.
+At 13:18: 41 markets pass (pots $792 a day, the minimum pair's expected share $526 a day, nobody else qualifying in
+61%). Cost over the last week there (38 markets, 212 market-days, pair 3c from the price, re-set every 2 min): 0.80
+fills a market-day, a fill worth -$0.46 after 1 h / -$0.50 after 24 h / -$0.48 at the end (20 shares), worst -$8.61:
+about -$0.40 a market-day, the same as the Mac's figures. The reward side is NOT a weekly number: 26 of the 35 picks
+have a pot dated TODAY (47% of all watched markets do), i.e. "empty" means "new pot", as the Mac found. Break-even is
+a pot share of ~$0.40 a market-day, 4% of what the formula gives while nobody else is there (net +$9.47 a market-day
+at 100%, +$4.54 at half, +$0.60 at a tenth). Open: how many hours a new pot stays empty (the recorder), and whether
+the formula pays a lone minimum order as published (only a real order can show that; the owner's call).
+
+## 8m. The steered resting orders live ON PAPER (24 Nov 2026, PC): tools/maker
+
+Read `tools/maker/README.md` first. On paper nothing here sends an order. The real-money half was built later the same day: 8n.
+
+WHAT RUNS ON THE PC since 24 Nov 17:35 Norway time: the collector (`run/collector.pid`, started from
+`target\release\oddsfeed.exe` in `run`, log `run/log.txt`) and `tools/maker/paperbot.py` (`run/maker/bot.pid`,
+`bot.log`), paper wallet $175. Read `run/maker/status.txt`; every fill / closed trade / result is in
+`run/maker/journal.jsonl`, every order a real bot would have sent or pulled in `run/maker/orders.jsonl`. Both stop
+when the PC sleeps or reboots; `state.json` keeps the wallet and the shares across a bot restart.
+
+HINDSIGHT FOUND IN THE RESEARCH INPUTS, fixed, results held. Writing the live inputs (`tools/maker/feat.py`, which
+calls the research code on a game's rows up to one moment) and comparing them with the full-recording inputs
+(`parity.py`) showed three inputs that knew the future:
+- `waves.book_lines` used a bookmaker from its FIRST price if that price changed at any later time, and took the set
+  of outcomes from the whole recording. Now `book_lines(rows, outcome, causal=True)`: outcomes seen so far, and a
+  book's line starts at its second real value. `features.build(..., t_end=, causal=)` passes it on.
+- `since_pm_end`: a wave still running when the data ends was closed by force and read as ended. `lead.trends` now
+  marks it `open`, `labfeat.fin` skips those.
+- `wavedir.flow` returned zeros before a game's first trade print instead of computing the same as later.
+Defaults keep the old behaviour; the causal set is `makersteer.py build --causal --name makersteer_causal.npz`. With
+it parity is exact: 82 moments in 14 games, 164 rows x 167 inputs, every value identical; one live decision takes
+0.14 s (median). Re-run of section 8l on the causal fills: five seeds $399; + two-step sizing $464 (+$65,
+[+17..+112]); + smart exit $490; counting only fills at or through our recorded quote $357; + half a cent worse
+$283; at 2 s reaction $270. Use THESE numbers, not 8l's $502 / $377 / $293. `makerbetter.py --model "five seeds
+averaged"` evaluates the deployed model (its automatic pick chose "+ real order flow" on the causal data).
+
+THE MODEL FILE. `export_model.py` trains the five seeds on every in-play fill of every setting (53,745 fills 17-22
+Nov, stopped on the last fifth) and writes `run/maker/model.npz`; `model.py` scores it in plain numpy (gap to the
+trained models 0.000001c). Usual call c0 = 0.642c (walk-forward median of positive calls on entry fills) = where the
+bot doubles its order.
+
+THE BOT (paperbot.py, rules = the backtest's final setting): two-way sports in play, book at most 15 s old, price
+10-90c; entry one cent inside a 5c+ spread on a side the bookmakers' last 30 s are not against and where the call is
+positive, 10 shares or 20 at c0, 2 orders deep; exit order one cent inside any 2c+ spread unless the bookmakers moved
+our way; one worker process per group of games keeps each game's rows and reads only new ones. Made stricter than the
+backtest on purpose: an order counts only from decision-ready + 0.3 s and a pulled order stays live 0.3 s
+(`order_delay_ms`); no order under 5 shares (`min_order_shares`: a smaller holding waits for the result or is netted
+by a later entry); no decision in a game until 15 min of it is on record (`min_history_s`). A fill = a real trade
+from Polymarket's public stream (`last_trade_price`: price, size, side, ms) reaching the price of an order resting at
+the trade's own time. Checks in status.txt: "taker buys printed at or above the middle" (96% on the first evening:
+buy / sell is read the right way round), data-to-order delay (0.5 s median), loop time.
+First evening: fills arrive (a 20-share entry after 34 s of resting, a part exit at the same price); the bot changes
+about 20 orders a minute, because the order follows the best price cent by cent.
+
+TRAPS HIT ON THE PC (hard disk):
+- NEVER call the collector's `/stats` page or run an unindexed query against the live database here. `/stats` counts
+  the whole `changes` table: minutes on this disk, and the query keeps running after the client gives up. For that
+  long the write-ahead file cannot be folded back. Two such calls plus one full scan of mine took the file past 1 GB;
+  from there it grew 100 MB a minute and did not recover (1.9 GB in 25 min; readers get slow, overlap, and the
+  writer's 60-250 ms tries never find a gap), and the writer dropped 22 batches ("db write failed: database is
+  locked", 16:01-16:07 UTC, so the PC's recording of those minutes has holes). Cure: stop the bot and the collector,
+  `PRAGMA wal_checkpoint(TRUNCATE)` (39 s), start both. Healthy = the file stays under 20 MB with the bot running.
+- To watch it without touching the database: read the first 120 bytes of `oddsfeed.db-shm` UNBUFFERED (frames at
+  offset 16, frames copied at 96, reader marks at 100..119; a buffered read crosses the lock bytes at 120 and fails).
+- Take `now` AFTER the database reads of a pass: a slow pass (token lookups) otherwise asks for decisions as of
+  seconds ago. Token lookups are capped at 3 a pass.
+- Patch scripts through a shell here-document lose `\n` inside strings: write them with the editor.
+
+REAL MONEY: see 8n (built the same evening; nothing below has met the real venue).
+
+## 8n. The order keeper for resting orders: src/maker.rs (24 Nov 2026, PC). Built, tested on a pretend exchange, NEVER run against Polymarket
+
+Owner said "build it". Read `tools/maker/README.md` ("Real money") for the owner's steps and the known gaps.
+AGENT ON THE MAC: start with `tools/maker/MAC_HANDOFF.md` (what to pull, build and start on paper, and what only
+the owner may do).
+
+SHAPE. Two halves that must both say "real":
+- `src/maker.rs` in the collector (where the key is): `/maker` (view), `/maker/sync` (the bot's call),
+  `/maker/settings` (limits, `maker.json`), `/maker/real` (`{"real": true, "confirm": "REAL MONEY"}`; off after every
+  start), `/maker/test` (`{"confirm": "TEST"}`: one real post-only buy 10c under the best bid, read back, cancelled).
+  Spawned in main.rs; one tick a second.
+- `tools/maker/paperbot.py` with `"mode": "real"`: hands over its whole wanted set every pass (one order per key
+  "<game>:<side>", token, BUY / SELL, whole cents, size) and books the fills the keeper returns
+  (`on_real_fill`); real ledger in `real_*` files; refuses to start while Real is off; on paper `"mirror": true`
+  rehearses the hand-off (the keeper keeps "dry-N" orders and sends nothing). A sync whose `mode` does not match the
+  keeper's switch is refused and does not count as a sign of life.
+
+RULES IN THE KEEPER (unit-tested, `maker::tests`): only the difference is sent (`plan`); an order whose cancel the
+venue did not confirm blocks its key until its last state is read; a part-filled order stays while the bot still
+asks for it; `admit` = the limits (20 shares an order, 40 of a token held + resting, $175 at risk, 30 orders, a sale
+only of what the keeper bought); fills = `size_matched` of the key's open orders read each second, booked at the
+order's own price; cancelled orders are read once more by id (`verify`) for a fill that came just before. Money
+guards: bot silent 3 s -> pull; Polymarket's heartbeat every 5 s (`POST /v1/heartbeats`, id chained; the venue
+cancels EVERY order of the API key 10 s after the last one: also other programs' orders, also after Real is switched
+off); account worth (cash + Data API value) $30 under the arming level on two readings -> Real off; kill switch ->
+Real off. Every real placement / cancel / fill -> `bot_orders` (bot "maker"); holdings, fill log and the resting
+order ids -> `maker_state.json` (a restart cancels what was left resting). A refused placement is tried again after
+1 s ("crosses": the price moved through ours, post-only refused it; expected) or 5 s (anything else).
+
+exec.rs additions (the taker path `pm_order_once` is untouched): `pm_rest_place` (GTC + `postOnly: true`, price must
+be whole cents and on the market's tick, size in hundredths), `pm_cancel` (`DELETE /orders`), `pm_open_orders`,
+`pm_order_state`, `pm_heartbeat`, `pm_equity`; `clob()` is Polymarket's address except in this crate's tests
+(`TEST_CLOB`). API facts were read from docs.polymarket.com on 24 Nov 2026 (place-orders, manage-orders,
+order-lifecycle, error-codes, the OpenAPI file); the docs disagree with themselves on a few points (trade status
+names, minimum size in shares or dollars, batch-cancel limit): none of those is relied on.
+
+TESTS. `cargo test` = 116 pass. `maker::venue_tests::the_real_path_against_a_pretend_exchange` runs an axum server
+that behaves as the documentation says and drives: refused while off, rehearsal, arming words, place (signed
+headers, post-only GTC, amounts), no-op on the same set, part fill, re-price, an order filled just before its cancel
+(nothing new placed until the fill is read), limits, a sale beyond holdings, a "crosses" refusal and its pause, the
+bot going silent, the heartbeat chain, Real off, state on disk. `python -I tools/maker/test_real.py` = the bot's
+real bookkeeping. On the PC the rehearsal runs live (`mirror` on; a hand-off takes 2 ms).
+NOT DONE: one real call (no key on the PC, and agents place no orders). First real call = the owner's `/maker/test`.
+
+NOT BUILT / WEAK: no web page for it; cancels and placements go one after another (a re-price = two round trips);
+fills are a second late (bounded by `max_position_shares`); the bot's cash runs ahead of the account until won
+shares are redeemed and for netted dust pairs; the loss guard is account-wide.
+
+STATE ON THE PC, end of 24 Nov: collector rebuilt 18:12 Norway time with the keeper (the running binary lacks two
+later source changes that only matter with Real on: the retry pause and the default of 30 orders, set there through
+`/maker/settings` instead); paper bot restarted with `mirror` on, paper wallet $182 after an hour (15 closed trades,
+far too few to mean anything). Committed and merged to main the same evening (owner asked); the model
+file ships as `tools/maker/model.npz`.
+
+TRAP (PC): do not compile into `target/` on D: while the collector records. A 60 s `cargo check --release` made the
+writer drop 8 batches ("db write failed: database is locked", 17:14-17:16 UTC): the disk is shared. Build with
+`CARGO_TARGET_DIR` on C: (no drops), or with the collector stopped. This, not the bot's reads, is the likely cause
+of most of the 22 drops at 16:01-16:07 UTC as well.
 
 ## 9. Hard rules
 

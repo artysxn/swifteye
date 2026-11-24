@@ -78,25 +78,29 @@ def _held(rows, t0, n):
     return np.where(idx >= 0, lv[np.clip(idx, 0, None)], np.nan)
 
 
-def build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book=None, full=False):
+def build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book=None, full=False, t_end=None, causal=False):
     """book: Polymarket order-book rows (ts, outcome, bid_size, ask_size, bid_depth, ask_depth) or None.
-    full: return the whole grid as a dict (ts, X, bid, ask, mid, pm_eps, evt, ok) for the wave models."""
+    full: return the whole grid as a dict (ts, X, bid, ask, mid, pm_eps, evt, ok) for the wave models.
+    t_end (ms): LIVE use (tools/maker): the grid runs to this moment with every line held at its last value, instead of
+    stopping at the last recorded change. Give it rows up to t_end only; the last grid second then holds what a bot
+    knew at t_end, the same numbers the full recording gives for that second (checked by tools/maker/parity.py).
+    causal: bookmaker lines without hindsight (waves.book_lines); needed for that equality."""
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', RuntimeWarning)
-        return _build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book, full)
+        return _build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book, full, t_end, causal)
 
 
-def _build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book=None, full=False):
+def _build(pm_rows, bk_rows, outcome, sport, start_ms, three_way, book=None, full=False, t_end=None, causal=False):
     """(t (ms), X float32 [n, F], y [n, 2] (up, down), net [n, 4] (up at H, up trade, down at H, down trade), evt) for
     every second of the span where Polymarket and the bookmakers both exist; rows not tradable are dropped."""
     pm = W.pm_line(pm_rows, outcome)
-    books = W.book_lines(bk_rows, outcome)
+    books = W.book_lines(bk_rows, outcome, causal)
     if not pm or not books:
         return None
     slp = W.superline(books)
     sl = [(t, p) for t, p, _ in slp]
     t0 = max(pm[0][0], sl[0][0])
-    t1 = min(pm[-1][0], max(r[-1][0] for r in books.values()))
+    t1 = min(pm[-1][0], max(r[-1][0] for r in books.values())) if t_end is None else int(t_end)
     if t1 - t0 < 300_000:
         return None
     n = (t1 - t0) // STEP + 1

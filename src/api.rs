@@ -76,6 +76,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/pm/api-from-key", post(pm_api_from_key))
         .route("/bots/test/{bot}", post(bots_test))
         .route("/bots/test-sellback/{id}", post(bots_test_sellback))
+        .route("/maker", get(maker_get))
+        .route("/maker/sync", post(maker_sync))
+        .route("/maker/settings", post(maker_settings))
+        .route("/maker/real", post(maker_real))
+        .route("/maker/test", post(maker_test))
         .route("/assets/pages6.js", get(|| async { asset("pages6.js", "text/javascript; charset=utf-8", include_str!("web/pages6.js")) }))
         .route("/assets/pages7.js", get(|| async { asset("pages7.js", "text/javascript; charset=utf-8", include_str!("web/pages7.js")) }))
         .route("/assets/waves.js", get(|| async { asset("waves.js", "text/javascript; charset=utf-8", include_str!("web/waves.js")) }))
@@ -1639,6 +1644,43 @@ async fn bots_real(State(app): S, Path(bot): Path<String>, Json(b): Json<Value>)
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// The resting-order keeper of the steered-maker bot: what rests, what it holds, its limits.
+async fn maker_get() -> Response {
+    Json(crate::maker::view().await).into_response()
+}
+
+/// The bot's wanted set of resting orders; the reply has the orders now resting and the new fills.
+async fn maker_sync(State(app): S, Json(b): Json<Value>) -> Response {
+    Json(crate::maker::sync(&app, &b).await).into_response()
+}
+
+/// Limits of the resting-order keeper (only the fields given).
+async fn maker_settings(State(app): S, Json(b): Json<Value>) -> Response {
+    match crate::maker::update(&app, &b) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+/// Real switch of the resting orders: {"real": true, "confirm": "REAL MONEY"} or {"real": false}.
+async fn maker_real(State(app): S, Json(b): Json<Value>) -> Response {
+    match crate::maker::set_real(&app, b["real"].as_bool().unwrap_or(false), b["confirm"].as_str().unwrap_or("")).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+/// One REAL resting order 10c under the best bid, read back and cancelled: {"confirm": "TEST", "token": "..."}.
+async fn maker_test(State(app): S, Json(b): Json<Value>) -> Response {
+    if b["confirm"].as_str().map(str::trim) != Some("TEST") {
+        return err(StatusCode::BAD_REQUEST, "type TEST to confirm a real test order");
+    }
+    match crate::maker::test(&app, b["token"].as_str().map(str::to_string)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
     }
 }
 

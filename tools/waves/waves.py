@@ -140,9 +140,15 @@ def pm_line(rows, outcome, clock='receive'):
     return out
 
 
-def book_lines(rows, outcome):
+def book_lines(rows, outcome, causal=False):
     """{book: [(t, p or None)]}: each bookmaker's margin-free probability of `outcome` (1/odds normalised over
-    the outcomes it lists for the game), one point per change; None while any of its outcomes is suspended."""
+    the outcomes it lists for the game), one point per change; None while any of its outcomes is suspended.
+    A bookmaker whose line never has two real values is dropped (a dead listing).
+    HINDSIGHT in the default (found by tools/maker/parity.py, 24 Nov): that rule looks at the whole recording, so a
+    bookmaker is used from its FIRST price on because it changes LATER, and its outcomes are the ones it ever lists.
+    causal=True removes both: a bookmaker's line starts at its SECOND real value (the moment it has shown it is
+    alive) and is normalised over the outcomes seen so far. A live bot that only has the rows so far then builds
+    exactly the lines the whole recording gives; the maker tools (makersteer --causal, tools/maker) use it."""
     by = defaultdict(list)
     for ts, b, o, price in rows:
         by[b].append((ts, o, price))
@@ -153,11 +159,17 @@ def book_lines(rows, outcome):
         if outcome not in outs or len(outs) < 2:
             continue
         last, line, i = {}, [], 0
+        seen = set()
         while i < len(rs):
             t = rs[i][0]
             while i < len(rs) and rs[i][0] == t:   # rows of one poll: one moment
                 last[rs[i][1]] = rs[i][2]
+                seen.add(rs[i][1])
                 i += 1
+            if causal:
+                outs = sorted(seen)
+                if outcome not in seen or len(seen) < 2:
+                    continue
             if all(last.get(o) and last[o] > 1 for o in outs):
                 inv = {o: 1 / last[o] for o in outs}
                 p = inv[outcome] / sum(inv.values())
@@ -165,8 +177,9 @@ def book_lines(rows, outcome):
                 p = None
             if not line or line[-1][1] != p:
                 line.append((t, p))
-        if sum(1 for _, p in line if p is not None) >= 2:
-            out[b] = line
+        real = [k for k, (_, p) in enumerate(line) if p is not None]
+        if len(real) >= 2:
+            out[b] = line[real[1]:] if causal else line
     return out
 
 

@@ -68,7 +68,7 @@ def extra(X, bid, ask, sz, pm_eps, sl_eps):
         return np.concatenate([np.zeros(w), c[:-w]]) if n > w else np.zeros(n)
     pm_al = np.array(sorted(e['alarm'] for e in pm_eps if e.get('alarm') is not None), np.int64)
     sl_al = np.array(sorted(e['alarm'] for e in sl_eps if e.get('alarm') is not None), np.int64)
-    fin = sorted((e['end'], abs(e['amp']), e['peak'] - e['on']) for e in pm_eps if e.get('end') is not None and e.get('peak') is not None and e.get('on') is not None)
+    fin = sorted((e['end'], abs(e['amp']), e['peak'] - e['on']) for e in pm_eps if e.get('end') is not None and e.get('peak') is not None and e.get('on') is not None and not e.get('open'))
     q['since_pm_end'] = since(np.array([f_[0] for f_ in fin], np.int64))
     q['since_sl_alarm'] = since(sl_al)
     for name, al in (('pm', pm_al), ('sl', sl_al)):
