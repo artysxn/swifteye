@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swifteye trades</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #16181d; --muted: #646b78; --line: #e3e6eb; --hover: #f0f3f8;
+  --sel: #e6efff; --accent: #2f6fdf; --win: #1f8a4c; --loss: #c43c3c; --real: #8a4b00;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111317; --card: #1a1d23; --ink: #e8eaee; --muted: #9aa1ad; --line: #2c3038; --hover: #22262e;
+    --sel: #1f2d47; --accent: #7aa7ff; --win: #4cc283; --loss: #f07474; --real: #f0b060;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111317; --card: #1a1d23; --ink: #e8eaee; --muted: #9aa1ad; --line: #2c3038; --hover: #22262e;
+  --sel: #1f2d47; --accent: #7aa7ff; --win: #4cc283; --loss: #f07474; --real: #f0b060;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+h1 { font-size: 22px; margin: 0 0 2px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.sub { color: var(--muted); margin: 0 0 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.sum div { padding: 2px 0; }
+.sum b { display: block; font-size: 13px; color: var(--muted); font-weight: 500; }
+.sum span { font-size: 18px; font-variant-numeric: tabular-nums; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filters label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+select, input, button { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; }
+button { cursor: pointer; }
+button:hover { background: var(--hover); }
+input[type=search] { min-width: 180px; }
+.grow { flex: 1; }
+.tablewrap { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-weight: 600; font-size: 12px; z-index: 1; }
+td.num, th.num { text-align: right; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.sel { background: var(--sel); }
+.win { color: var(--win); } .loss { color: var(--loss); } .realtag { color: var(--real); font-weight: 600; }
+.muted { color: var(--muted); }
+.game { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 18px; margin: 4px 0 14px; }
+.facts b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+.chartbox { background: #fff; border: 1px solid var(--line); border-radius: 8px; height: 520px; padding: 6px; position: relative; }
+.chartmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #646b78; text-align: center; padding: 20px; }
+.two { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
+.nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.empty { padding: 30px; text-align: center; color: var(--muted); }
+details { margin-top: 12px; } summary { cursor: pointer; color: var(--muted); }
+pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 340px; overflow: auto; background: var(--bg); padding: 10px; border-radius: 8px; }
+@media (max-width: 700px) {
+  .chartbox { height: 380px; }
+  th, td { padding: 6px 8px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Swifteye trades</h1>
+  <p class="sub" id="sub"></p>
+
+  <section class="card"><h2>Results by bot</h2><div class="sum" id="sum"></div></section>
+
+  <section class="card">
+    <div class="filters">
+      <label>Bot <select id="fBot"></select></label>
+      <label>Money <select id="fMoney"><option value="">All</option><option value="real">Real</option><option value="paper">Paper</option></select></label>
+      <label>Sport <select id="fSport"></select></label>
+      <label>Result <select id="fRes"><option value="">All</option><option value="won">Made money</option><option value="lost">Lost money</option><option value="open">Still open</option></select></label>
+      <input type="search" id="fText" placeholder="Search a team or #id" aria-label="Search">
+      <span class="grow"></span>
+      <span class="muted" id="count"></span>
+      <button id="dlAll" title="Every trade with all its prices, as one JSON file">Download all data (JSON)</button>
+    </div>
+  </section>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Bought (Norway)</th><th>Bot</th><th>Money</th><th>Sport</th><th>Game</th><th>Side</th>
+        <th class="num">Buy</th><th class="num">Sell</th><th class="num">Result</th><th>Why it sold</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No trades match these filters.</div>
+  </div>
+
+  <section class="card" id="detail" style="margin-top:14px" hidden>
+    <div class="nav">
+      <button id="prev">Previous</button><button id="next">Next</button>
+      <span class="muted">or the arrow keys</span><span class="grow"></span>
+      <button id="dlOne">This trade (JSON)</button>
+    </div>
+    <h2 id="dTitle"></h2>
+    <div class="facts" id="dFacts"></div>
+    <div class="chartbox"><canvas id="cv"></canvas><div class="chartmsg" id="chartMsg" hidden></div></div>
+    <div class="two">
+      <div><h2>Prices at the buy and at the sale</h2><div class="tablewrap" style="max-height:none"><table id="dBooks"></table></div>
+        <p class="muted" style="margin:8px 0 0">Everything is for the side bought, in cents, the way the bot's chart shows it. Bookmakers: 1 ÷ odds (the bot's own measure, margin not removed); for a bet against a player or team, 100 − that, with the odds on them in brackets. Polymarket: what the bought token could be sold at (bid) and bought at (ask). ★ = the bookmaker whose move triggered the buy.</p></div>
+    </div>
+    <details><summary>The bot's own record of this trade</summary><pre id="dRec"></pre></details>
+  </section>
+
+  <p class="muted" style="margin-top:18px">The full data is inside this file as JSON (the script tag with id <code>swifteye-trades</code>): every trade, Polymarket's bid, ask and last price for each outcome, and every bookmaker's winner odds, from 15 minutes before each buy to 10 minutes after its sale. The charts are the ones the bot sends to Telegram and need an internet connection to load Chart.js.</p>
+</main>
+
+<script type="application/json" id="swifteye-trades">/*__DATA__*/</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/0.5.7/chartjs-plugin-annotation.min.js"></script>
+<script>
+(function () {
+  const raw = document.getElementById('swifteye-trades').textContent;
+  const D = JSON.parse(raw);
+  const T = D.trades;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const NO = 3600 * 1000; // Norway in November: UTC+1
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const p2 = (n) => String(n).padStart(2, '0');
+  function when(ms, withSec) {
+    if (!ms) return '';
+    const d = new Date(ms + NO);
+    return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}` + (withSec ? ':' + p2(d.getUTCSeconds()) : '');
+  }
+  const cents = (p) => (p == null ? '' : (100 * p).toFixed(1) + '¢');
+  const money = (x) => (x == null ? '' : (x >= 0 ? '+$' : '−$') + Math.abs(x).toFixed(2));
+  const cls = (x) => (x == null ? '' : x > 0 ? 'win' : x < 0 ? 'loss' : '');
+  const botShort = { 'snipe': 'Snipe', 'snipe-trial': 'Snipe trial', 'snipe-1book': 'Snipe 1-book', 'favs': 'Favourites' };
+  const sideLabel = (t) => (t.token === 'no' ? 'Against ' : '') + esc(t.side_name);
+  const why = { 'gave up': 'gave up', 'caught up': 'Polymarket caught up', 'won': 'won at the end', 'lost': 'lost at the end' };
+
+  $('sub').textContent = `${T.length} trades · made ${D.generated} · ${D.what}`;
+
+  // ---- summary
+  function group(list) {
+    const c = list.filter((t) => !t.open), w = c.filter((t) => (t.pnl || 0) > 0).length;
+    const pnl = c.reduce((a, t) => a + (t.pnl || 0), 0), cost = c.reduce((a, t) => a + (t.cost || 0), 0);
+    return { n: list.length, closed: c.length, w, pnl, cost, open: list.length - c.length };
+  }
+  const groups = [
+    ['Real money (from 20 Nov)', (t) => t.real && t.counts_in_real_results],
+    ['Real money, 19 Nov (left out of real results)', (t) => t.real && !t.counts_in_real_results],
+    ['Snipe, paper', (t) => t.bot === 'snipe' && !t.real],
+    ['Snipe trial wallet, paper', (t) => t.bot === 'snipe-trial'],
+    ['Snipe one-bookmaker test, paper', (t) => t.bot === 'snipe-1book'],
+    ['Pre-match favourites, paper', (t) => t.bot === 'favs'],
+  ];
+  $('sum').innerHTML = groups.map(([name, f]) => {
+    const g = group(T.filter(f));
+    if (!g.n) return '';
+    const per = g.cost ? ` · ${(100 * g.pnl / g.cost).toFixed(1)}% a $` : '';
+    return `<div><b>${esc(name)}</b><span class="${cls(g.pnl)}">${money(g.pnl)}</span><div class="muted">${g.n} trades, ${g.w} of ${g.closed} closed made money${per}${g.open ? `, ${g.open} open` : ''}</div></div>`;
+  }).join('');
+
+  // ---- filters
+  const bots = [...new Set(T.map((t) => t.bot))];
+  $('fBot').innerHTML = '<option value="">All</option>' + bots.map((b) => `<option value="${esc(b)}">${esc(botShort[b] || b)}</option>`).join('');
+  const sports = [...new Set(T.map((t) => t.sport || ''))].filter(Boolean).sort();
+  $('fSport').innerHTML = '<option value="">All</option>' + sports.map((s) => `<option>${esc(s)}</option>`).join('');
+
+  let view = [], cur = -1, chart = null;
+  function apply() {
+    const b = $('fBot').value, m = $('fMoney').value, s = $('fSport').value, r = $('fRes').value, q = $('fText').value.trim().toLowerCase();
+    view = T.filter((t) => (!b || t.bot === b) && (!m || (m === 'real') === t.real) && (!s || t.sport === s)
+      && (!r || (r === 'open' ? t.open : !t.open && (r === 'won' ? (t.pnl || 0) > 0 : (t.pnl || 0) <= 0)))
+      && (!q || ('#' + t.id).includes(q) || String(t.id) === q || `${t.home} ${t.away} ${t.league || ''}`.toLowerCase().includes(q)))
+      .sort((a, z) => z.buy_ms - a.buy_ms);
+    $('count').textContent = `${view.length} shown`;
+    $('empty').hidden = view.length > 0;
+    $('rows').innerHTML = view.map((t, i) => `<tr data-i="${i}">
+      <td>${t.id}</td><td>${when(t.buy_ms)}</td><td>${esc(botShort[t.bot] || t.bot)}</td>
+      <td>${t.real ? '<span class="realtag">Real</span>' + (t.counts_in_real_results ? '' : ' <span class="muted">(19 Nov)</span>') : '<span class="muted">Paper</span>'}</td>
+      <td>${esc(t.sport)}</td><td class="game" title="${esc(t.home)} v ${esc(t.away)}">${esc(t.home)} v ${esc(t.away)}</td><td>${sideLabel(t)}</td>
+      <td class="num">${cents(t.buy_price)}</td><td class="num">${cents(t.sell_price)}</td>
+      <td class="num ${cls(t.pnl)}">${t.open ? '<span class="muted">open</span>' : money(t.pnl)}</td><td>${esc(why[t.reason] || t.reason || '')}</td></tr>`).join('');
+    const keep = cur >= 0 && view.indexOf(T[cur]) >= 0 ? view.indexOf(T[cur]) : -1;
+    if (keep >= 0) mark(keep); else { $('detail').hidden = true; cur = -1; }
+  }
+  ['fBot', 'fMoney', 'fSport', 'fRes'].forEach((id) => $(id).addEventListener('change', apply));
+  $('fText').addEventListener('input', apply);
+  $('rows').addEventListener('click', (e) => { const tr = e.target.closest('tr'); if (tr) open(+tr.dataset.i, true); });
+
+  function mark(i) {
+    document.querySelectorAll('#rows tr.sel').forEach((x) => x.classList.remove('sel'));
+    const tr = document.querySelector(`#rows tr[data-i="${i}"]`);
+    if (tr) { tr.classList.add('sel'); tr.scrollIntoView({ block: 'nearest' }); }
+  }
+
+  function drawChart(cfg) {
+    const msg = $('chartMsg');
+    if (chart) { chart.destroy(); chart = null; }
+    if (!cfg) { msg.hidden = false; msg.textContent = 'The bot could not draw a chart for this trade. Its prices are still in the tables below and in the data.'; return; }
+    if (!window.Chart) { msg.hidden = false; msg.textContent = 'Charts need Chart.js from cdnjs.cloudflare.com, which did not load (no internet?). All the prices are still in the tables and in the data.'; return; }
+    msg.hidden = true;
+    const c = JSON.parse(JSON.stringify(cfg));
+    // Same decoding as the bot's chart snippets: [label, repeats] pairs, {k: level} and {s: [[i, x]]} datasets, "HH:MM~n" positions.
+    if (c.data.labels.length && Array.isArray(c.data.labels[0])) {
+      const lb = []; for (const [k, r] of c.data.labels) for (let i = 0; i < r; i++) lb.push(k + '\u200b'.repeat(i)); c.data.labels = lb;
+    }
+    const N = c.data.labels.length;
+    for (const d of c.data.datasets) {
+      const v = d.data;
+      if (!Array.isArray(v)) { const a = new Array(N).fill(null); if ('k' in v) a.fill(v.k); else for (const [i, x] of v.s) a[i] = x; d.data = a; }
+      else while (v.length < N) v.push(null);
+    }
+    const fix = (x) => { if (typeof x !== 'string') return x; const m = x.match(/^(\d\d:\d\d)~(\d+)$/); return m ? m[1] + '\u200b'.repeat(+m[2]) : x; };
+    for (const a of ((c.options.annotation || {}).annotations || [])) for (const k of ['value', 'xMin', 'xMax']) if (k in a) a[k] = fix(a[k]);
+    c.options.responsive = true; c.options.maintainAspectRatio = false; c.options.animation = false;
+    Chart.defaults.global.animation = false;
+    chart = new Chart($('cv'), c);
+  }
+
+  function open(i, fromClick) {
+    if (i < 0 || i >= view.length) return;
+    const t = view[i]; cur = T.indexOf(t); mark(i);
+    $('detail').hidden = false;
+    $('dTitle').innerHTML = `#${t.id} · ${esc(t.home)} v ${esc(t.away)} <span class="muted">· ${esc(t.sport)}${t.league ? ' · ' + esc(t.league) : ''}</span>`;
+    const hold = t.sell_ms ? Math.round((t.sell_ms - t.buy_ms) / 60000) : null;
+    const f = [
+      ['Bot', `${esc(botShort[t.bot] || t.bot)} · ${t.real ? '<span class="realtag">real money</span>' + (t.counts_in_real_results ? '' : ' (19 Nov, left out of results)') : 'paper'}`],
+      ['Side bought', sideLabel(t) + ` <span class="muted">(${t.token === 'no' ? 'the No token of ' : ''}${esc(t.outcome)})</span>`],
+      ['Bought', `${cents(t.buy_price)} at ${when(t.buy_ms, true)}`],
+      ['Sold', t.sell_ms ? `${cents(t.sell_price)} at ${when(t.sell_ms, true)}${hold != null ? ` <span class="muted">(${hold} min later)</span>` : ''}` : '<span class="muted">still open</span>'],
+      ['Shares · cost', `${t.shares != null ? (+t.shares).toFixed(2) : ''} · $${(t.cost || 0).toFixed(2)}`],
+      ['Result', t.open ? '<span class="muted">open</span>' : `<span class="${cls(t.pnl)}">${money(t.pnl)}</span> · ${esc(why[t.reason] || t.reason || '')}`],
+    ];
+    if (t.trigger) f.push(['Trigger', `${esc(t.trigger)} moved${t.move_ms ? ' at ' + when(t.move_ms, true) : ''}`]);
+    if (t.start_ms) f.push(['Game start', when(t.start_ms)]);
+    $('dFacts').innerHTML = f.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
+    drawChart(t.chart);
+
+    // prices at the buy and the sale
+    const pa = t.polymarket_at || {}, ba = t.bookmakers_at || {};
+    const pc = (x) => (x == null ? '<span class="muted">–</span>' : (100 * x).toFixed(1) + '¢');
+    let h = `<thead><tr><th>Where</th><th class="num">At the buy</th><th class="num">At the sale</th><th class="num">Change</th></tr></thead><tbody>`;
+    const pmRow = (lab, k) => {
+      const a = pa.buy && pa.buy[k], z = pa.sell && pa.sell[k];
+      const ch = a != null && z != null ? (100 * (z - a)).toFixed(1) : '';
+      return `<tr><td>Polymarket, ${lab}</td><td class="num">${pc(a)}</td><td class="num">${pc(z)}</td><td class="num ${cls(+ch)}">${ch ? (ch > 0 ? '+' : '') + ch : ''}</td></tr>`;
+    };
+    h += pmRow('sell at (bid)', 'bid') + pmRow('buy at (ask)', 'ask');
+    const names = [...new Set([...Object.keys(ba.buy || {}), ...Object.keys(ba.sell || {})])].sort();
+    for (const b of names) {
+      const a = (ba.buy || {})[b], z = (ba.sell || {})[b];
+      const ia = a && a.implied, iz = z && z.implied;
+      const ch = ia != null && iz != null ? (100 * (iz - ia)).toFixed(1) : '';
+      const odds = (x) => (x && x.odds ? ` <span class="muted">(${(+x.odds).toFixed(2)}${t.token === 'no' ? ' on ' + esc(t.side_name) : ''})</span>` : '');
+      h += `<tr><td>${b === t.trigger ? '★ ' : ''}${esc(b)}</td><td class="num">${pc(ia)}${odds(a)}</td><td class="num">${pc(iz)}${odds(z)}</td><td class="num ${cls(+ch)}">${ch ? (ch > 0 ? '+' : '') + ch : ''}</td></tr>`;
+    }
+    if (!names.length) h += `<tr><td colspan="4" class="muted">No bookmaker prices recorded for this game's winner market.</td></tr>`;
+    $('dBooks').innerHTML = h + '</tbody>';
+    $('dRec').textContent = JSON.stringify(t.record, null, 2);
+    if (fromClick) $('detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  const step = (d) => { const i = view.indexOf(T[cur]); if (i >= 0) open(Math.min(view.length - 1, Math.max(0, i + d)), false); };
+  $('prev').addEventListener('click', () => step(-1));
+  $('next').addEventListener('click', () => step(1));
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, select') || cur < 0) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+  });
+
+  function save(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  $('dlAll').addEventListener('click', () => save('swifteye_trades.json', raw));
+  $('dlOne').addEventListener('click', () => { const t = T[cur]; if (t) save(`swifteye_trade_${t.id}.json`, JSON.stringify(t, null, 1)); });
+
+  apply();
+  if (view.length) open(0, false);
+})();
+</script>
+</body>
+</html>
