@@ -127,7 +127,7 @@ where the source has a stamp.
 - **SportyBet**: `/api/ng/factsCenter/liveOrPrematchEvents?sportId=sr:sport:1&marketId=1,18,16,29`. Sportradar market/outcome ids. `lastOddsChangeTime` in ms.
 - **betPawa**: `/api/sportsbook/v4/events/lists/by-queries?q=<json>`. Needs header `x-pawa-brand: betpawa-nigeria`. Market 3743 = 1X2. Sportradar id in `widgets`.
 - **Betika**: `live.betika.com/v1/uo/matches?sport=14`. Times are UTC+3. `parent_match_id` = Sportradar id.
-- **Linebet** (1xBet platform): `/service-api/LiveFeed/Get1x2_VZip?sports=1&count=500&mode=4...`. T 1/2/3 = 1X2, 7/8 = handicap, 9/10 = total, 180/181 = BTTS, `B` = blocked. Lists simulated leagues ("Short Football 3x3", "MLS+", "4x4"), which `is_esoccer` filters out.
+- **Linebet** (1xBet platform): `/service-api/LiveFeed/Get1x2_VZip?sports=1&count=500&mode=4...`. T 1/2/3 = 1X2, 7/8 = handicap, 9/10 = total, 180/181 = BTTS, `B` = blocked. Lists simulated leagues ("Short Football 3x3", "MLS+", "4x4"), which `is_esoccer` filters out. LiveFeed returns at most 200 games per request whatever `count` says, so live is asked in groups (`live_groups`); `champs=<league id>[,..]` filters by league (1-3 ids worked, 5+ answered 406).
 - **Fonbet**: website is Cloudflare-challenged, but the line CDN `line52w.bk6bba-resources.com/events/list?version=N` is open. Deltas by `packetVersion`, full refresh every 30 s. Factors: 921/922/923 = 1X2, 930/931 = total, 927/928 = handicap.
 - **VINN**: Altenar `sb2frontend-altenar2.biahosted.com/api/widget/GetLiveEvents?integration=vinn&sportId=66`.
 - **HKJC** (`books/hkjc.rs`, record-only): GraphQL GET `info.cld.hkjc.com/graphql/base-get/` with the
@@ -150,6 +150,14 @@ where the source has a stamp.
    - Not traced yet: Favbet, STS, Norsk Tipping, 1Win, 20Bet, GGBET, Betway, thunderpick.
    - Other Kambi/Altenar brands are one-line additions in `start_books`.
 3. Kambi push feed instead of 1 s polling. Polymarket totals/handicap markets.
+4. LONG-TERM (owner, 23 Nov 2026): DIRECTION FROM WAVE TIMING. "Direction is the gap: nothing we have says which way
+   well enough. If we can predict how long a wave lasts, say 30 s, then we can tell which direction a wave will go:
+   at 30 s into an up wave, the next one goes down more often than up." Pilot: `tools/signals/pilot_wavedir.py`
+   (do waves alternate; fading exactly at the peak as the ceiling; light models "has it peaked" / "fading beats
+   following"). Results in section 8h.
+5. LONG-TERM (owner, 23 Nov 2026): A WINNER MODEL with its own view of where the match is headed (live score, the
+   teams' record, the suspicious-match signals), bets held to the result. Pilot: `tools/signals/pilot_winner.py`,
+   `value.py`. Results in section 8h.
 
 To add a book: create `src/books/x.rs` implementing `Book` (return the full live
 list as `EventIn`s with normalized `QuoteIn`s), add `pub mod x;` to
@@ -221,8 +229,14 @@ BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet and Shuffle come from `
 - The script's lines "<book> poll fail: ..." become that book's poll errors on the Feeds page.
   It posts nothing when a list is empty, so a book with no live games shows its last poll time.
 - All seven are RECORD_ONLY. Not used: Gamdom and CSGORoll (no sports section).
+- Since 23 Nov the five Betby brands are read by the Rust Betby collector on every machine (main.rs
+  Betby list, live every 3 s, pre-match every 5 min, every sport, the whole board) and `/ingest`
+  ignores what the script posts for them (`browser::READ_BY_RUST`). The script stays as written; on
+  the Mac only Cloudbet and Shuffle need it. Same games and event ids as Duel; on 23 Nov 09:40 a
+  third to two thirds of their winner prices equalled Duel's, the rest differed (margins, timing).
+  `snipe::platform` groups them with Duel.
 - Config: `[browser_books] enabled / dir / python`; per book `[books.bcgame] enabled / paused`.
-  The Mac has no `.venv` with camoufox yet, so these books are off there (one warning at start).
+  The Mac has no `.venv` with camoufox, so Cloudbet and Shuffle are off there (one warning at start).
 
 ## 8e. Trade review (2026-11-23)
 
@@ -787,6 +801,191 @@ Tool: `tools/waves/` (`waves.py` library, `run.py`, `test_waves.py` synthetic ca
   First fit: too optimistic (trades it rates >= 0c realize about -2c); down at ev >= +1.5c made +1.1c over 58
   test trades (12 a day); up loses at every threshold. Old bots in the export: ~41 trades a day (favs 18.5,
   snipe 15, snipe-1book 4, snipe-trial 3).
+
+## 8h. Night of 23-24 Nov 2026 (Mac): every taker idea fails; the venue pays the resting side; liquidity rewards
+
+Full log with every number: `~/Documents/dev/SWIFTEYE-NIGHT-LOG.md`. Data: `~/swifteye/research/lab` (lab files, paths),
+`~/swifteye/research/rewards`. Python: `~/swifteye/venv-lab/bin/python` (torch on the CPU: macOS 13 has no MPS).
+
+TWO TRAPS found on the way (apply to every earlier result in 8g that reads `pm_quotes` through Python):
+- HOLES. A game's recorded Polymarket book can freeze for minutes or hours while it trades on (game 42521: bid 29 /
+  ask 35 from minute 17 to the end, real trades 37c -> 100c). `tools/signals/paths.py` writes per-second files with
+  `age` (seconds since the game's newest Polymarket row) and `late`; `paths.book()` gives fresh-only marks and
+  `paths.row_quality()` flags lab rows. Rule: decide, count and value only where age <= 15 s (feed <= 1 s late).
+  Half of the "CS2 bookmakers lead" result was holes. The lab's money labels were NOT re-run with this rule.
+- PRINTS. A trade seen as "pm_quotes.last changed" is a biased sample (repeats at one price = the sweeps are
+  missing): it showed the resting side keeping +0.51c a share; Polymarket's full public trade record with sizes
+  (`prints_fetch.py`, Data API /v2/trades) shows 0.00c a trade, -0.35c a share.
+
+RESULTS (3,493 games, 17-23 Nov; ranges by game are in the log):
+- Value (`value.py`): who was right about the WINNER when Polymarket and the bookmakers' level disagree. beta (share of
+  a gap that was real) -0.13; calm gaps of 3+ pt -0.05. Polymarket's price is the better forecast in every sport
+  (CS2 +0.26 at 10 min on live rows only, 99 games). Bet toward the bookmakers, held to the result: -$2.70 per $100.
+- Winner model (`pilot_winner.py`: trees starting from the market price; bookmakers, live score, record, suspicious
+  flags): log-loss worse than the bare price (-3.5 x1000); bets on its disagreements -$8.70 per $100.
+- Wave direction (`pilot_wavedir.py`): waves alternate (65%; small 84%, big 33%); fading at the TRUE peak is right 56%
+  and makes -$7.70 per $100; "fading beats following" model right 88% on its top picks and loses even when right.
+- Live score as a head start (`scorelead.py`): our score feed is behind Polymarket everywhere; a CS2 round = 1.3c.
+- Model lab (`lab.py test`, 85 min on the Mac's CPU): wave start 0.801 / 0.779, next wave 0.774, wave length 34 s v
+  51 s, superline right 0.714, high wave 0.780. Picks: wave start top 1% -$15.69 per $100 (loses even when right),
+  high wave top 3% needs 79% right, has 62%. COMBINED model -$3.25 per $100 (2,082 trades), the same without the
+  other models' calls (-$3.24); no model -$11.86. Nothing is above zero as a buy-and-sell trade.
+- Same bet, two prices (`identity.py`): esports side markets that are the same event (after map 1 of a best-of-3,
+  "over 2.5 maps" = "the map-1 loser wins map 2"; "leader -1.5" = "leader wins map 2"): 21 episodes of 1c+ locked
+  after fees in 2.5 days with strict freshness, $16-32 on a $100 cap. Real, tiny.
+- Resting orders (`rspread.py`, `makersim.py`, `makersim2.py` on real trades): all the resting side's profit is queue
+  position (a level that survives the print keeps +0.67c, one that is taken out loses -0.85c). True realized spread:
+  <=1c spreads -0.20c a trade, 3-4c +0.55, 5c+ +1.28. Our order one cent inside a 5c+ spread: +0.5c a share at 2 s
+  reaction, negative at 3 s. Orders resting away from the price: negative.
+
+POLYMARKET FACTS (docs.polymarket.com, read 24 Nov): makers never pay a fee; sports taker fee 0.05 x p(1-p); marketable
+orders on sports markets wait in a delay window and cannot be cancelled meanwhile (Gamma `secondsDelay` = 1 on our
+games), resting orders can always be pulled; post-only orders; smallest order 5 shares. So the venue charges and
+delays exactly what the snipe bot does.
+
+LIQUIDITY REWARDS (the one positive lead; NOT verified by our own orders):
+- Public list `clob.polymarket.com/rewards/markets/multi`: 8,359 markets with a daily pot, $144.7k a day in all;
+  minimum size 20 shares in most; each minute an order scores ((v - s) / v)^2 x shares (v = the market's max
+  distance from the midpoint, s = its own), a maker's score is its smaller side (one side alone / 3), the day's pot is
+  shared by score over the minutes in which anyone qualified. Public per-wallet record: Data API `/v2/user-pnl`
+  (trading result, reward income, maker rebates by day), `/v2/activity`.
+- Real wallets (`tools/rewards/farmers.py`): 536 wallets that rested orders in small reward markets in late October,
+  followed 1-23 Nov: 52% in profit, median +$16; rewards $1.32M, trading -$5.73M. For reward farmers trading losses
+  run at 92-99% of rewards. Volume $20k-200k: 56% in profit, median +$229. Small quiet farmers (62): rewards $17.0k,
+  trading -$9.9k, half in profit. A few bots keep 20-40% (0x9efda3d6: rewards $123k, trading -$76k, +$52k in 23 days,
+  up 22 of 24): the minimum size in thousands of tiny pots, merging at once (`bots.py`).
+- Cost of a resting fill, from those bots' own fills (`markouts.py`, 2,460): +0.8c after 5 min, -1.4c after 1 h,
+  -2.4c at the end = about -$0.50 per 20-share fill (-$1.27 in low-competition markets with a bigger pot).
+- Night rule (02:30): pot $5+ a day, min size <= 50, 24-hour volume under $300, 3+ days to the end, a real two-sided
+  book (< 20c wide, 5-95c), others' qualifying score <= 20; the minimum size on both sides. **Corrected in the
+  morning (24 Nov 06:00), three things:**
+  1. Others' score is NOT min(Q bids, Q asks). With the price in 10-90c a one-sided maker still scores a third of
+     his side: others hold between max/3 and (2 min + max)/3; outside 10-90c between 0 and min. Use the high bound.
+  2. Our order's score must use its real cent price (rounding can cut the score 4x at the edge of the limit).
+  3. The "+$6.81 a market-day" week-of-history number is VOID as a reward estimate: it assumed last night's empty
+     books for the whole week. 99 of the 102 picks had a pot dated 23 Nov and 72 were markets created that day.
+     Only its fill rate / fill cost stand (0.5-0.8 fills a day, a fill -$0.2..-$0.5, worst -$8; `hist_cost.py`).
+- What the rule really finds: BRAND-NEW markets the bots have not reached. They arrive within hours: the minimum
+  order's share of the pot goes 26% (first hour) -> 15% (hours 2-5); others' median score 7 -> 36. For ALL quiet
+  long-dated reward markets by age the minimum order earns $0.1-2.3 a market-day, against 0.5-2 fills a day at
+  $0.5-1.3 each: break-even, as the real wallets showed. So: placing by hand once a day is NOT a profit.
+- What is left (unproven): a scanner bot that rests the minimum pair where nobody qualifies yet and leaves when
+  others arrive. Forward check with exact prices, 5.1 h, rule at the first pass (`forward3.py`): pot share
+  $4.56-14.16 a market-day by distance (edge ... 1c), 2.1-4.0 fills a day, net +$1.87..+$9.07 at $1.27 a fill.
+  Paper bot on the same hours (`paperbot.py --prefix rec1`): profit only if filled shares are HELD (+$5..+$12 a
+  slot-day); selling them at the bid of an empty book loses everything (one fill: bought at 77c, bid 6c, -$14).
+  Fills cluster right after a market starts to look empty (waiting 50 minutes before entering: almost no fills).
+- Checks that passed: the Yes book is the exact mirror of the No book (so /book shows both sides); Polymarket's own
+  `market_competitiveness` agrees with the book score (rank correlation +0.92; scale ~8% of ours); re-set interval
+  hardly matters; `POST clob.polymarket.com/books` returns 200 books in 0.2 s.
+- Running since 24 Nov 05:51 (`tools/rewards/rec2.py`, 48 h): ~1,540 quiet reward markets every 2 minutes, the
+  reward list re-read every 30 minutes (new markets enter). `paperbot.py` trades on it on paper; `pick.py` lists
+  the best markets of the moment from it (stale within hours).
+- Weak points: fill cost has a fat tail and too few fills seen (16-28); filled shares in an empty book cannot be
+  sold at a fair price; the mid of an empty book is not a price; the payout itself (a tiny order alone taking most
+  of a pot) is only the published formula, never seen paid to us; capacity is ~100 markets and a few hundred $ a
+  day in all, shared with every other scanner; pots and rules change daily.
+
+## 8i. Order desk (2026-11-24): bets at any book through one call
+
+Owner: "Set up an integration to be able to place orders on the different websites through an api / bot. I will then
+later wire it myself to be able to work on the website (you dont need to bypass cloudflare)." Full description:
+`docs/DESK.md`. Read it before touching `src/desk.rs`.
+
+- `src/desk.rs`: tickets of legs ("back this outcome at this book for at least these odds with this stake"), placed
+  one at a time in the order given. Polymarket legs: Swifteye itself (`exec::pm_order`, FAK at the price that keeps
+  `min_odds` after the fee). Every other book: a DRIVER, the owner's own program where he is signed in; it pulls work
+  (`GET /desk/next`, long poll) and answers (`POST /desk/result`). Swifteye never signs in to a bookmaker here and
+  does nothing about a site's bot checks.
+- Modes: `paper` (default; fills at the recorded price / the Polymarket book), `dry` (drivers read the bet slip and
+  report its odds and limit, nothing confirmed), `real`.
+- Real needs ALL of: desk `real`, the book's `real`, stake <= the book's `max_stake`, the book's 24-hour `daily_cap`,
+  the bots' kill switch off. Switching real on or raising a limit needs `"confirm": "REAL MONEY"`. Agents never send
+  that to the owner's desk: arming is the owner's (same rule as the Bots page).
+- Every changing call and `/desk/next` need `X-Desk-Key` (made on first start, in `<db dir>/desk.json`, private like
+  telegram.json; never shown by the API). Without it a web page in the same browser could queue a bet via localhost.
+- Invariants (tested): an order is handed out ONCE, ever; a driver that goes silent leaves the leg `unknown` and the
+  ticket `check`, never a re-send; a failed later leg after a placed one = `exposed` (+ Telegram for real); later legs
+  are re-sized to what leg 1 really got; a restart cancels untaken legs and marks held ones `unknown`.
+- Files next to the database: `desk.json` (settings + key), `desk_tickets.jsonl` (every state of every ticket; last
+  line of an id wins). No SQLite table on purpose (the writer's lock, 21 Nov). Real Polymarket orders also go to
+  `bot_orders` as bot `desk`.
+- `oddsfeed desk-sandbox [port] [folder]`: the desk alone with two pretend bookmakers (`alpha`, `beta` with swapped
+  teams) and a pretend Polymarket book; no feed, no database, no account; a real Polymarket leg is refused there.
+  `tools/desk/driver.py` (`--mock` = a pretend bookmaker; else three methods to write per site).
+- Tested 24 Nov on the Mac: 12 tests (`cargo test desk::`, one runs the live desk in-process against a real engine),
+  and the sandbox over HTTP with the Python mock driver (paper, dry, real, expiry, limits, key, a refused browser
+  preflight). NOT tested: a real Polymarket order through the desk, any real bookmaker site (no site driver exists).
+- BOOKMAKER LOGINS (same day; owner: "Set up a sign-in system using email and password that i input for them but make
+  sure the bots can use my account"): the owner types them on the Order desk page (`web/desk.js`, `#/desk`), they live
+  in `<db dir>/desk_accounts.json` (mode 600; never committed, never shown again, the login shown cut short). Saving is
+  allowed from the app's own page on this machine (Origin = the local host it was sent to) or with the desk key. The
+  ONLY reader of a password is a driver: `GET /desk/account?book=` + key; it reports `POST /desk/account/state`
+  (`signed_in`, `signed_out`, `refused`, `needs_owner`). After `refused` / `needs_owner`, or 3 hand-outs with no
+  `signed_in`, the login is held back until the owner saves again (or signs in by hand and the driver says so); dry
+  and real tickets for that book are refused; one Telegram message. Swifteye never signs in to a bookmaker itself, and
+  nothing here answers a captcha or a code. Agents never type the owner's passwords (tests use made-up values in the
+  sandbox). `tools/desk/driver.py`: `Site.signed_in()` / `Site.sign_in()` / `NeedsOwner`.
+- Not built: handing in tickets or changing limits from the page, Kalshi legs, Polymarket markets other than the
+  winner, maker orders, anything that decides what to bet. `POST /desk/from_arb` turns a tracker row into a ticket, but tracker rows are unchecked against bet
+  slips (8h, "arbitrage"): run them `dry` first.
+
+## 8j. Kalshi feed rebuilt (2026-11-24): why it went silent, what changed, how to check it
+
+Owner: "And fix the kalshi feed". Code: the socket part of `src/books/kalshi.rs`; `GET /kalshi/feed`;
+`oddsfeed kalshi-probe <minutes> <out folder> <folder holding kalshi.json>` (the Kalshi feed alone: no other feed, no
+database, no bot, no order); `tools/kalshi_feed_check.py <out folder>` (holds a probe's recording against Kalshi's
+public trades).
+
+- ROOT CAUSES, from the Mac's own log (`~/swifteye/logs/oddsfeed.log`, 18-22 Nov) and Kalshi's WebSocket documentation:
+  1. A FALSE "sequence gap". Kalshi numbers every message of a connection's order-book stream: snapshots, changes AND
+     its "ok" reply to a command on that stream (a repeated `subscribe` that adds contracts). The feed counted only
+     snapshots and changes, so an "ok" followed by a change looked like a lost message, and the connection was dropped.
+     Log: 1,545 such drops in 4.9 days; exactly one number skipped in 1,446 of them (two in the other 99); 63% within
+     15 s of connecting (median 1 s: the second subscribe command's "ok"). A busy market only raises the odds that a
+     change, not a snapshot, follows the "ok": it was never about price jumps.
+  2. The wait before reconnecting doubled on every drop and NEVER came back down (a session only ever ended with an
+     error): 60 s in 1,318 of the 1,545 drops = 22.6 hours spent waiting to reconnect. This is "the whole Kalshi feed
+     silent 21.2 h of 59.3 h" (8g).
+  3. During a drop the old order books stayed in memory, on record and in the arbitrage's ladders as if current.
+  4. The socket was read on the shared runtime, behind every other feed and the bots, and rows were stamped when
+     processed, not when received.
+- WHAT CHANGED: its own thread and runtime; everything waiting is read before anything is published (one publish per
+  contract per batch); every numbered message of the book stream is counted; a real lost message empties EVERY book
+  and asks for fresh snapshots on the same connection (`update_subscription` / `get_snapshot`), reconnecting only if
+  under 80% are back in 20 s; a book is read (best prices, depth, ladder) only while IN STEP, and a dropped connection
+  empties all of them (rows are written with `book_bid` / `book_ask` NULL at that moment); a book that names other
+  best prices than Kalshi's ticker for 10 s gets a fresh snapshot (at most every 5 min per contract); the reconnect
+  wait is 1 s after a connection that lived a minute, doubling to 30 s only for failures in a row; finished games
+  are forgotten from the subscription list.
+- DATA: `kalshi_quotes.ts_ms` is now the time the message was taken off the socket. New column `book_ts_ms` =
+  Kalshi's own time of the order-book change behind `book_bid` / `book_ask` (their delay = `ts_ms - book_ts_ms` on
+  rows written by a book change). `bid` / `ask` are still Kalshi's `ticker` channel, which Kalshi sends once a second
+  by design (so up to ~1 s behind the book): NOT changed, the engine's Kalshi price and the bots' inputs are the same
+  source as before. `GET /kalshi/feed`: books in step, lost messages, reconnects, delay behind Kalshi's clock.
+- DISCOVERY (found by the live check, same day): a series that could not be read in a round (Kalshi answered "too many
+  requests": 8 requests at a time was over its limit) was skipped, and its games fell out of the window until a later
+  round got through. The game list swung 86 -> 121 -> 88 -> 240 -> 200 -> 76 in ten minutes, and a contract whose game
+  had fallen off was not recorded although the socket still carried it (2-minute holes in single contracts). Now: such
+  a series keeps its games, 4 requests at a time with a pause after a refusal, and the contract -> game table is only
+  ever added to. After: 231 -> 276 -> 278 -> 277.
+- NOT changed: which price feeds the engine and the bots; the REST re-seed.
+- VERIFIED 24 Nov on the Mac with the feed ALONE (`kalshi-probe`, debug build; 8.7 min, 566 contracts, 750,349
+  messages = 1,400 a second): 0 lost messages, 0 reconnects; messages arrive a median 41 ms after Kalshi sent them
+  (99 in 100 under 54 ms); longest silence 1.4 s; contracts were added mid-run (the case that used to drop the
+  connection) with nothing lost. Against Kalshi's public trades in the 80 busiest contracts (1,809 trades, sweeps
+  counted once): our book's best price just before the trade WAS the traded price in 99.4% (Kalshi's clock), and it
+  was what we were showing at the trade's own moment in 93.0% (our clock; the rest moved in the last tens of ms).
+  The first run, before the discovery fix, scored 84.9% / 73.8%: every miss was a contract whose game had fallen off
+  the list. An earlier run also showed the in-place re-sync working (238 books back in step within seconds) and one
+  "connection reset by peer" after 10 min, back in 1 s. On 23 Nov the old feed scored 1% at busy moments.
+- NOT verified: inside the full collector (Kalshi is paused on the PC; nothing here ran with the other feeds and the
+  bots beside it), a release build, a busy US evening, a truly lost message (only the false one, which exercised the
+  same recovery). The trade check must use the one-contract floor (crumbs of 0.01-0.5 contracts sit in front of real
+  prices) and remember that Kalshi stamps a trade's book change a few ms BEFORE the trade.
+- Every conclusion drawn from our Kalshi RECORDING before this (8g: "Polymarket leads Kalshi", feed holes, the paper
+  arbitrages of 18 Nov, the Kalshi-lag locks) was measured on the broken feed and must be measured again before it is
+  used. What Kalshi's own public trades showed (real gaps are swept in milliseconds) does not depend on our feed.
 
 ## 9. Hard rules
 

@@ -230,6 +230,9 @@ pub fn open(path: &Path) -> Result<Connection> {
     for col in ["book_bid", "book_ask"] {
         let _ = c.execute(&format!("ALTER TABLE kalshi_quotes ADD COLUMN {col} REAL"), []);
     }
+    // Kalshi's own time of the order-book change behind those two (24 Nov 2026), so the delay of
+    // the recording can be read off the table itself.
+    let _ = c.execute("ALTER TABLE kalshi_quotes ADD COLUMN book_ts_ms INTEGER", []);
     Ok(c)
 }
 
@@ -428,7 +431,7 @@ fn flush(c: &mut Connection, buf: &mut Vec<Write>) -> Result<()> {
         )?;
         let mut ins_score = tx.prepare_cached("INSERT INTO book_scores(ts_ms,book,book_event_id,score,detail,clock) VALUES(?1,?2,?3,?4,?5,?6)")?;
         let mut ins_k = tx.prepare_cached(
-            "INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est,bid_size,ask_size,bid_depth,ask_depth,book_bid,book_ask) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            "INSERT INTO kalshi_quotes(ts_ms,server_ts_ms,event,outcome,bid,ask,est,bid_size,ask_size,bid_depth,ask_depth,book_bid,book_ask,book_ts_ms) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         )?;
         for w in buf.drain(..) {
             match w {
@@ -459,8 +462,8 @@ fn flush(c: &mut Connection, buf: &mut Vec<Write>) -> Result<()> {
                 Write::BookScore { ts_ms, book, book_event_id, score, detail, clock } => {
                     ins_score.execute(params![ts_ms, book, book_event_id, score, detail, clock])?;
                 }
-                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est, depth: d, book } => {
-                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth, book.0, book.1])?;
+                Write::KQuote { ts_ms, server_ts_ms, event, outcome, bid, ask, est, depth: d, book, book_ts } => {
+                    ins_k.execute(params![ts_ms, server_ts_ms, event, outcome.as_str(), bid, ask, est as i64, d.bid_size, d.ask_size, d.bid_depth, d.ask_depth, book.0, book.1, book_ts])?;
                 }
                 Write::Change(ch) => {
                     ins_change.execute(params![

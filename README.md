@@ -78,14 +78,14 @@ The **Changelog** page lists what changed and when. Add an entry at the top of
 | Kambi | Unibet, LeoVegas, Paf |
 | Fonbet platform | Fonbet, PARI, Mostbet |
 | Altenar | VINN, BetKing |
-| Betby | Duel; BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire (through `browser_books.py`) |
+| Betby | Duel, BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire |
 | Own feeds | Pinnacle, Marathonbet, Leon, Olimpbet, Betcity, M88, Thunderpick, SportyBet, betPawa, Betika |
 | Headless browser (`browser_books.py`) | Cloudbet (its sports API, fetched inside the page), Shuffle (the rendered live page) |
 
 Every adapter reads the same public JSON the bookmaker's own live page loads. Nothing logs in,
 solves challenges or works around blocks. `browser_books.py` (started and kept running by the
-collector, posting to `POST /ingest`) covers the seven crypto books above; it needs the repo's
-`.venv` with `requests` and `camoufox`, and they are recorded only until their timing is tested. `docs/BOOKMAKERS.md` has the details per feed,
+collector, posting to `POST /ingest`) covers Cloudbet and Shuffle; it needs the repo's
+`.venv` with `requests` and `camoufox`. The crypto books are recorded only until their timing is tested. `docs/BOOKMAKERS.md` has the details per feed,
 including the ones that are blocked.
 
 Feeds that share one trading desk count as one group when the bot asks "how many bookmakers moved".
@@ -203,6 +203,7 @@ The **API** page in the app lists every endpoint. The most used:
 | `GET /review/labels` | Every Trade review mark (also `trade_labels.json` next to the database) |
 | `POST /review/import` | Import a trades export (HTML page or JSON body) for grading |
 | `GET /review/wave_scores` | The latest `tools/waves/run.py` scores per line, or null |
+| `GET /desk`, `POST /desk/tickets` | The order desk: place a bet at any bookmaker or on Polymarket through one call (paper by default). See `docs/DESK.md` |
 
 ```bash
 curl "localhost:8787/matches?min_books=3"
@@ -226,6 +227,7 @@ src/snipebot.rs       the live snipe bot: trigger, measure, rules, buy, sell
 src/adaptive.rs       the replay and the rule picker
 src/bots.rs           wallets, settings, real runs and their safety stops
 src/exec.rs           Polymarket and Kalshi orders
+src/desk.rs           the order desk: tickets, bookmaker drivers' queue, Polymarket legs (docs/DESK.md)
 src/arb*.rs           arbitrage scout, paper arbitrage and its backtest
 src/suspect.rs        suspicious games
 src/telegram.rs       the Telegram bot and its charts

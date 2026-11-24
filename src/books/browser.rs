@@ -1,7 +1,8 @@
-//! Books collected by `browser_books.py` (repo root) instead of a Rust poll loop: BC.Game, Rollbit,
-//! Rainbet, CSGO500 and CSGOEmpire through their Betby (`sptpub.com`) brand feeds, Cloudbet through
+//! Books collected by `browser_books.py` (repo root) instead of a Rust poll loop: Cloudbet through
 //! its own sports API fetched inside a headless browser page, Shuffle by reading its rendered live
-//! page. The script is used as written; oddsfeed starts it, keeps it running, and takes what it
+//! page. The script also reads BC.Game, Rollbit, Rainbet, CSGO500 and CSGOEmpire (Betby feeds); since
+//! 23 Nov the Rust Betby collector reads those on every machine and `/ingest` ignores them
+//! (`READ_BY_RUST`). The script is used as written; oddsfeed starts it, keeps it running, and takes what it
 //! POSTs to `/ingest` through the same filters and engine as every other book.
 //!
 //! What the script sends, and what is fixed on the way in (see `normalize`):
@@ -27,14 +28,14 @@ use std::time::{Duration, Instant};
 
 /// (name, what the script does for it, its poll interval in ms).
 pub const BOOKS: &[(&str, &str, u64)] = &[
-    ("bcgame", "Betby feed api-k-c7818b61-623.sptpub.com brand 2103509236163162112", 5_000),
-    ("rollbit", "Betby feed api-a-c7818b61-600.sptpub.com brand 2103518166582956032", 5_000),
-    ("rainbet", "Betby feed api-a-c7818b61-600.sptpub.com brand 2374656571012681728", 5_000),
-    ("csgo500", "Betby feed api-h-c7818b61-608.sptpub.com brand 2195256717934206976", 5_000),
-    ("csgoempire", "Betby feed api-h-c7818b61-608.sptpub.com brand 2432911154364948480", 5_000),
     ("cloudbet", "Cloudbet sports-api v6, fetched inside a headless browser page", 5_000),
     ("shuffle", "Shuffle live page, rendered in a headless browser and read every 60 s", 60_000),
 ];
+
+/// The script's five Betby brands are read by the Rust Betby collector instead (books/betby.rs,
+/// started in main.rs): plain JSON, every sport, the whole board, on any machine. What the script
+/// still posts for them is ignored, or the two would overwrite each other's lists.
+pub const READ_BY_RUST: &[&str] = &["bcgame", "rollbit", "rainbet", "csgo500", "csgoempire"];
 
 pub fn book(name: &str) -> Option<&'static str> {
     BOOKS.iter().find(|b| b.0 == name).map(|b| b.0)
@@ -98,6 +99,9 @@ pub fn corrected_recv(raw: Option<i64>, now: i64, offset: i64) -> i64 {
 /// `POST /ingest`: `{book, recv_ms, events}` from browser_books.py.
 pub async fn ingest(app: &Arc<App>, mut body: Value) -> Result<Value> {
     let name = body["book"].as_str().unwrap_or_default().to_string();
+    if READ_BY_RUST.contains(&name.as_str()) {
+        return Ok(json!({"ok": true, "ignored": "read by the Rust Betby collector"}));
+    }
     let book = book(&name).ok_or_else(|| anyhow!("unknown book '{name}' (known: {})", BOOKS.iter().map(|b| b.0).collect::<Vec<_>>().join(", ")))?;
     if !app.engine.lock().books.contains_key(book) {
         // Switched off in the config (or the helper is not run by this oddsfeed): not recorded.
@@ -199,7 +203,7 @@ pub fn start(app: &Arc<App>) {
         return;
     }
     let Some((dir, python)) = locate(&cfg) else {
-        tracing::warn!("browser books: browser_books.py or its .venv Python not found; BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet and Shuffle are off");
+        tracing::warn!("browser books: browser_books.py or its .venv Python not found; Cloudbet and Shuffle are off");
         return;
     };
     let mut on = Vec::new();
@@ -378,8 +382,14 @@ mod tests {
     #[test]
     fn the_known_books_are_the_seven_the_script_polls() {
         for n in ["bcgame", "rollbit", "rainbet", "csgo500", "csgoempire", "cloudbet", "shuffle"] {
-            assert_eq!(book(n), Some(n));
             assert!(super::super::record_only(n), "{n} is record-only until its timing is tested");
+        }
+        for n in ["cloudbet", "shuffle"] {
+            assert_eq!(book(n), Some(n));
+        }
+        for n in READ_BY_RUST {
+            assert_eq!(book(n), None, "{n} is the Rust Betby collector's, not the script's");
+            assert_eq!(crate::snipe::platform(n), "duel", "{n} is the same Betby board as Duel");
         }
         assert_eq!(book("gamdom"), None);
     }

@@ -152,6 +152,38 @@ pub struct Policy {
 /// The safe set never buys when Polymarket has already made more than this share of the move,
 /// whatever the rule-picker chose for a window (it once allowed 25%: the replay's total loss).
 pub const SAFE_MAX_FOLLOWED: f64 = 0.10;
+
+// ---- Rules by sport (owner, 23 Nov 2026, "Yes, build it") ----------------------------------------
+// Replay of 17-22 Nov (tools/sweep.py, SWEEP_DATA=v19, $12 a trade, recording gaps dropped):
+// * CS2: no "lagged earlier" rule, no weak-game price cap, Polymarket may already have made 10% of
+//   the move: 73 trades, 77% won, +$49.63, positive on 5 of 6 days, against 15 trades +$11.94 under
+//   the common rules. The 15-minute give-up stays for CS2: with 5 minutes the same set lost $32.
+// * Tennis: give up after 5 minutes (common rules otherwise): 23 trades +$30.97 against +$8.07 at
+//   15 minutes, better on 5 of 6 days. Looser tennis rules lost.
+// Chosen on the same six days, so the replay figures are an upper bound: paper first.
+/// CS2: how much of the move Polymarket may already have made (the common rules: 5%).
+pub const CS2_MAX_FOLLOWED: f64 = 0.10;
+/// Tennis: give up after this many seconds (the common setting: 15 minutes).
+pub const TENNIS_GIVE_UP_S: i64 = 300;
+
+/// The share of the move Polymarket may already have made, for this sport.
+pub fn max_followed_for(sport: &str, base: f64) -> f64 {
+    if cs2_rules(sport) { base.max(CS2_MAX_FOLLOWED) } else { base }
+}
+
+/// Sports run on CS2's rules: CS2 itself, and Valorant and League of Legends on paper (owner, 23
+/// Nov 2026). Valorant is the one sport where Polymarket trailed the books more often than it led
+/// (8 games); LoL is untested.
+pub const CS2_RULE_SPORTS: &[&str] = &["cs2", "valorant", "lol"];
+
+pub fn cs2_rules(sport: &str) -> bool {
+    CS2_RULE_SPORTS.contains(&sport)
+}
+
+/// The give-up time (seconds) for this sport.
+pub fn give_up_for(sport: &str, base: i64) -> i64 {
+    if sport == "tennis" { TENNIS_GIVE_UP_S } else { base }
+}
 /// The smallest bookmaker move the replay measures and the live bot takes. Every bookmaker update
 /// is a trigger (hundreds a minute): smaller moves tested worse and measuring them all takes hours.
 pub const LIVE_MIN_MOVE: f64 = 0.07;
@@ -405,12 +437,10 @@ pub fn us_basketball(c: &Connection, match_id: i64, home: &str, away: &str) -> b
 
 /// Is THIS game paper-only? A paper-only sport, except basketball outside the US and Dota 2 with
 /// a tight spread (owner, 21 Nov 2026).
-pub fn paper_only_game(sport: &str, us_bb: bool, spread: f64) -> bool {
-    match sport {
-        "basketball" => us_bb,
-        "dota2" => spread > DOTA_MAX_SPREAD + 1e-9,
-        s => paper_only(s),
-    }
+pub fn paper_only_game(sport: &str, _us_bb: bool, _spread: f64) -> bool {
+    // Since 23 Nov 2026 only `REAL_SPORTS` trade real money; basketball outside the US and tight
+    // Dota 2 games (21 Nov) are paper again with every other sport.
+    paper_only(sport)
 }
 
 /// Sports real money does not trade. Basketball lost in the replay (US college games above
@@ -423,8 +453,16 @@ pub fn paper_only_game(sport: &str, us_bb: bool, spread: f64) -> bool {
 /// `Flt::trial`) until that record says otherwise.
 pub const PAPER_ONLY_SPORTS: &[&str] = &["basketball", "amfootball", "mma", "dota2"];
 
+/// The only sports real money trades (owner, 23 Nov 2026: "CS2 and Tennis (strict) on real
+/// money", "Valorant, League on paper tests"). By sport over 17-22 Nov (TRADING-TRIED.md, "SPORT
+/// BY SPORT"): Polymarket leads the bookmakers in 66-78% of basketball, football, Dota 2 and
+/// American football games and buying its apparent lag there lost 5-16% a dollar; CS2 is the one
+/// sport where it paid without filters, tennis only with the strict "lagged earlier" filter.
+/// Every other sport trades on the trial's paper wallet (`Flt::trial`).
+pub const REAL_SPORTS: &[&str] = &["cs2", "tennis"];
+
 pub fn paper_only(sport: &str) -> bool {
-    PAPER_ONLY_SPORTS.contains(&sport)
+    !REAL_SPORTS.contains(&sport)
 }
 
 /// How far the bookmakers' consensus stood above Polymarket's price BEFORE the move, in the
@@ -462,11 +500,16 @@ impl Flt {
     /// These filters for one game: a paper-only sport's game that real money may trade (see
     /// `paper_only_game`) is not refused for its sport.
     pub fn for_game(&self, sport: &str, us_bb: bool, spread: f64) -> Flt {
-        if self.no_basketball && paper_only(sport) && !paper_only_game(sport, us_bb, spread) {
-            Flt { no_basketball: false, ..*self }
-        } else {
-            *self
+        let mut f = *self;
+        if f.no_basketball && paper_only(sport) && !paper_only_game(sport, us_bb, spread) {
+            f.no_basketball = false;
         }
+        // CS2, Valorant, LoL (23 Nov 2026, see `CS2_MAX_FOLLOWED`): no "lagged earlier" rule, no weak-game cap.
+        if cs2_rules(sport) {
+            f.follow = None;
+            f.weak_cap = None;
+        }
+        f
     }
     fn keep(&self, c: &Cand) -> bool {
         // The price the live bot tests: the offer plus its 1c margin.
@@ -1236,6 +1279,11 @@ impl Stats {
     }
 }
 
+/// The measured give-up time nearest to `secs`.
+fn give_idx(secs: i64) -> usize {
+    (0..GIVE.len()).min_by_key(|i| (GIVE[*i] - secs).abs()).unwrap_or(0)
+}
+
 /// The sale a rule uses: the nearest measured catch-up share and give-up time.
 fn sale_idx(p: &Policy) -> (usize, usize) {
     let nearest = |v: f64, g: &[f64]| (0..g.len()).min_by(|a, b| (g[*a] - v).abs().partial_cmp(&(g[*b] - v).abs()).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(0);
@@ -1260,12 +1308,13 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
         if c.blind {
             continue;
         }
+        let max_fol = max_followed_for(&c.sport, p.max_followed);
         if c.books[0] < p.min_books
             || c.books[1] < p.min_books
             || c.bm[0] < p.min_move
-            || c.fol[0] > p.max_followed
-            || c.fol[1] > p.max_followed
-            || c.fol_start > p.max_followed
+            || c.fol[0] > max_fol
+            || c.fol[1] > max_fol
+            || c.fol_start > max_fol
             || c.sp[0] > p.max_spread + 1e-9
             || c.sp[1] > p.max_spread + 1e-9
             || c.edge[0][ci] < p.min_edge
@@ -1285,6 +1334,7 @@ fn run_policy<'a>(cands: &[&'a Cand], p: &Policy, from: Ms, to: Ms, known_by: Ms
             recent.push_back((c.match_id, c.tf));
             continue;
         }
+        let gi = if give_up_for(&c.sport, p.give_up_s) == p.give_up_s { gi } else { give_idx(give_up_for(&c.sport, p.give_up_s)) };
         let Some(x) = c.exit(ci, gi) else { continue };
         if x.ts > known_by {
             continue;
@@ -2050,10 +2100,11 @@ fn why_not(c: &Cand, p: &Policy, f: &Flt) -> Option<&'static str> {
     if c.books[0] < p.min_books || c.books[1] < p.min_books {
         return Some("too_few_books");
     }
-    if c.fol[0] > p.max_followed || c.fol[1] > p.max_followed {
+    let max_fol = max_followed_for(&c.sport, p.max_followed);
+    if c.fol[0] > max_fol || c.fol[1] > max_fol {
         return Some("already_moved");
     }
-    if c.fol_start > p.max_followed {
+    if c.fol_start > max_fol {
         return Some("moved_with_first_book");
     }
     if c.sp[0] > p.max_spread + 1e-9 || c.sp[1] > p.max_spread + 1e-9 {
@@ -2268,6 +2319,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rules_by_sport_cs2_looser_tennis_gives_up_sooner() {
+        // CS2: 10% followed allowed, the lagged rule and the weak-game cap off; others unchanged.
+        assert_eq!(max_followed_for("cs2", 0.05), 0.10);
+        assert_eq!(max_followed_for("tennis", 0.05), 0.05);
+        assert_eq!(max_followed_for("dota2", 0.05), 0.05);
+        let f = Flt::picked().for_game("cs2", false, 0.01);
+        assert!(f.follow.is_none() && f.weak_cap.is_none());
+        assert_eq!(f.fams, Flt::picked().fams, "everything else stays");
+        let t = Flt::picked().for_game("tennis", false, 0.01);
+        assert_eq!((t.follow, t.weak_cap), (Flt::picked().follow, Flt::picked().weak_cap));
+        // Tennis: 5 minutes; every other sport keeps the setting.
+        assert_eq!(give_up_for("tennis", 900), 300);
+        assert_eq!(give_up_for("cs2", 900), 900);
+        assert_eq!(GIVE[give_idx(300)], 300);
+        assert_eq!(GIVE[give_idx(900)], 900);
+    }
+
+    #[test]
     fn stake_is_halved_where_polymarket_does_not_trail() {
         let cx = |jumps, follow, lead| crate::consensus::Ctx { jumps, follow, lead, ..Default::default() };
         // Polymarket moves after the bookmakers in this game: the full stake.
@@ -2341,8 +2410,8 @@ mod tests {
             assert_eq!(why(&trial, s, 0.60), None, "{s}");
             assert_eq!(why(&trial, s, 0.95), Some("price_too_high"), "{s}");
         }
-        assert!(!paper_only("tennis") && !paper_only("cs2") && !paper_only("football"));
-        assert!(paper_only("dota2"));
+        assert!(!paper_only("tennis") && !paper_only("cs2"));
+        assert!(paper_only("dota2") && paper_only("football") && paper_only("valorant") && paper_only("lol"));
     }
     #[test]
     fn basketball_outside_the_us_and_tight_dota_games_may_trade_real_money() {
@@ -2352,17 +2421,26 @@ mod tests {
         assert!(!us_basketball_text("Euroleague | Barcelona Crvena Zvezda"));
         assert!(!us_basketball_text("Brazil. NBB | Flamengo Franca")); // NBB is not the NBA
         assert!(!us_basketball_text("USA. WNBA | Aces Liberty"));
-        assert!(paper_only_game("basketball", true, 0.01));
-        assert!(!paper_only_game("basketball", false, 0.04));
-        assert!(!paper_only_game("dota2", false, 0.02));
-        assert!(paper_only_game("dota2", false, 0.03));
-        assert!(paper_only_game("mma", false, 0.01) && paper_only_game("amfootball", false, 0.01));
+        // Since 23 Nov 2026 real money trades CS2 and tennis only: every other game is paper.
+        assert!(paper_only_game("basketball", true, 0.01) && paper_only_game("basketball", false, 0.04));
+        assert!(paper_only_game("dota2", false, 0.02) && paper_only_game("dota2", false, 0.03));
+        assert!(paper_only_game("mma", false, 0.01) && paper_only_game("amfootball", false, 0.01) && paper_only_game("football", false, 0.01));
+        assert!(paper_only_game("valorant", false, 0.01) && paper_only_game("lol", false, 0.01));
         assert!(!paper_only_game("cs2", false, 0.04) && !paper_only_game("tennis", false, 0.04));
-        // The live filters refuse the sport, the game's own filters do not.
+        // The live filters refuse every paper sport.
         let f = Flt::picked();
-        assert!(f.no_basketball && !f.for_game("basketball", false, 0.03).no_basketball);
-        assert!(f.for_game("basketball", true, 0.03).no_basketball && f.for_game("dota2", false, 0.03).no_basketball);
-        assert!(!f.for_game("dota2", false, 0.02).no_basketball);
+        assert!(f.for_game("basketball", false, 0.03).no_basketball && f.for_game("dota2", false, 0.02).no_basketball);
+    }
+    #[test]
+    fn valorant_and_lol_get_cs2_rules_on_paper() {
+        for s in ["cs2", "valorant", "lol"] {
+            let f = Flt::trial().for_game(s, false, 0.01);
+            assert!(f.follow.is_none() && f.weak_cap.is_none(), "{s}");
+            assert_eq!(max_followed_for(s, 0.05), 0.10, "{s}");
+            assert_eq!(give_up_for(s, 900), 900, "{s}");
+        }
+        let d = Flt::trial().for_game("dota2", false, 0.01);
+        assert_eq!(d.follow, Flt::picked().follow, "Dota 2 keeps the common rules");
     }
     #[test]
     fn a_weak_game_is_not_bought_above_60c() {

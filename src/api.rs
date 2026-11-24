@@ -99,6 +99,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/kalshi/settings", get(kalshi_settings_get).post(kalshi_settings_post))
         .route("/pinnacle/settings", get(pin_settings_get).post(pin_settings_post))
         .route("/kalshi/account", get(kalshi_account))
+        .route("/kalshi/feed", get(|| async { Json(crate::books::kalshi::status()) }))
         .route("/control/scope", post(control_scope))
         .route("/books", get(books))
         .route("/ingest", post(ingest))
@@ -117,6 +118,18 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/lag/books", get(lag_books_summary))
         .route("/lag/books/events", get(lag_books_events))
         .route("/clock", get(|| async { Json(crate::clock::status()) }))
+        .route("/desk", get(desk_get))
+        .route("/desk/tickets", post(desk_create))
+        .route("/desk/tickets/{id}", get(desk_ticket))
+        .route("/desk/tickets/{id}/cancel", post(desk_cancel))
+        .route("/desk/from_arb", post(desk_from_arb))
+        .route("/desk/next", get(desk_next))
+        .route("/desk/result", post(desk_result))
+        .route("/desk/settings", post(desk_settings))
+        .route("/desk/accounts", get(|| async { Json(crate::desk::accounts()) }).post(desk_accounts_save))
+        .route("/desk/account", get(desk_account))
+        .route("/desk/account/state", post(desk_account_state))
+        .route("/assets/desk.js", get(|| async { asset("desk.js", "text/javascript; charset=utf-8", include_str!("web/desk.js")) }))
         .layer(axum::middleware::from_fn(local_cors))
         .with_state(app)
 }
@@ -167,6 +180,19 @@ async fn index() -> Json<Value> {
             "DELETE /review/labels/{id}": "delete a mark",
             "GET /review/wave_scores": "Trade review: the latest tools/waves/run.py scores per source (lead over Polymarket, precision, lead-lag, correlation), or null",
             "POST /review/import": "import another machine's trades export (the Swifteye trades HTML page or its JSON) for grading; games get negative ids",
+            "GET /kalshi/feed": "the Kalshi socket's health: books in step, lost messages, how far behind Kalshi's own clock messages arrive",
+            "GET /desk?limit=&state=": "Order desk (docs/DESK.md): switches, books and their drivers, the latest tickets",
+            "GET /desk/tickets/{id}": "one ticket with its legs",
+            "POST /desk/tickets": "hand in a ticket {mode: paper|dry|real, note, rebalance, ttl_s, legs: [{book, match_id, market, line, outcome, side, min_odds, odds, stake}]}; needs X-Desk-Key",
+            "POST /desk/from_arb": "a ticket from an arbitrage on /arbs: {key, stake, mode, slack}; needs X-Desk-Key",
+            "POST /desk/tickets/{id}/cancel": "cancel the legs no driver has taken; needs X-Desk-Key",
+            "GET /desk/next?book=&driver=&wait=": "a bookmaker driver asks for its next order (waits up to `wait` s, at most 30); needs X-Desk-Key",
+            "POST /desk/result": "a driver's answer {id, status: placed|rejected|failed, odds, stake, max_stake, bet_ref, message}; needs X-Desk-Key",
+            "GET /desk/accounts": "saved bookmaker logins: the login cut short, the driver's sign-in state; never a password",
+            "POST /desk/accounts": "save a bookmaker login {book, login, password, note} or {book, remove: true}; from the Order desk page, or with X-Desk-Key",
+            "GET /desk/account?book=": "a driver fetches its book's login and password to sign in; needs X-Desk-Key",
+            "POST /desk/account/state": "a driver reports {book, state: signed_in|signed_out|refused|needs_owner, detail}; needs X-Desk-Key",
+            "POST /desk/settings": "desk switches and per-book limits; real money needs \"confirm\": \"REAL MONEY\"; needs X-Desk-Key",
             "POST /ingest": "browser_books.py posts {book, recv_ms, events} here (BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle)",
             "POST /matches/{into}/merge/{from}": "fix a missed cross-book match",
             "POST /events/{book}/{event_id}/unlink": "fix a wrong cross-book match"
@@ -185,6 +211,150 @@ async fn books(State(app): S) -> Json<Value> {
     let mut v: Vec<_> = eng.books.values().map(|b| b.status.clone()).collect();
     v.sort_by_key(|s| s.name);
     Json(json!({"started_ms": app.started_ms, "now_ms": now_ms(), "books": v}))
+}
+
+// ---- Order desk (desk.rs, docs/DESK.md)
+
+/// Everything that changes the desk or hands out an order needs the key from `desk.json`: a web
+/// page open in the same browser must not be able to queue a bet through localhost.
+fn desk_locked(h: &axum::http::HeaderMap) -> Option<Response> {
+    if crate::desk::key_ok(h.get("x-desk-key").and_then(|v| v.to_str().ok())) {
+        None
+    } else {
+        Some(err(StatusCode::UNAUTHORIZED, "send the desk key (desk.json, next to the database) as the X-Desk-Key header"))
+    }
+}
+
+fn desk_answer(r: anyhow::Result<Value>) -> Response {
+    match r {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct DeskQ {
+    limit: Option<usize>,
+    state: Option<String>,
+}
+
+async fn desk_get(Query(q): Query<DeskQ>) -> Response {
+    Json(crate::desk::view(q.limit.unwrap_or(50).clamp(1, 500), q.state.as_deref())).into_response()
+}
+
+async fn desk_ticket(Path(id): Path<u64>) -> Response {
+    match crate::desk::ticket(id) {
+        Some(v) => Json(v).into_response(),
+        None => err(StatusCode::NOT_FOUND, format!("no ticket {id}")),
+    }
+}
+
+async fn desk_create(State(app): S, h: axum::http::HeaderMap, Json(req): Json<crate::desk::TicketReq>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::create(&app, req).await)
+}
+
+async fn desk_cancel(State(app): S, h: axum::http::HeaderMap, Path(id): Path<u64>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::cancel(&app, id).await)
+}
+
+#[derive(Deserialize)]
+struct DeskArb {
+    key: String,
+    stake: f64,
+    mode: Option<crate::desk::Mode>,
+    slack: Option<f64>,
+}
+
+async fn desk_from_arb(State(app): S, h: axum::http::HeaderMap, Json(b): Json<DeskArb>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::from_arb(&app, &b.key, b.stake, b.mode.unwrap_or_default(), b.slack.unwrap_or(0.0)).await)
+}
+
+#[derive(Deserialize)]
+struct DeskNextQ {
+    book: String,
+    driver: Option<String>,
+    wait: Option<u64>,
+}
+
+async fn desk_next(h: axum::http::HeaderMap, Query(q): Query<DeskNextQ>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    let book = q.book.trim().to_ascii_lowercase();
+    Json(crate::desk::next(&book, q.driver.as_deref().unwrap_or("driver"), q.wait.unwrap_or(0)).await).into_response()
+}
+
+async fn desk_result(State(app): S, h: axum::http::HeaderMap, Json(r): Json<crate::desk::Report>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::report(&app, r).await)
+}
+
+async fn desk_settings(State(app): S, h: axum::http::HeaderMap, Json(e): Json<Value>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::edit(&app, &e).await)
+}
+
+/// Swifteye's own page in a browser on this machine: the request names the same origin it was
+/// sent to, and that origin is the local machine. Another website cannot put this Origin on its
+/// request, and a domain pointed at 127.0.0.1 fails the host check.
+fn desk_own_page(h: &axum::http::HeaderMap) -> bool {
+    let get = |k: axum::http::HeaderName| h.get(k).and_then(|v| v.to_str().ok());
+    let (Some(origin), Some(host)) = (get(axum::http::header::ORIGIN), get(axum::http::header::HOST)) else { return false };
+    let name = host.rsplit_once(':').map_or(host, |x| x.0);
+    (name == "127.0.0.1" || name == "localhost") && origin == format!("http://{host}")
+}
+
+/// Saving a login: the owner on the Order desk page, or anything holding the desk key.
+async fn desk_accounts_save(State(app): S, h: axum::http::HeaderMap, Json(e): Json<Value>) -> Response {
+    if !desk_own_page(&h) {
+        if let Some(no) = desk_locked(&h) {
+            return no;
+        }
+    }
+    desk_answer(crate::desk::account_save(&app, &e).await)
+}
+
+#[derive(Deserialize)]
+struct DeskBookQ {
+    book: String,
+}
+
+/// A login WITH its password: for the book's driver only.
+async fn desk_account(State(app): S, h: axum::http::HeaderMap, Query(q): Query<DeskBookQ>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    match crate::desk::account_for_driver(&app, &q.book.trim().to_ascii_lowercase()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err(StatusCode::CONFLICT, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct DeskState {
+    book: String,
+    state: String,
+    detail: Option<String>,
+}
+
+async fn desk_account_state(State(app): S, h: axum::http::HeaderMap, Json(b): Json<DeskState>) -> Response {
+    if let Some(no) = desk_locked(&h) {
+        return no;
+    }
+    desk_answer(crate::desk::account_state(&app, &b.book.trim().to_ascii_lowercase(), &b.state, b.detail.as_deref().unwrap_or("")).await)
 }
 
 // ---- Trade review (review.rs, page #/review)

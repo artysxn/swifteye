@@ -539,6 +539,8 @@ pub(crate) fn platform(book: &str) -> &str {
         // mostbet repeats fonbet's prices (84% of ticks identical within 3 s).
         "fonbet" | "pari" | "mostbet" => "fonbet",
         "vinn" | "betking" => "altenar",
+        // Betby brands (recorded only for now): the same board as Duel.
+        "bcgame" | "rollbit" | "rainbet" | "csgo500" | "csgoempire" => "duel",
         b => b,
     }
 }
@@ -1053,7 +1055,7 @@ pub async fn kalshi_backfill(app: &Arc<App>, days: i64) -> Result<Value, String>
             for k in cv["candlesticks"].as_array().into_iter().flatten() {
                 let px = |side: &str| crate::books::num(&k[side]["close_dollars"]).or_else(|| crate::books::num(&k[side]["close"]).map(|c| c / 100.0)).filter(|x| *x > 0.0 && *x < 1.0);
                 let Some(ts) = k["end_period_ts"].as_i64() else { continue };
-                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true, depth: Default::default(), book: (None, None) };
+                let w = crate::engine::Write::KQuote { ts_ms: ts * 1000, server_ts_ms: None, event: ev.clone(), outcome, bid: px("yes_bid"), ask: px("yes_ask"), est: true, depth: Default::default(), book: (None, None), book_ts: None };
                 if app.tx.send(w).await.is_ok() {
                     rows += 1;
                 }

@@ -15,3 +15,11 @@ __pycache__/
 
 # research data rebuilt by tools/strategy_tests/price_paths_build.py (several MB each)
 tools/strategy_tests/price_paths_*.json
+
+# order ids a desk driver has handled (tools/desk/driver.py)
+tools/desk/driver_*_done.json
+
+# order desk: settings with the drivers' key, and the ticket journal (next to the database)
+desk.json
+desk_tickets.jsonl
+desk_accounts.json

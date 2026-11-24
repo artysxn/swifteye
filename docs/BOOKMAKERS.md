@@ -25,7 +25,9 @@ plain request with no challenge.
 | Cloudbet | `www.cloudbet.com/sports-api/c/v6/sports/events?live=true&sports=soccer`, then `/events/{id}?markets=soccer.match_odds&...` per game | fetched inside a headless browser page; 1X2, totals, Asian handicap, BTTS. |
 | Shuffle | `shuffle.com/sports?section=live`, rendered and read as text every 60 s | no odds JSON found; 1X2 only, no kick-off time; the page mixes sports (two-way games are dropped). |
 
-The script reads football only, and for the Betby brands only the board's top slice (about half
+Since 23 Nov the five Betby brands are read by the Rust Betby collector instead (every sport, the
+whole board, live every 3 s, pre-match every 5 min; all five answered from the Mac too), and
+`/ingest` ignores what the script posts for them. The script reads football only, and for the Betby brands only the board's top slice (about half
 of the live football: 25 of 53 games on BC.Game, 23 Nov 07:20 UTC).
 
 ## Wired in this round

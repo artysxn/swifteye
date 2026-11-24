@@ -8,6 +8,7 @@ mod bots;
 mod clock;
 mod consensus;
 mod data;
+mod desk;
 mod diag;
 mod engine;
 mod exec;
@@ -61,7 +62,7 @@ pub struct Config {
     /// How often to refresh the bookmakers' pre-match lists.
     pub prematch_refresh_ms: i64,
     pub books: HashMap<String, BookCfg>,
-    /// browser_books.py (BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle).
+    /// browser_books.py (Cloudbet, Shuffle; its Betby brands are read in Rust).
     pub browser_books: BrowserCfg,
 }
 
@@ -171,6 +172,26 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("sqlite: could not switch memory totals off (code {rc}); running as before");
     }
 
+    // `oddsfeed desk-sandbox [port] [folder]`: the order desk alone with pretend bookmakers, for
+    // writing a driver. Starts no feed, opens no database, reads no account (desk.rs).
+    if std::env::args().nth(1).as_deref() == Some("desk-sandbox") {
+        let port = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(8799);
+        return desk::sandbox(port, std::env::args().nth(3).map(PathBuf::from)).await;
+    }
+
+    // `oddsfeed kalshi-probe <minutes> <out folder> <folder holding kalshi.json>`: the Kalshi feed
+    // alone, for checking it against Kalshi's public trades. No other feed, no database, no bot.
+    if std::env::args().nth(1).as_deref() == Some("kalshi-probe") {
+        let arg = |n: usize| std::env::args().nth(n);
+        let (Some(minutes), Some(out), Some(data)) = (arg(2).and_then(|s| s.parse().ok()), arg(3), arg(4)) else {
+            anyhow::bail!("usage: oddsfeed kalshi-probe <minutes> <out folder> <folder holding kalshi.json>");
+        };
+        if let Err(e) = clock::sync().await {
+            tracing::warn!("clock: NTP sync failed ({e}); delays are against the raw PC clock");
+        }
+        return books::kalshi::probe(minutes, PathBuf::from(out), PathBuf::from(data)).await;
+    }
+
     let cfg_path = std::env::args().nth(1).unwrap_or_else(|| "oddsfeed.toml".into());
     let cfg: Config = match std::fs::read_to_string(&cfg_path) {
         Ok(s) => toml::from_str(&s)?,
@@ -226,6 +247,8 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = review::init(&app.db_path) {
         tracing::warn!("trade review: {e:#}");
     }
+    desk::init(&app.db_path);
+    desk::spawn(app.clone());
     predarb::spawn(app.clone());
     snipebot::spawn(app.clone());
     valuebot::spawn(app.clone());
@@ -309,6 +332,7 @@ fn start_books(app: &Arc<App>) {
             sports: linebet::sport_ids(follows),
             pre: pre(),
             details: Default::default(),
+            live: Default::default(),
         });
     }
     start!("m88", 1500, |_p: Option<String>| m88::M88::new(follows, pre()));
@@ -349,17 +373,27 @@ fn start_books(app: &Arc<App>) {
     start!("leon", 3000, |p: Option<String>| leon::Leon { ctag: p.unwrap_or_else(|| "en-US-7da6p".into()) });
     // Mostbet moves between mirror domains; param = the current one.
     start!("mostbet", 2000, |p: Option<String>| mostbet::Mostbet { host: p.unwrap_or_else(|| "0djawb3.com".into()), pre: Pre::new(ph, 60_000) });
-    // Betby brands: (name, API host, brand id, site). Pre-match is ~600 KB, refreshed every minute.
-    for (name, api, brand, origin) in [("duel", "https://api-a-c7818b61-600.sptpub.com", "2482975601191952386", "https://duel.com")] {
-        start!(name, 1500, |_p: Option<String>| betby::Betby { name, api: api.into(), brand: brand.into(), origin: origin.into(), pre: Pre::new(ph, 60_000) });
+    // Betby brands: (name, API host, brand id, site, live poll ms, pre-match refresh ms). Live is
+    // ~40 KB a read, pre-match ~600 KB. The five crypto brands are RECORDED ONLY (books::RECORD_ONLY):
+    // same games and ids as Duel, often the same prices, sometimes updated earlier or later.
+    // browser_books.py also reads them on the PC; /ingest leaves them to this collector (books/browser.rs).
+    for (name, api, brand, origin, poll, pre_ms) in [
+        ("duel", "https://api-a-c7818b61-600.sptpub.com", "2482975601191952386", "https://duel.com", 1500, 60_000),
+        ("bcgame", "https://api-k-c7818b61-623.sptpub.com", "2103509236163162112", "https://bc.game", 3000, 300_000),
+        ("rollbit", "https://api-a-c7818b61-600.sptpub.com", "2103518166582956032", "https://rollbit.com", 3000, 300_000),
+        ("rainbet", "https://api-a-c7818b61-600.sptpub.com", "2374656571012681728", "https://rainbet.com", 3000, 300_000),
+        ("csgo500", "https://api-h-c7818b61-608.sptpub.com", "2195256717934206976", "https://csgo500.com", 3000, 300_000),
+        ("csgoempire", "https://api-h-c7818b61-608.sptpub.com", "2432911154364948480", "https://csgoempire.com", 3000, 300_000),
+    ] {
+        start!(name, poll, |_p: Option<String>| betby::Betby { name, api: api.into(), brand: brand.into(), origin: origin.into(), pre: Pre::new(ph, pre_ms) });
     }
     // SBOBET's public live pages: RECORDED ONLY (books::RECORD_ONLY) until its timing is tested.
     start!("hkjc", 2000, |_p: Option<String>| hkjc::Hkjc { pre: Pre::new(ph, 60_000) });
     start!("sbobet", 4000, |_p: Option<String>| sbobet::Sbobet::new(follows));
     start!("thunderpick", 1500, |_p: Option<String>| thunderpick::Thunderpick { pre_hours: ph, esports: cfg.esports });
     start!("novibet", 1000, |_p: Option<String>| novibet::Novibet);
-    // BC.Game, Rollbit, Rainbet, CSGO500, CSGOEmpire, Cloudbet, Shuffle: browser_books.py posts them
-    // to /ingest. RECORDED ONLY (books::RECORD_ONLY) until their timing is tested.
+    // Cloudbet, Shuffle: browser_books.py posts them to /ingest (its five Betby brands are read by the
+    // Betby loop above). RECORDED ONLY (books::RECORD_ONLY) until their timing is tested.
     browser::start(app);
     // Kalshi: second prediction-market baseline, polled in batches.
     // With an API key Kalshi pushes over its WebSocket and a poll is only a memory read, so it

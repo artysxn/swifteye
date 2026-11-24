@@ -244,7 +244,9 @@ fn on_change(app: &Arc<App>, ch: &Change) {
                 note(SNIPE, "rules_loading", feat.json());
                 return;
             }
-            match gate(&feat, &rules, &crate::adaptive::Flt::trial()) {
+            // The game's own rules: Valorant and LoL run on CS2's (`adaptive::cs2_rules`, 23 Nov 2026).
+            let trial_flt = crate::adaptive::Flt::trial().for_game(&feat.sport, feat.us_bb, feat.sp[0].max(feat.sp[1]));
+            match gate(&feat, &rules, &trial_flt) {
                 Ok(()) if !claim(m, t0) => note(SNIPE, "same_move", feat.json()),
                 Ok(()) => {
                     if enter(&app, SNIPE_TRIAL, false, &feat, &rules, false, None).await.is_some() {
@@ -516,11 +518,13 @@ fn gate(f: &Feat, r: &crate::adaptive::Policy, flt: &crate::adaptive::Flt) -> Re
     if f.books[0] < r.min_books || f.books[1] < r.min_books {
         return Err("too_few_books");
     }
-    if f.fol[0] > r.max_followed || f.fol[1] > r.max_followed {
+    // CS2 allows a little more (`adaptive::max_followed_for`, 23 Nov 2026).
+    let max_fol = crate::adaptive::max_followed_for(&f.sport, r.max_followed);
+    if f.fol[0] > max_fol || f.fol[1] > max_fol {
         return Err("already_moved");
     }
     // A slow bookmaker catching up late: Polymarket already moved with the first ones.
-    if f.fol_start > r.max_followed {
+    if f.fol_start > max_fol {
         return Err("moved_with_first_book");
     }
     if f.sp[0] > r.max_spread + 1e-9 || f.sp[1] > r.max_spread + 1e-9 {
@@ -697,6 +701,8 @@ async fn enter(app: &Arc<App>, bot: &'static str, real: bool, f: &Feat, r: &crat
     };
     let stake = if wider { (sn.b_pct * balance).min(if real { sn.r_max_trade } else { sn.b_max_trade }) } else { base * q }.min(cash).min(max_open - open).min(room);
     let give_up_s = if !wider && sn.give_up_s > 0 { sn.give_up_s } else { r.give_up_s };
+    // Tennis gives up after 5 minutes (`adaptive::give_up_for`, 23 Nov 2026); the wider set keeps its own.
+    let give_up_s = if wider { give_up_s } else { crate::adaptive::give_up_for(&f.sport, give_up_s) };
     // The trial stakes what real money would, so it has real money's floor.
     if stake < (if real || trial { snipe::MIN_REAL_STAKE } else { snipe::MIN_FILL }) {
         note(bot, "no_cash", f.json());

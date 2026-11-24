@@ -6,6 +6,21 @@ const { esc, ic } = SE;
 const P = SE.P;
 
 SE.CHANGELOG = [
+  { date: '2026-11-24', icon: 'sync_problem', area: 'Collector', title: 'Kalshi feed: no more drop-outs',
+    lines: [
+      'The Kalshi connection used to drop itself whenever new games were added, then wait up to a minute before coming back: over 1,500 times in five days. It mistook one of Kalshi\'s own replies for a lost message. Fixed.',
+      'If a message really is lost, the order books are refreshed on the same connection instead of reconnecting, and no old order book is shown as current while that happens.',
+      'Kalshi is read on its own thread, so a busy app no longer makes its prices late. The Kalshi rows now keep Kalshi\'s own time of each order-book change.',
+      'Kalshi games no longer vanish and come back: when Kalshi answered "too many requests" for a league, that league\'s games used to drop off the list for a few minutes.',
+    ] },
+  { date: '2026-11-24', icon: 'receipt_long', area: 'Bots', title: 'Order desk: place a bet at any book through one call',
+    lines: [
+      'A ticket holds one or more bets that belong together. The desk places them one at a time and tells you when a bet stands with nothing against it.',
+      'Polymarket bets are placed by Swifteye. Every other bookmaker is placed by your own driver, a small program in a browser where you are signed in; a template is in tools/desk.',
+      'Paper by default. A dry run reads the real bet slip (odds and stake limit) without confirming. Real money stays off until you switch it on, per bookmaker, with its own stake limit and daily cap.',
+      'New Order desk page: type each bookmaker\'s email and password once. They stay on this machine, are never shown again, and only that bookmaker\'s driver can fetch them to sign in. If a site asks for a captcha or a code, the driver stops and you are told.',
+      'Tickets are handed in through the API. docs/DESK.md explains it, and "oddsfeed desk-sandbox" runs it with pretend bookmakers for trying things out.',
+    ] },
   { date: '2026-11-23', icon: 'stacked_line_chart', area: 'Bots', title: 'Trade review: who is ahead, second by second',
     lines: [
       'With Analysis on, a strip under the chart shows each second whether the superline is ahead of Polymarket (green: Polymarket should rise, red: should fall), Polymarket is ahead (blue), or the two simply disagree for minutes (grey).',
@@ -30,11 +45,35 @@ SE.CHANGELOG = [
       'Set where a bot should have bought and sold and the most it should have paid, or mark a bot\'s own trade as right, wrong, or right at other points. Keys: K, P, B and S, Esc to stop.',
       'Marks are kept with the prices they were made on, for working out what the move detection misses.',
     ] },
+  { date: '2026-11-23', icon: 'sports_esports', area: 'Bots', title: 'Real money trades CS2 and tennis only; Valorant and LoL tested on paper',
+    lines: [
+      'In basketball, football, Dota 2 and American football Polymarket moves before the bookmakers in two thirds to three quarters of games, and buying its apparent lag lost 5-16% a dollar in the replay. Those sports now trade on the trial\'s paper wallet only.',
+      'CS2 (looser rules) and tennis (strict rules, 5-minute give-up) keep real money.',
+      'Valorant and League of Legends run on CS2\'s rules on the paper wallet, to see whether the same lag shows there.',
+    ] },
+  { date: '2026-11-23', icon: 'tune', area: 'Bots', title: 'Rules by sport: CS2 looser, tennis gives up after 5 minutes',
+    lines: [
+      'CS2 no longer needs Polymarket to have lagged earlier in the game, has no price cap in weak games, and may buy when Polymarket has already made up to 10% of the move.',
+      'Tennis keeps the common rules but gives up after 5 minutes instead of 15. Every other sport is unchanged.',
+      'In the replay of 17-22 November ($12 a trade) CS2 went from 15 trades and +$11.94 to 73 trades and +$49.63, and tennis from +$8.07 to +$30.97 on the same 23 trades. Chosen on those same days, so it runs on paper first.',
+    ] },
+  { date: '2026-11-23', icon: 'add_circle', area: 'Feeds', title: 'BC.Game, Rollbit, Rainbet, CSGO500 and CSGOEmpire read on the Mac too',
+    lines: [
+      'The five Betby bookmakers are now read by Swifteye itself, the same way as Duel, so they run on any computer without the browser script.',
+      'Every sport and the whole live list (the script read football only, about half the list), every 3 seconds; the pre-match list every 5 minutes. About 75 kB a second for all five.',
+      'They list the same games as Duel. Many prices are identical, others differ, sometimes by a lot when one updates before another. Still recorded only.',
+    ] },
   { date: '2026-11-23', icon: 'add_circle', area: 'Feeds', title: 'Seven crypto bookmakers added, recorded only',
     lines: [
       'BC.Game, Rollbit, Rainbet, CSGO500 and CSGOEmpire (live football from their Betby feeds, every 5 seconds), Cloudbet (live football, every 5 seconds) and Shuffle (its live page, once a minute).',
       'They are collected by browser_books.py, which the collector now starts by itself and restarts if it stops. Its errors show on the Feeds page under each bookmaker.',
       'Like SBOBET and HKJC, their prices are kept apart. No bot, replay or chart uses them until a test shows how they move against Polymarket.',
+    ] },
+  { date: '2026-11-22', icon: 'healing', area: 'Feeds', title: '1xBet mirrors no longer lose live games on busy afternoons',
+    lines: [
+      '1xBet\'s live feed returns at most 200 games per request. One request for every sport was filled by football: on a Sunday afternoon the eight mirrors showed 2 of 18 live e-sports games and 5 of 12 tennis matches.',
+      'Each mirror now asks hockey, basketball, tennis, baseball, American football and e-sports together every second, and football and the minor sports (volleyball, handball, table tennis) every third second.',
+      'About the same amount of data as before. If a group still reaches 200 games it is split in two by itself.',
     ] },
   { date: '2026-11-22', icon: 'login', area: 'Feeds', title: 'Pinnacle as a signed-in member, recorded only',
     lines: [

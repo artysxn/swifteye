@@ -178,6 +178,8 @@ pub enum Write {
         /// Best Yes bid and ask read off the real-time order book (None without one). `bid` /
         /// `ask` above come from Kalshi's `ticker` channel, which can be seconds behind.
         book: (Option<f64>, Option<f64>),
+        /// Kalshi's own time of the last order-book change behind `book` (None without one).
+        book_ts: Option<Ms>,
     },
 }
 
